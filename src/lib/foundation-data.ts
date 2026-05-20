@@ -105,6 +105,37 @@ export type AuditEvent = {
   outcome: "allowed" | "blocked" | "read_only";
 };
 
+export type ServiceRevenue = {
+  service: string;
+  bookedRevenue: number;
+  appointments: number;
+  acceptedCases: number;
+};
+
+export type ProviderRevenue = {
+  provider: string;
+  role: "Doctor" | "RDH";
+  locationId: string;
+  bookedRevenue: number;
+  completedAppointments: number;
+  openChairHours: number;
+};
+
+export type AppointmentMetric = {
+  label: string;
+  count: number;
+  production: number;
+};
+
+export type LocationPerformance = {
+  locationId: string;
+  bookedRevenue: number;
+  hygieneRevenue: number;
+  treatmentRevenue: number;
+  chairUtilization: number;
+  unscheduledTreatment: number;
+};
+
 export const foundationPractice = {
   id: "practice_summit_dental",
   name: "Summit Dental Group",
@@ -514,6 +545,35 @@ export const auditEvents: AuditEvent[] = [
   },
 ];
 
+export const serviceRevenue: ServiceRevenue[] = [
+  { service: "Crowns and bridges", bookedRevenue: 48200, appointments: 18, acceptedCases: 13 },
+  { service: "Hygiene and perio", bookedRevenue: 31650, appointments: 42, acceptedCases: 39 },
+  { service: "Implant consults", bookedRevenue: 27400, appointments: 9, acceptedCases: 5 },
+  { service: "Clear aligners", bookedRevenue: 22100, appointments: 7, acceptedCases: 4 },
+  { service: "Emergency dentistry", bookedRevenue: 12850, appointments: 16, acceptedCases: 12 },
+];
+
+export const providerRevenue: ProviderRevenue[] = [
+  { provider: "Dr. Aisha Patel", role: "Doctor", locationId: "loc_denver", bookedRevenue: 52700, completedAppointments: 31, openChairHours: 4.5 },
+  { provider: "Dr. Marcus Lee", role: "Doctor", locationId: "loc_denver", bookedRevenue: 38900, completedAppointments: 28, openChairHours: 7.25 },
+  { provider: "Nina Gomez, RDH", role: "RDH", locationId: "loc_boulder", bookedRevenue: 18450, completedAppointments: 34, openChairHours: 2.75 },
+  { provider: "Aurora specialty team", role: "Doctor", locationId: "loc_aurora", bookedRevenue: 30150, completedAppointments: 17, openChairHours: 8 },
+];
+
+export const appointmentMetrics: AppointmentMetric[] = [
+  { label: "Completed", count: 82, production: 94400 },
+  { label: "Confirmed upcoming", count: 46, production: 67300 },
+  { label: "Needs confirmation", count: 19, production: 21800 },
+  { label: "Emergency holds", count: 6, production: 9200 },
+  { label: "Unscheduled treatment", count: 23, production: 58600 },
+];
+
+export const locationPerformance: LocationPerformance[] = [
+  { locationId: "loc_denver", bookedRevenue: 91600, hygieneRevenue: 14100, treatmentRevenue: 77500, chairUtilization: 82, unscheduledTreatment: 22600 },
+  { locationId: "loc_boulder", bookedRevenue: 37450, hygieneRevenue: 23100, treatmentRevenue: 14350, chairUtilization: 68, unscheduledTreatment: 12100 },
+  { locationId: "loc_aurora", bookedRevenue: 30150, hygieneRevenue: 4400, treatmentRevenue: 25750, chairUtilization: 54, unscheduledTreatment: 23900 },
+];
+
 export function getRole(roleKey?: string) {
   return roles.find((role) => role.key === roleKey) ?? roles[0];
 }
@@ -539,4 +599,12 @@ export function getLocationName(locationId: string) {
 
 export function statusLabel(status: ModuleStatus | ChairStatus) {
   return status.replaceAll("_", " ");
+}
+
+export function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
 }
