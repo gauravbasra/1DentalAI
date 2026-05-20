@@ -32,7 +32,7 @@ export const productPillars = [
   {
     title: "Universal connectors",
     eyebrow: "PMS, EHR, CRM, payers",
-    body: "Use NexHealth and Stedi to move faster where they help, while building owned PMS, payer, phone, payment, CRM, and clinical connector contracts.",
+    body: "Connect PMS, payer, phone, payment, CRM, reputation, and clinical systems through owned routing, capability checks, and approval controls.",
   },
   {
     title: "Practice intelligence",

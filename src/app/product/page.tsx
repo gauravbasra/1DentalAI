@@ -180,13 +180,13 @@ export default function ProductPage() {
 
         <section className="bg-white px-6 py-24 text-center sm:px-8">
           <h2 className="mx-auto max-w-4xl text-4xl font-semibold tracking-tight text-neutral-950 sm:text-6xl">
-            Built to connect everything. Built to avoid vendor lock-in.
+            Built to connect the systems your practice already runs on.
           </h2>
           <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-neutral-600">
-            NexHealth and Stedi can accelerate PMS and payer connectivity, but
-            1DentalAI is not a wrapper around either one. The product model is
-            owned routing, capability maps, cost telemetry, approval policies,
-            direct connectors, and honest fallback workflows.
+            1DentalAI is designed around an owned connector platform: smart
+            routing, capability maps, cost controls, approval policies, direct
+            integrations, smoke tests, and fallback workflows when a system or
+            payer cannot support real-time automation.
           </p>
           <Link
             href="/contact"
