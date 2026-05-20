@@ -21,7 +21,7 @@ Working directory:
 Runtime command:
 
 ```bash
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build
 ```
 
 ## Health Check
