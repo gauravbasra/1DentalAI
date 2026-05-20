@@ -17,7 +17,7 @@ export default async function TeamPage({
       <PageHeader
         eyebrow="Team and access"
         title="One person does not need to see everything."
-        body="A dental office needs different views for owners, providers, hygienists, assistants, front desk, treatment coordinators, billers, managers, and support. This demo shows who can see what before live patient data is connected."
+        body="A dental office needs different views for owners, providers, hygienists, assistants, front desk, treatment coordinators, billers, managers, and support. This view shows who can see what before live patient data is connected."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/team" />
 
@@ -60,7 +60,7 @@ export default async function TeamPage({
             {selectedRole.scopes.map((scope) => (
               <div key={scope} className="rounded-2xl bg-neutral-50 p-4">
                 <p className="text-sm font-semibold capitalize text-neutral-950">{scope.replaceAll("_", " ")}</p>
-                <p className="mt-1 text-xs text-neutral-500">Allowed for this role in the demo access model.</p>
+                <p className="mt-1 text-xs text-neutral-500">Allowed for this role under the current access model.</p>
               </div>
             ))}
           </div>
@@ -68,12 +68,12 @@ export default async function TeamPage({
           <div className="mt-6 rounded-2xl bg-amber-50 p-4">
             <p className="text-sm font-semibold text-amber-950">Hidden or blocked by default</p>
             <p className="mt-2 text-sm leading-6 text-amber-900">
-              {selectedRole.hiddenByDefault.length ? selectedRole.hiddenByDefault.join(", ") : "Nothing hidden by default for the demo owner role."}
+              {selectedRole.hiddenByDefault.length ? selectedRole.hiddenByDefault.join(", ") : "Nothing hidden by default for the owner role."}
             </p>
           </div>
 
           <div className="mt-6">
-            <p className="text-sm font-semibold text-neutral-950">Demo team members</p>
+            <p className="text-sm font-semibold text-neutral-950">Team members</p>
             <div className="mt-3 space-y-3">
               {matchingTeam.length ? matchingTeam.map((member) => (
                 <div key={member.id} className="rounded-2xl border border-neutral-200 p-4">
@@ -84,7 +84,7 @@ export default async function TeamPage({
                 </div>
               )) : (
                 <div className="rounded-2xl border border-neutral-200 p-4 text-sm text-neutral-600">
-                  No demo team member uses this role yet. The role still exists for access planning and future practice setup.
+                  No team member uses this role yet. The role still exists for access planning and future practice setup.
                 </div>
               )}
             </div>

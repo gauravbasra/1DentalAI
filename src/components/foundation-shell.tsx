@@ -27,6 +27,7 @@ export function FoundationShell({
 }) {
   const role = getRole(roleKey);
   const roleParam = `role=${role.key}`;
+  const modeLabel = foundationPractice.mode === "PRODUCTION_SETUP" ? "Production setup" : "Live";
 
   return (
     <div className="min-h-screen bg-[#f5f5f7] text-neutral-950">
@@ -42,7 +43,7 @@ export function FoundationShell({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-800">
-              {foundationPractice.mode}
+              {modeLabel}
             </span>
             <Link
               href="/contact"
@@ -73,7 +74,7 @@ export function FoundationShell({
       </header>
       <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8">{children}</main>
       <footer className="mx-auto max-w-7xl px-5 pb-8 text-xs text-neutral-500 sm:px-8">
-        Demo practice data only. No live patients, no vendor calls, no production writeback.
+        Production setup environment. No live PHI, no vendor calls, no production writeback until connectors and approvals are enabled.
       </footer>
     </div>
   );

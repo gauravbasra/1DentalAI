@@ -24,7 +24,7 @@ export default async function ModulesPage({
       <PageHeader
         eyebrow="Product areas"
         title="What is available, what needs setup, and what needs approval."
-        body="This view shows the major 1DentalAI product areas in plain practice terms. It separates demo-ready structure from work that still needs live connections, approvals, and patient-safe release."
+        body="This view shows the major 1DentalAI product areas in plain practice terms. It separates the production setup already established from work that still needs live connections, approvals, and patient-safe release."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/modules" />
 
@@ -67,8 +67,9 @@ export default async function ModulesPage({
                 {module.visible ? statusLabel(module.status) : "hidden"}
               </StatusPill>
             </div>
+            <p className="mt-5 text-sm leading-6 text-neutral-600">{module.summary}</p>
             <div className="mt-5 space-y-3">
-              <Readiness label="Available in this demo" body={module.foundationReady} />
+              <Readiness label="Established now" body={module.foundationReady} />
               <Readiness label="Needed before live use" body={module.setupRequired} />
               <Readiness label="Planned build" body={module.futurePhase} />
             </div>

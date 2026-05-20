@@ -18,7 +18,7 @@ export default async function WorkflowsPage({
       <PageHeader
         eyebrow="Work rules"
         title="Standard dental workflows that each practice can adapt."
-        body="These demo workflows show how 1DentalAI will manage real handoffs: who owns the work, what each location can adjust, and which actions require approval before they affect patients, claims, or clinical records."
+        body="These production work rules show how 1DentalAI will manage real handoffs: who owns the work, what each location can adjust, and which actions require approval before they affect patients, claims, or clinical records."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/workflows" />
 

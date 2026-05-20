@@ -17,7 +17,7 @@ export default async function AuditPage({
       <PageHeader
         eyebrow="Access and audit"
         title="Access outcomes must be visible from day one."
-        body="This demo audit trail shows who viewed or attempted work, what they touched, and whether the action was allowed, blocked, or read-only. Live support access, PHI access, clinical signoff, payer actions, and writebacks will use the same accountability model."
+        body="This audit trail shows who viewed or attempted work, what they touched, and whether the action was allowed, blocked, or read-only. Live support access, PHI access, clinical signoff, payer actions, and writebacks will use the same accountability model."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/audit" />
 
