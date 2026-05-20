@@ -58,12 +58,25 @@ jobs:
           ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
             set -euo pipefail
             cd "${DEPLOY_PATH}"
-            docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build
+            if [ ! -f .env ]; then
+              DB_PASSWORD="\$(openssl rand -base64 36 | tr -d '\n')"
+              {
+                echo "POSTGRES_DB=dentalai_prod"
+                echo "POSTGRES_USER=dentalai_app"
+                echo "POSTGRES_PASSWORD=\${DB_PASSWORD}"
+                echo "DATABASE_URL=postgresql://dentalai_app:\${DB_PASSWORD}@postgres:5432/dentalai_prod?schema=public"
+              } > .env
+              chmod 600 .env
+            fi
+            docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
+            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run --rm migrate
+            docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build app
             for i in 1 2 3 4 5; do
               curl -fsS http://127.0.0.1:3001/api/health && break
               sleep 3
             done
             curl -fsS http://127.0.0.1:3001/api/health
+            curl -fsS http://127.0.0.1:3001/api/database/health
           EOF
 
       - name: Verify public health
@@ -78,3 +91,7 @@ jobs:
           done
           cat /tmp/1dentalai-health.json || true
           exit 1
+
+      - name: Verify public database health
+        run: |
+          curl -fsS "http://${{ secrets.DO_SSH_HOST }}/api/database/health"
