@@ -7,16 +7,10 @@
 Expected process layout:
 
 - DentalRCM: existing process on port `3000`
-- 1DentalAI: new systemd service on `127.0.0.1:3001`
+- 1DentalAI: Docker Compose service on `127.0.0.1:3001`
 - Nginx: proxies `http://162.243.186.191/` to `127.0.0.1:3001`
 
-## Systemd Service
-
-Service name:
-
-```text
-1dentalai.service
-```
+## Docker Service
 
 Working directory:
 
@@ -27,14 +21,7 @@ Working directory:
 Runtime command:
 
 ```bash
-npm run start
-```
-
-Environment:
-
-```text
-NODE_ENV=production
-PORT=3001
+docker compose up -d --build
 ```
 
 ## Health Check

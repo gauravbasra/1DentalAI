@@ -58,15 +58,10 @@ jobs:
           ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
             set -euo pipefail
             cd "${DEPLOY_PATH}"
-            npm ci --omit=dev
-            npm run build
-            install -m 0644 ops/systemd/1dentalai.service /etc/systemd/system/1dentalai.service
+            docker compose up -d --build
             install -m 0644 ops/nginx/1dentalai.conf /etc/nginx/sites-available/1dentalai.conf
             ln -sfn /etc/nginx/sites-available/1dentalai.conf /etc/nginx/sites-enabled/1dentalai.conf
             rm -f /etc/nginx/sites-enabled/default
-            systemctl daemon-reload
-            systemctl enable 1dentalai.service
-            systemctl restart 1dentalai.service
             nginx -t
             systemctl reload nginx
             curl -fsS http://127.0.0.1:3001/api/health
