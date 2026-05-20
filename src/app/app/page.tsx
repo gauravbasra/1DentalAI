@@ -28,9 +28,9 @@ export default async function AppOverview({
   return (
     <FoundationShell active="/app" roleKey={role.key}>
       <PageHeader
-        eyebrow="1DentalAI product command center"
-        title="Every major dental operating system module in one place."
-        body="This is the production product map for 1DentalAI: PMS, patient access, phones, AI chat, reputation, digital marketing, AI Studio, RCM, payer work, clinical AI, charting, imaging, labs, pharmacy, referrals, patient financials, analytics, marketplace, security, and DSO controls. Modules show honest setup and approval states until live connectors are enabled."
+        eyebrow={role.title}
+        title={dashboard.title}
+        body={dashboard.summary}
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app" />
 
@@ -52,47 +52,11 @@ export default async function AppOverview({
       <section className="mt-6 rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-sm font-semibold text-cyan-700">High-level module map</p>
-            <h2 className="mt-2 text-2xl font-semibold text-neutral-950">The full dental ecosystem is visible from the start.</h2>
-            <p className="mt-3 text-sm leading-6 text-neutral-600">
-              This is not a feature teaser. These are the production product areas 1DentalAI must build, secure, connect, and operate phase by phase.
+            <p className="text-sm font-semibold text-cyan-700">Daily operating view</p>
+            <h2 className="mt-2 text-3xl font-semibold tracking-tight text-neutral-950">What needs attention today.</h2>
+            <p className="mt-3 max-w-4xl text-sm leading-6 text-neutral-600">
+              This view is built around the work owned by {role.title.toLowerCase()}: the queues, risks, decisions, and metrics that should be reviewed at login.
             </p>
-          </div>
-          <Link
-            href={`/app/modules?role=${role.key}`}
-            className="shrink-0 rounded-full bg-neutral-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-700"
-          >
-            Open product areas
-          </Link>
-        </div>
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {visibleModules.map((module) => (
-            <Link
-              key={module.id}
-              href={`/app/modules?role=${role.key}#${module.id}`}
-              className="rounded-3xl border border-neutral-200 bg-neutral-50 p-5 transition hover:-translate-y-0.5 hover:border-cyan-200 hover:bg-white hover:shadow-md"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">{module.suite}</p>
-                  <h3 className="mt-2 text-lg font-semibold text-neutral-950">{module.name}</h3>
-                </div>
-                <StatusPill tone={module.status === "foundation_ready" ? "green" : module.status === "locked_by_policy" ? "red" : "amber"}>
-                  {module.status === "foundation_ready" ? "active setup" : module.status === "locked_by_policy" ? "approval locked" : "setup required"}
-                </StatusPill>
-              </div>
-              <p className="mt-4 text-sm leading-6 text-neutral-600">{module.summary}</p>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-6 rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-cyan-700">{role.title}</p>
-            <h2 className="mt-2 text-3xl font-semibold tracking-tight text-neutral-950">{dashboard.title}</h2>
-            <p className="mt-3 max-w-4xl text-sm leading-6 text-neutral-600">{dashboard.summary}</p>
           </div>
           <StatusPill tone="green">job-specific view</StatusPill>
         </div>
