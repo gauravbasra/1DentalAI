@@ -53,12 +53,31 @@ export default async function AppOverview({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-cyan-700">Daily operating view</p>
-            <h2 className="mt-2 text-3xl font-semibold tracking-tight text-neutral-950">What needs attention today.</h2>
+            <h2 className="mt-2 text-3xl font-semibold tracking-tight text-neutral-950">Where to work today.</h2>
             <p className="mt-3 max-w-4xl text-sm leading-6 text-neutral-600">
-              This view is built around the work owned by {role.title.toLowerCase()}: the queues, risks, decisions, and metrics that should be reviewed at login.
+              Start in the work areas owned by {role.title.toLowerCase()}, then use the queue and metrics below to decide what needs attention first.
             </p>
           </div>
           <StatusPill tone="green">job-specific view</StatusPill>
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {dashboard.workAreas.map((area) => (
+            <Link
+              key={area.title}
+              href={area.route}
+              className="rounded-3xl border border-neutral-200 bg-neutral-50 p-5 transition hover:-translate-y-0.5 hover:border-cyan-200 hover:bg-white hover:shadow-md"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">{area.system}</p>
+                  <h3 className="mt-2 text-lg font-semibold text-neutral-950">{area.title}</h3>
+                </div>
+                <StatusPill tone={workAreaTone(area.status)}>{area.status}</StatusPill>
+              </div>
+              <p className="mt-4 text-sm leading-6 text-neutral-600">{area.primaryWork}</p>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-[0.14em] text-cyan-700">{area.nextAction}</p>
+            </Link>
+          ))}
         </div>
         <div className="mt-5 rounded-2xl bg-cyan-50 p-4">
           <p className="text-sm font-semibold text-cyan-950">Morning huddle focus</p>
@@ -136,6 +155,12 @@ function priorityTone(priority: DailyDashboardItem["priority"]) {
   if (priority === "Blocked") return "amber";
   if (priority === "Watch") return "cyan";
   return "neutral";
+}
+
+function workAreaTone(status: "Open" | "Setup required" | "Approval locked") {
+  if (status === "Open") return "green";
+  if (status === "Approval locked") return "red";
+  return "amber";
 }
 
 function FoundationLink({ href, title, body }: { href: string; title: string; body: string }) {
