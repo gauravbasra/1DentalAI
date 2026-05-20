@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "1DentalAI",
-  description: "Production bootstrap for the 1DentalAI dental AI operating system.",
+  title: "1DentalAI | Dental AI Operating System",
+  description:
+    "1DentalAI connects AI phone, patient messaging, insurance, RCM, reputation, clinical AI, analytics, and dental practice workflows.",
 };
 
 export default function RootLayout({

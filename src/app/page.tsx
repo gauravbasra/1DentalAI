@@ -1,108 +1,113 @@
-const platformFacts = [
-  {
-    label: "Runtime",
-    value: "Next.js App Router",
-    detail: "Independent service on port 3001 behind the droplet web server.",
-  },
-  {
-    label: "Production rule",
-    value: "Phase-gated",
-    detail: "No feature coding begins without an approved phase plan.",
-  },
-  {
-    label: "Current phase",
-    value: "Phase 0 bootstrap",
-    detail: "Repository, deployment, health checks, and operating guardrails.",
-  },
-  {
-    label: "Existing DentalRCM",
-    value: "Isolated",
-    detail: "The DentalRCM app on port 3000 remains a separate process.",
-  },
-];
-
-const operatingRules = [
-  "No shells, fake buttons, pretend connectors, or decorative completion.",
-  "Every external side effect must pass an approval gate.",
-  "NexHealth and Stedi are accelerators behind owned 1DentalAI routers.",
-  "PMS, EHR, CRM, payer, phone, payment, reputation, and clinical connectors are vendor-neutral contracts.",
-];
+import Link from "next/link";
+import { MarketingShell, ProductVisual, SectionIntro } from "@/components/marketing-shell";
+import { imageUrls, productPillars, stats, useCases } from "@/lib/site-data";
 
 export default function Home() {
   return (
-    <main className="min-h-screen bg-[#f7f8fb] text-slate-950">
-      <section className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-8 sm:px-8 lg:px-10">
-        <header className="flex items-center justify-between border-b border-slate-200 pb-5">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-700">
-              1DentalAI
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950 sm:text-5xl">
-              Dental AI operating system bootstrap
-            </h1>
-          </div>
-          <a
-            href="/api/health"
-            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-cyan-600 hover:text-cyan-800"
-          >
-            Health
-          </a>
-        </header>
-
-        <div className="grid flex-1 gap-8 py-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
-          <section>
-            <p className="max-w-3xl text-lg leading-8 text-slate-700">
-              This is the first production bootstrap for 1DentalAI. It is live
-              only as infrastructure truth: repository, app runtime, health
-              endpoint, deployment isolation, and the phase-gated rule that
-              protects the project from unfinished product surfaces.
-            </p>
-
-            <div className="mt-8 grid gap-4 sm:grid-cols-2">
-              {platformFacts.map((item) => (
-                <article
-                  key={item.label}
-                  className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+    <MarketingShell>
+      <main>
+        <section className="relative overflow-hidden bg-white">
+          <div className="mx-auto grid min-h-[calc(100vh-3.5rem)] max-w-7xl items-center gap-10 px-6 py-14 sm:px-8 lg:grid-cols-[0.95fr_1.05fr]">
+            <div className="relative z-10">
+              <p className="text-sm font-semibold text-cyan-700">
+                AI operating system for modern dentistry
+              </p>
+              <h1 className="mt-5 text-5xl font-semibold tracking-tight text-neutral-950 sm:text-7xl lg:text-8xl">
+                One platform for every dental workflow.
+              </h1>
+              <p className="mt-7 max-w-2xl text-lg leading-8 text-neutral-600 sm:text-xl">
+                1DentalAI is being built to connect phones, scheduling, patient
+                messaging, insurance, RCM, reputation, clinical AI, and practice
+                intelligence into one governed system.
+              </p>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                <Link
+                  href="/demos"
+                  className="rounded-full bg-neutral-950 px-6 py-3 text-center text-sm font-semibold text-white transition hover:bg-cyan-700"
                 >
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    {item.label}
-                  </p>
-                  <h2 className="mt-3 text-xl font-semibold text-slate-950">
-                    {item.value}
-                  </h2>
-                  <p className="mt-3 text-sm leading-6 text-slate-600">
-                    {item.detail}
-                  </p>
-                </article>
-              ))}
+                  Explore demos
+                </Link>
+                <Link
+                  href="/product"
+                  className="rounded-full border border-neutral-300 bg-white px-6 py-3 text-center text-sm font-semibold text-neutral-900 transition hover:border-cyan-600 hover:text-cyan-700"
+                >
+                  See product
+                </Link>
+              </div>
             </div>
-          </section>
+            <ProductVisual />
+          </div>
+        </section>
 
-          <aside className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-slate-950">
-              Operating contract
-            </h2>
-            <div className="mt-5 space-y-4">
-              {operatingRules.map((rule) => (
-                <div key={rule} className="flex gap-3">
-                  <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-cyan-600" />
-                  <p className="text-sm leading-6 text-slate-700">{rule}</p>
-                </div>
-              ))}
-            </div>
-            <div className="mt-6 rounded-md border border-amber-200 bg-amber-50 p-4">
-              <p className="text-sm font-semibold text-amber-950">
-                Next required approval
+        <section className="bg-[#f5f5f7] px-6 py-20 sm:px-8">
+          <div className="mx-auto grid max-w-7xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {stats.map((stat) => (
+              <div key={stat.label} className="rounded-[2rem] bg-white p-7 text-center shadow-sm">
+                <p className="text-4xl font-semibold text-neutral-950">{stat.value}</p>
+                <p className="mt-3 text-sm leading-6 text-neutral-600">{stat.label}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="bg-white px-6 py-24 sm:px-8">
+          <SectionIntro
+            eyebrow="Product suites"
+            title="Every major practice function, connected."
+            body="The goal is not another dashboard. It is an operating layer that turns calls, claims, treatment plans, reviews, and clinical notes into tracked work."
+          />
+          <div className="mx-auto mt-14 grid max-w-7xl gap-5 md:grid-cols-2 lg:grid-cols-3">
+            {productPillars.map((pillar) => (
+              <article key={pillar.title} className="rounded-[2rem] bg-[#f5f5f7] p-7">
+                <p className="text-sm font-semibold text-cyan-700">{pillar.eyebrow}</p>
+                <h2 className="mt-4 text-2xl font-semibold text-neutral-950">{pillar.title}</h2>
+                <p className="mt-4 text-sm leading-7 text-neutral-600">{pillar.body}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="grid bg-neutral-950 text-white lg:grid-cols-2">
+          <div className="min-h-[520px] bg-cover bg-center" style={{ backgroundImage: `url(${imageUrls.practice})` }} />
+          <div className="flex items-center px-6 py-20 sm:px-12 lg:px-16">
+            <div>
+              <p className="text-sm font-semibold text-cyan-300">Productivity</p>
+              <h2 className="mt-5 text-4xl font-semibold tracking-tight sm:text-6xl">
+                Less chasing. More dentistry.
+              </h2>
+              <p className="mt-6 text-lg leading-8 text-neutral-300">
+                Practices lose time to disconnected phones, manual insurance
+                checks, claim rework, follow-up gaps, review requests, and
+                repeated patient context hunting. 1DentalAI is designed to put
+                that work into one queue with AI assistance and human approval.
               </p>
-              <p className="mt-2 text-sm leading-6 text-amber-900">
-                Phase 0 architecture packet: repo strategy, DentalRCM reuse
-                boundary, phone app scan, deployment topology, and connector
-                extraction decision.
-              </p>
+              <Link
+                href="/use-cases"
+                className="mt-8 inline-flex rounded-full bg-white px-6 py-3 text-sm font-semibold text-neutral-950 transition hover:bg-cyan-100"
+              >
+                View use cases
+              </Link>
             </div>
-          </aside>
-        </div>
-      </section>
-    </main>
+          </div>
+        </section>
+
+        <section className="bg-[#f5f5f7] px-6 py-24 sm:px-8">
+          <SectionIntro
+            eyebrow="Role-based workflows"
+            title="Built around the way dental teams actually work."
+            body="Each workflow is designed for a specific handoff: front desk to billing, treatment coordinator to patient, provider to chart, practice manager to DSO leadership."
+          />
+          <div className="mx-auto mt-14 grid max-w-7xl gap-5 md:grid-cols-2 lg:grid-cols-3">
+            {useCases.slice(0, 6).map((item) => (
+              <article key={item.title} className="rounded-[2rem] bg-white p-7 shadow-sm">
+                <p className="text-sm font-semibold text-emerald-700">{item.role}</p>
+                <h2 className="mt-4 text-2xl font-semibold text-neutral-950">{item.title}</h2>
+                <p className="mt-4 text-sm leading-7 text-neutral-600">{item.body}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      </main>
+    </MarketingShell>
   );
 }
