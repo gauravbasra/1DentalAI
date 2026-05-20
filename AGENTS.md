@@ -7,9 +7,12 @@
 - Every phase plan must include fresh research: competition, UI/UX, product features, workflows, integrations, database fields, migrations, protocols, handoffs, audit/compliance needs, and verification strategy.
 - The approved phase plan is the contract. Code must match the approved plan.
 - If implementation reality changes, stop, update the plan, explain the change, and get approval before continuing.
+- Items previously marked out of scope are approved as 1DentalAI product scope. They still must be delivered in small production phases with explicit research, implementation, credentials/configuration needs, compliance gates, tests, and user approval before each phase starts.
 - No shells, placeholders, fake success responses, dead buttons, decorative-only UI, fake connectors, or pretend production states.
 - 1DentalAI is not a prototype, mockup, demo app, or shell. Every screen is part of the production product from Day 1.
 - If a capability is not live yet, show a production-grade setup, approval, or integration state. Do not label product surfaces as demo versions.
+- Dashboard work-entry cards such as "Where to work today" are not a final product surface. They must be replaced with real role-specific workbench areas where users perform the work: PMS schedule, patient chart, perio charting, RCM queues, phone inbox, forms/intake, treatment plans, imaging, labs/referrals, rooms/chairs, reputation management, AI Studio, Local SEO, AI SEO, campaign/growth marketing, and connector setup.
+- Workbench pages must include role-owned queues, actionable buttons, permission checks, truthful setup or blocked states, audit trail, and clear next actions. Text-only descriptions are allowed only as temporary orientation while the production workbench for that phase is being built.
 - High-level product surfaces must always keep the full dental ecosystem visible: PMS/EHR, scheduling, forms, phone, AI receptionist, chat, reputation, digital marketing, local SEO, AI SEO, AI Studio, RCM, payer workflows, revenue integrity, clinical AI, scribing, charting, perio, imaging, labs, referrals, pharmacy/eRx, patient financing, memberships, payments, analytics, marketplace, security, and DSO controls.
 - A phase is not complete until UI, backend, persistence/integration behavior or truthful unavailable state, validation, errors, audit/logging, tests, and verification are complete within that phase's approved scope.
 

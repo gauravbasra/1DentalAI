@@ -1,0 +1,192 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum WorkbenchStatus {
+  OPEN
+  SETUP_REQUIRED
+  APPROVAL_LOCKED
+  BLOCKED
+}
+
+enum WorkbenchActionKind {
+  LOCAL_STATE_CHANGE
+  APPROVAL_REQUEST
+  CONNECTOR_SETUP
+  EXTERNAL_EXECUTION_BLOCKED
+}
+
+enum WorkbenchAuditOutcome {
+  ALLOWED
+  BLOCKED
+  READ_ONLY
+}
+
+model Tenant {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  mode        String   @default("PRODUCTION_SETUP")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  locations   Location[]
+  roles       TenantRole[]
+  workbenches WorkbenchArea[]
+  audits      WorkbenchAuditEvent[]
+}
+
+model Location {
+  id        String   @id @default(cuid())
+  tenantId  String
+  code      String
+  name      String
+  timezone  String
+  status    String   @default("ONBOARDING")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  items     WorkbenchQueueItem[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+}
+
+model TenantRole {
+  id          String   @id @default(cuid())
+  tenantId    String
+  roleKey     String
+  title       String
+  scopes      String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workbenches WorkbenchAreaRole[]
+
+  @@unique([tenantId, roleKey])
+}
+
+model WorkbenchArea {
+  id              String            @id @default(cuid())
+  tenantId        String
+  slug            String
+  title           String
+  domain          String
+  status          WorkbenchStatus
+  summary         String
+  primarySystem   String
+  liveCapability  Boolean           @default(false)
+  setupReason     String?
+  approvalReason  String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  roles           WorkbenchAreaRole[]
+  queueItems      WorkbenchQueueItem[]
+  connectorItems  ConnectorReadinessItem[]
+  audits          WorkbenchAuditEvent[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, domain])
+  @@index([tenantId, status])
+}
+
+model WorkbenchAreaRole {
+  id          String        @id @default(cuid())
+  areaId      String
+  roleId      String
+  accessLevel String        @default("WORK")
+  area        WorkbenchArea @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  role        TenantRole    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([areaId, roleId])
+}
+
+model WorkbenchQueueItem {
+  id              String       @id @default(cuid())
+  areaId          String
+  tenantId        String
+  locationId      String?
+  patientRef      String?
+  ownerRoleKey    String
+  title           String
+  detail          String
+  status          String
+  priority        String
+  dueAt           DateTime?
+  amountCents     Int?
+  sourceSystem    String
+  sourceObjectType String
+  sourceObjectId  String?
+  clinicalData    Json?
+  financialData   Json?
+  marketingData   Json?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  area            WorkbenchArea @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  location        Location?     @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  actions         WorkbenchAction[]
+
+  @@index([tenantId, ownerRoleKey])
+  @@index([areaId, priority])
+  @@index([locationId])
+  @@index([sourceObjectType, sourceObjectId])
+}
+
+model WorkbenchAction {
+  id              String              @id @default(cuid())
+  queueItemId     String
+  label           String
+  kind            WorkbenchActionKind
+  requiresScope   String[]
+  externalSystem  String?
+  blockedReason   String?
+  resultStatus    String              @default("READY")
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  queueItem       WorkbenchQueueItem   @relation(fields: [queueItemId], references: [id], onDelete: Cascade)
+  audits          WorkbenchAuditEvent[]
+
+  @@index([queueItemId, kind])
+}
+
+model ConnectorReadinessItem {
+  id                 String          @id @default(cuid())
+  areaId             String
+  connectorCategory  String
+  capability         String
+  status             String
+  requiredFields     String[]
+  missingFields      String[]
+  policyGate         String
+  nextAction         String
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  area               WorkbenchArea   @relation(fields: [areaId], references: [id], onDelete: Cascade)
+
+  @@index([areaId, connectorCategory])
+  @@index([status])
+}
+
+model WorkbenchAuditEvent {
+  id          String                  @id @default(cuid())
+  tenantId    String
+  areaId      String?
+  actionId    String?
+  actorRole   String
+  eventType   String
+  outcome     WorkbenchAuditOutcome
+  summary     String
+  metadata    Json?
+  createdAt   DateTime                @default(now())
+  tenant      Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  area        WorkbenchArea?          @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  action      WorkbenchAction?        @relation(fields: [actionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([actorRole])
+  @@index([outcome])
+}

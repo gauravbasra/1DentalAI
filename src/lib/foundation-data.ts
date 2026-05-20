@@ -21,6 +21,7 @@ export type RoleKey =
   | "treatment_coordinator"
   | "billing_rcm"
   | "practice_manager"
+  | "marketing_growth"
   | "dso_regional"
   | "compliance_admin"
   | "support_admin";
@@ -280,6 +281,14 @@ export const roles: FoundationRole[] = [
     sampleUser: "Grace Morgan",
   },
   {
+    key: "marketing_growth",
+    title: "Marketing / Growth Manager",
+    description: "Sees reputation, review requests, service recovery, campaigns, AI Studio drafts, Local SEO, AI SEO, listings, and growth attribution.",
+    scopes: ["location", "module", "communications", "settings_admin", "ai_governance"],
+    hiddenByDefault: ["Clinical chart editing", "Claim submission", "Payer contracts", "Security admin"],
+    sampleUser: "Avery Johnson",
+  },
+  {
     key: "dso_regional",
     title: "DSO Regional Manager",
     description: "Sees location rollups, staffing, chair utilization, production trends, and rollout status with minimized PHI.",
@@ -313,6 +322,7 @@ export const teamMembers: TeamMember[] = [
   { id: "tm_5", name: "Emma Brooks", role: "front_desk", locationIds: ["loc_denver", "loc_aurora"], availability: "front_desk", currentFocus: "Check-in and missed-call queue" },
   { id: "tm_6", name: "Priya Shah", role: "billing_rcm", locationIds: ["loc_denver", "loc_boulder", "loc_aurora"], availability: "billing_queue", currentFocus: "ERA exceptions and revenue integrity" },
   { id: "tm_7", name: "Grace Morgan", role: "practice_manager", locationIds: ["loc_denver"], availability: "admin", currentFocus: "Schedule capacity and staffing" },
+  { id: "tm_8", name: "Avery Johnson", role: "marketing_growth", locationIds: ["loc_denver", "loc_boulder", "loc_aurora"], availability: "admin", currentFocus: "Reputation, AI Studio, and local search work" },
 ];
 
 export const chairs: Chair[] = [
@@ -433,7 +443,7 @@ export const modules: FeatureModule[] = [
     name: "Reputation management",
     suite: "Growth",
     status: "setup_required",
-    visibleTo: ["owner_dentist", "practice_manager", "front_desk", "treatment_coordinator"],
+    visibleTo: ["owner_dentist", "practice_manager", "front_desk", "treatment_coordinator", "marketing_growth"],
     summary: "Review requests, review monitoring, AI response drafts, service recovery, surveys, and location reputation reporting.",
     foundationReady: "Practice roles and follow-up ownership are ready for review requests and service recovery queues.",
     setupRequired: "Review site connections, response approvals, unhappy-patient recovery, and listing updates are not connected yet.",
@@ -444,7 +454,7 @@ export const modules: FeatureModule[] = [
     name: "Digital marketing, Local SEO, and AI SEO",
     suite: "Growth",
     status: "setup_required",
-    visibleTo: ["owner_dentist", "practice_manager", "dso_regional"],
+    visibleTo: ["owner_dentist", "practice_manager", "dso_regional", "marketing_growth"],
     summary: "Listings, local pages, AI search visibility, campaigns, attribution, reactivation, and treatment follow-up marketing.",
     foundationReady: "Locations, providers, and service areas are available for future listing and local-search work.",
     setupRequired: "Listing connections, location-page publishing, campaign channels, AI search visibility, and attribution reporting are not connected yet.",
@@ -455,7 +465,7 @@ export const modules: FeatureModule[] = [
     name: "AI Studio",
     suite: "AI controls",
     status: "setup_required",
-    visibleTo: ["owner_dentist", "practice_manager", "compliance_admin", "treatment_coordinator"],
+    visibleTo: ["owner_dentist", "practice_manager", "compliance_admin", "treatment_coordinator", "marketing_growth"],
     summary: "Approved prompts, brand voice, content generation, campaign drafts, automation policies, and AI audit reporting.",
     foundationReady: "AI access roles and approval boundaries are modeled for practice-safe content and automation.",
     setupRequired: "Brand voice, approved prompts, content review, campaign generation, and audit reports are not connected yet.",
@@ -587,7 +597,7 @@ export const modules: FeatureModule[] = [
     name: "Practice intelligence and analytics",
     suite: "Analytics",
     status: "foundation_ready",
-    visibleTo: ["owner_dentist", "practice_manager", "dso_regional", "billing_rcm"],
+    visibleTo: ["owner_dentist", "practice_manager", "dso_regional", "billing_rcm", "marketing_growth"],
     summary: "Production, collections, schedule health, provider performance, service mix, payer delay, marketing attribution, and AI ROI.",
     foundationReady: "Production, schedule, provider, service, and location performance views are available for the current setup stage.",
     setupRequired: "Live PMS, payment, payer, phone, and marketing feeds are needed for production reporting.",
@@ -598,7 +608,7 @@ export const modules: FeatureModule[] = [
     name: "Integration marketplace",
     suite: "Platform",
     status: "setup_required",
-    visibleTo: ["owner_dentist", "practice_manager", "dso_regional", "compliance_admin", "support_admin"],
+    visibleTo: ["owner_dentist", "practice_manager", "dso_regional", "compliance_admin", "support_admin", "marketing_growth"],
     summary: "PMS, EHR, payer, CRM, phone, payment, imaging, lab, eRx, marketing, financing, and analytics vendor connections.",
     foundationReady: "Product areas and access boundaries are established for future connector setup.",
     setupRequired: "Connector registry, credential storage, health checks, approval rules, vendor status, and cost controls are not connected yet.",
@@ -749,10 +759,10 @@ export const dailyDashboards: Record<RoleKey, DailyDashboard> = {
     summary: "A working owner huddle for production, collections, schedule risk, case acceptance, hygiene retention, provider performance, phones, reviews, and revenue leakage before the first patient is seated.",
     huddleFocus: "Review yesterday's close, protect today's production, fill tomorrow's openings, and assign owners for anything that can cost the practice money or patient trust.",
     workAreas: [
-      { title: "PMS schedule and production board", system: "Practice management system", status: "Setup required", route: "/app/modules?role=owner_dentist#pms", primaryWork: "Inspect today/tomorrow schedule, production holes, provider columns, and same-day treatment capacity.", nextAction: "Connect live PMS schedule before production writeback." },
-      { title: "Owner RCM recovery queue", system: "Revenue integrity", status: "Setup required", route: "/app/modules?role=owner_dentist#revenue_integrity", primaryWork: "Approve recoverable claims, underpayment reviews, write-off reversals, and payer escalation batches.", nextAction: "Approve recovery policy and payer data connector." },
-      { title: "Clinical approval desk", system: "Clinical AI and charting", status: "Approval locked", route: "/app/modules?role=owner_dentist#clinical_ai", primaryWork: "Review AI scribe policy, clinical writeback approvals, imaging evidence, and provider signoff exceptions.", nextAction: "Clinical writeback remains locked until provider approval rules are configured." },
-      { title: "Growth and reputation recovery", system: "Reputation and digital marketing", status: "Setup required", route: "/app/modules?role=owner_dentist#reputation", primaryWork: "Approve service recovery, review negative feedback, inspect missed-call revenue, and release review requests.", nextAction: "Connect review/listing sources and approval rules." },
+      { title: "PMS schedule and production board", system: "Practice management system", status: "Setup required", route: "/app/work/pms-schedule?role=owner_dentist", primaryWork: "Inspect today/tomorrow schedule, production holes, provider columns, and same-day treatment capacity.", nextAction: "Connect live PMS schedule before production writeback." },
+      { title: "Owner RCM recovery queue", system: "Revenue integrity", status: "Setup required", route: "/app/work/rcm-queue?role=owner_dentist", primaryWork: "Approve recoverable claims, underpayment reviews, write-off reversals, and payer escalation batches.", nextAction: "Approve recovery policy and payer data connector." },
+      { title: "Clinical approval desk", system: "Clinical AI and charting", status: "Approval locked", route: "/app/work/patient-chart?role=owner_dentist", primaryWork: "Review AI scribe policy, clinical writeback approvals, imaging evidence, and provider signoff exceptions.", nextAction: "Clinical writeback remains locked until provider approval rules are configured." },
+      { title: "Growth and reputation recovery", system: "Reputation and digital marketing", status: "Setup required", route: "/app/work/growth-reputation?role=owner_dentist", primaryWork: "Approve service recovery, review negative feedback, inspect missed-call revenue, and release review requests.", nextAction: "Connect review/listing sources and approval rules." },
     ],
     kpis: [
       { label: "Yesterday net production", value: "$94.4K", detail: "$8.6K over goal; $3.1K was same-day accepted treatment", tone: "green" },
@@ -814,10 +824,10 @@ export const dailyDashboards: Record<RoleKey, DailyDashboard> = {
     summary: "The provider sees today’s patients, clinical prep, note work, imaging evidence, labs, referrals, and approval items.",
     huddleFocus: "Be ready for the chair: medical alerts, unscheduled treatment in today’s patients, images to review, notes to sign, and emergency exams.",
     workAreas: [
-      { title: "Patient chart worklist", system: "PMS/EHR chart", status: "Approval locked", route: "/app/modules?role=associate_provider#charting_perio", primaryWork: "Open today’s charts, review medical alerts, treatment history, planned procedures, and unsigned clinical items.", nextAction: "Live chart writeback requires clinical approval setup." },
-      { title: "AI scribe signoff", system: "Clinical AI and scribe", status: "Approval locked", route: "/app/modules?role=associate_provider#clinical_ai", primaryWork: "Review, edit, and sign AI-generated notes before any writeback.", nextAction: "Provider signoff workflow must be enabled." },
-      { title: "Imaging and evidence review", system: "Imaging AI and CBCT", status: "Setup required", route: "/app/modules?role=associate_provider#imaging", primaryWork: "Review missing X-rays, CBCT, AI findings, overlays, and claim evidence.", nextAction: "Connect imaging source and DICOM storage." },
-      { title: "Labs and referrals", system: "Clinical operations", status: "Setup required", route: "/app/modules?role=associate_provider#labs", primaryWork: "Check lab cases, referral results, remake issues, and specialty handoffs tied to upcoming appointments.", nextAction: "Connect lab/referral tracking." },
+      { title: "Patient chart worklist", system: "PMS/EHR chart", status: "Approval locked", route: "/app/work/patient-chart?role=associate_provider", primaryWork: "Open today’s charts, review medical alerts, treatment history, planned procedures, and unsigned clinical items.", nextAction: "Live chart writeback requires clinical approval setup." },
+      { title: "AI scribe signoff", system: "Clinical AI and scribe", status: "Approval locked", route: "/app/work/patient-chart?role=associate_provider", primaryWork: "Review, edit, and sign AI-generated notes before any writeback.", nextAction: "Provider signoff workflow must be enabled." },
+      { title: "Imaging and evidence review", system: "Imaging AI and CBCT", status: "Setup required", route: "/app/work/imaging?role=associate_provider", primaryWork: "Review missing X-rays, CBCT, AI findings, overlays, and claim evidence.", nextAction: "Connect imaging source and DICOM storage." },
+      { title: "Labs and referrals", system: "Clinical operations", status: "Setup required", route: "/app/work/labs-referrals?role=associate_provider", primaryWork: "Check lab cases, referral results, remake issues, and specialty handoffs tied to upcoming appointments.", nextAction: "Connect lab/referral tracking." },
     ],
     kpis: [
       { label: "Patients today", value: "14", detail: "Four restorative, two emergency, eight exams or follow-ups", tone: "cyan" },
@@ -852,9 +862,9 @@ export const dailyDashboards: Record<RoleKey, DailyDashboard> = {
     summary: "The hygienist sees hygiene flow, perio charting, reappointment gaps, doctor exam timing, radiograph readiness, and preventive opportunities.",
     huddleFocus: "Keep continuing care moving: perio status, hygiene reappointment, fluoride, diagnosed treatment, doctor exam timing, and chart completeness.",
     workAreas: [
-      { title: "Perio charting board", system: "Charting and perio", status: "Approval locked", route: "/app/modules?role=rdh#charting_perio", primaryWork: "Enter pocket depths, bleeding, mobility, recession, perio diagnosis support, and doctor-exam flags.", nextAction: "Perio writeback requires live chart model and provider rules." },
-      { title: "Hygiene schedule", system: "PMS schedule", status: "Setup required", route: "/app/modules?role=rdh#scheduling_forms", primaryWork: "Work today’s hygiene column, exam timing, reappointment status, and recall opportunities.", nextAction: "Connect PMS schedule and recall data." },
-      { title: "Radiograph readiness", system: "Imaging", status: "Setup required", route: "/app/modules?role=rdh#imaging", primaryWork: "See overdue BWX/FM/PAs and images needed before doctor exam.", nextAction: "Connect imaging and radiograph policy." },
+      { title: "Perio charting board", system: "Charting and perio", status: "Approval locked", route: "/app/work/perio-charting?role=rdh", primaryWork: "Enter pocket depths, bleeding, mobility, recession, perio diagnosis support, and doctor-exam flags.", nextAction: "Perio writeback requires live chart model and provider rules." },
+      { title: "Hygiene schedule", system: "PMS schedule", status: "Setup required", route: "/app/work/pms-schedule?role=rdh", primaryWork: "Work today’s hygiene column, exam timing, reappointment status, and recall opportunities.", nextAction: "Connect PMS schedule and recall data." },
+      { title: "Radiograph readiness", system: "Imaging", status: "Setup required", route: "/app/work/imaging?role=rdh", primaryWork: "See overdue BWX/FM/PAs and images needed before doctor exam.", nextAction: "Connect imaging and radiograph policy." },
     ],
     kpis: [
       { label: "Hygiene visits", value: "9", detail: "Three perio maintenance, six prophy/recall", tone: "cyan" },
@@ -889,9 +899,9 @@ export const dailyDashboards: Record<RoleKey, DailyDashboard> = {
     summary: "The assistant sees room readiness, turnover, provider support, lab case status, imaging readiness, blocked chairs, and procedure setup.",
     huddleFocus: "Protect chair time: what room is ready, what is blocked, which lab or image is missing, and where the provider needs support.",
     workAreas: [
-      { title: "Room and chair board", system: "Rooms", status: "Open", route: "/app/rooms?role=dental_assistant", primaryWork: "Manage room readiness, turnover, assigned provider, blocked-chair reasons, and emergency setup.", nextAction: "Clear blocked room and turnover tasks." },
-      { title: "Procedure setup list", system: "PMS schedule", status: "Setup required", route: "/app/modules?role=dental_assistant#pms", primaryWork: "See planned procedures, trays, materials, and provider-specific setup needs.", nextAction: "Connect live appointment procedure data." },
-      { title: "Lab and imaging readiness", system: "Labs and imaging", status: "Setup required", route: "/app/modules?role=dental_assistant#labs", primaryWork: "Verify lab case arrival, scan files, x-ray readiness, and referral packets before seating.", nextAction: "Connect lab, scanner, and imaging sources." },
+      { title: "Room and chair board", system: "Rooms", status: "Open", route: "/app/work/rooms-chairs?role=dental_assistant", primaryWork: "Manage room readiness, turnover, assigned provider, blocked-chair reasons, and emergency setup.", nextAction: "Clear blocked room and turnover tasks." },
+      { title: "Procedure setup list", system: "PMS schedule", status: "Setup required", route: "/app/work/pms-schedule?role=dental_assistant", primaryWork: "See planned procedures, trays, materials, and provider-specific setup needs.", nextAction: "Connect live appointment procedure data." },
+      { title: "Lab and imaging readiness", system: "Labs and imaging", status: "Setup required", route: "/app/work/labs-referrals?role=dental_assistant", primaryWork: "Verify lab case arrival, scan files, x-ray readiness, and referral packets before seating.", nextAction: "Connect lab, scanner, and imaging sources." },
     ],
     kpis: [
       { label: "Rooms ready", value: "3/5", detail: "One turnover, one blocked for imaging setup", tone: "amber" },
@@ -926,10 +936,10 @@ export const dailyDashboards: Record<RoleKey, DailyDashboard> = {
     summary: "The front desk sees calls, texts, voicemails, appointment requests, confirmations, forms, recalls, and emergency routing.",
     huddleFocus: "Keep the front door moving: missed calls, unconfirmed appointments, forms not complete, new patient requests, and emergency triage.",
     workAreas: [
-      { title: "AI phone and missed-call inbox", system: "Telephony", status: "Setup required", route: "/app/modules?role=front_desk#telephony", primaryWork: "Recover missed calls, review AI summaries, route emergencies, and book new patient requests.", nextAction: "Connect phone numbers and AI receptionist routing." },
-      { title: "Schedule confirmation board", system: "PMS schedule", status: "Setup required", route: "/app/modules?role=front_desk#scheduling_forms", primaryWork: "Confirm visits, fill openings, manage recalls, and move appointment requests into the schedule.", nextAction: "Connect live PMS schedule and reminder rules." },
-      { title: "Forms and intake queue", system: "Forms", status: "Setup required", route: "/app/modules?role=front_desk#scheduling_forms", primaryWork: "Collect medical history, insurance cards, consents, and missing intake before arrival.", nextAction: "Enable forms storage and patient matching." },
-      { title: "Patient messaging", system: "AI chat and texting", status: "Setup required", route: "/app/modules?role=front_desk#patient_chat", primaryWork: "Reply to patient questions, approve AI drafts, route billing/clinical messages, and record outcomes.", nextAction: "Connect messaging channels and consent ledger." },
+      { title: "AI phone and missed-call inbox", system: "Telephony", status: "Setup required", route: "/app/work/phone-inbox?role=front_desk", primaryWork: "Recover missed calls, review AI summaries, route emergencies, and book new patient requests.", nextAction: "Connect phone numbers and AI receptionist routing." },
+      { title: "Schedule confirmation board", system: "PMS schedule", status: "Setup required", route: "/app/work/pms-schedule?role=front_desk", primaryWork: "Confirm visits, fill openings, manage recalls, and move appointment requests into the schedule.", nextAction: "Connect live PMS schedule and reminder rules." },
+      { title: "Forms and intake queue", system: "Forms", status: "Setup required", route: "/app/work/pms-schedule?role=front_desk", primaryWork: "Collect medical history, insurance cards, consents, and missing intake before arrival.", nextAction: "Enable forms storage and patient matching." },
+      { title: "Patient messaging", system: "AI chat and texting", status: "Setup required", route: "/app/work/phone-inbox?role=front_desk", primaryWork: "Reply to patient questions, approve AI drafts, route billing/clinical messages, and record outcomes.", nextAction: "Connect messaging channels and consent ledger." },
     ],
     kpis: [
       { label: "Missed calls", value: "9", detail: "Three high-intent new patient calls need recovery", tone: "red" },
@@ -964,9 +974,9 @@ export const dailyDashboards: Record<RoleKey, DailyDashboard> = {
     summary: "The treatment coordinator sees presented treatment, unscheduled treatment, financing candidates, membership opportunities, estimates, and follow-ups.",
     huddleFocus: "Turn diagnosed treatment into accepted care: estimates ready, financing options, membership fit, follow-up timing, and doctor handoff quality.",
     workAreas: [
-      { title: "Treatment plan worklist", system: "PMS treatment planning", status: "Setup required", route: "/app/modules?role=treatment_coordinator#pms", primaryWork: "Review presented treatment, accepted-not-scheduled cases, doctor narratives, and case value.", nextAction: "Connect treatment plan and provider note data." },
-      { title: "Financing and membership desk", system: "Patient financials", status: "Setup required", route: "/app/modules?role=treatment_coordinator#financial_products", primaryWork: "Offer financing, membership plans, payment schedules, agreements, and follow-up.", nextAction: "Connect financing, membership, and payment providers." },
-      { title: "Estimate and benefits review", system: "RCM and payer", status: "Setup required", route: "/app/modules?role=treatment_coordinator#rcm", primaryWork: "Confirm benefits, estimate patient portion, and clear blockers before presenting cases.", nextAction: "Connect eligibility and fee schedule data." },
+      { title: "Treatment plan worklist", system: "PMS treatment planning", status: "Setup required", route: "/app/work/treatment-plans?role=treatment_coordinator", primaryWork: "Review presented treatment, accepted-not-scheduled cases, doctor narratives, and case value.", nextAction: "Connect treatment plan and provider note data." },
+      { title: "Financing and membership desk", system: "Patient financials", status: "Setup required", route: "/app/work/treatment-plans?role=treatment_coordinator", primaryWork: "Offer financing, membership plans, payment schedules, agreements, and follow-up.", nextAction: "Connect financing, membership, and payment providers." },
+      { title: "Estimate and benefits review", system: "RCM and payer", status: "Setup required", route: "/app/work/rcm-queue?role=treatment_coordinator", primaryWork: "Confirm benefits, estimate patient portion, and clear blockers before presenting cases.", nextAction: "Connect eligibility and fee schedule data." },
     ],
     kpis: [
       { label: "Unscheduled treatment", value: "$58.6K", detail: "23 patients with presented treatment not booked", tone: "amber" },
@@ -1001,10 +1011,10 @@ export const dailyDashboards: Record<RoleKey, DailyDashboard> = {
     summary: "Billing sees eligibility, benefit gaps, claim blockers, payer follow-up, denials, EOB/ERA exceptions, underpayments, and patient balances.",
     huddleFocus: "Clear money blockers: eligibility before visit, claims before timely filing, attachments before rejection, ERA exceptions before aging, and underpayments before write-off.",
     workAreas: [
-      { title: "Eligibility and benefits queue", system: "RCM and payer", status: "Setup required", route: "/app/modules?role=billing_rcm#rcm", primaryWork: "Run 270/271 eligibility, capture benefit evidence, identify missing demographics, and clear tomorrow's schedule.", nextAction: "Connect payer routing and eligibility transactions." },
-      { title: "Claim readiness and attachments", system: "Claims", status: "Setup required", route: "/app/modules?role=billing_rcm#rcm", primaryWork: "Review claims needing narratives, perio charts, images, prior auth, coding, or provider signoff.", nextAction: "Connect claims, attachment, and documentation sources." },
-      { title: "EOB/ERA and payment posting", system: "Payments and ERA", status: "Setup required", route: "/app/modules?role=billing_rcm#payments", primaryWork: "Resolve ERA exceptions, post payments, reconcile balances, and route denials.", nextAction: "Connect ERA/EOB and ledger posting." },
-      { title: "Revenue leakage review", system: "Revenue integrity", status: "Setup required", route: "/app/modules?role=billing_rcm#revenue_integrity", primaryWork: "Recover underpayments, inspect write-offs, missed billing, payer delays, and contract variance.", nextAction: "Connect historical claims and contract data." },
+      { title: "Eligibility and benefits queue", system: "RCM and payer", status: "Setup required", route: "/app/work/rcm-queue?role=billing_rcm", primaryWork: "Run 270/271 eligibility, capture benefit evidence, identify missing demographics, and clear tomorrow's schedule.", nextAction: "Connect payer routing and eligibility transactions." },
+      { title: "Claim readiness and attachments", system: "Claims", status: "Setup required", route: "/app/work/rcm-queue?role=billing_rcm", primaryWork: "Review claims needing narratives, perio charts, images, prior auth, coding, or provider signoff.", nextAction: "Connect claims, attachment, and documentation sources." },
+      { title: "EOB/ERA and payment posting", system: "Payments and ERA", status: "Setup required", route: "/app/work/rcm-queue?role=billing_rcm", primaryWork: "Resolve ERA exceptions, post payments, reconcile balances, and route denials.", nextAction: "Connect ERA/EOB and ledger posting." },
+      { title: "Revenue leakage review", system: "Revenue integrity", status: "Setup required", route: "/app/work/rcm-queue?role=billing_rcm", primaryWork: "Recover underpayments, inspect write-offs, missed billing, payer delays, and contract variance.", nextAction: "Connect historical claims and contract data." },
     ],
     kpis: [
       { label: "Claim dollars blocked", value: "$24.7K", detail: "Attachments, coding review, and payer status work", tone: "red" },
@@ -1039,10 +1049,10 @@ export const dailyDashboards: Record<RoleKey, DailyDashboard> = {
     summary: "The manager sees schedule gaps, room status, staff coverage, confirmations, forms, phone load, overdue tasks, and today’s production risk.",
     huddleFocus: "Run the day: holes in schedule, who owns each queue, which rooms are blocked, which patients are not ready, and which production is at risk.",
     workAreas: [
-      { title: "Daily schedule control", system: "PMS schedule", status: "Setup required", route: "/app/modules?role=practice_manager#pms", primaryWork: "Monitor schedule gaps, provider columns, confirmations, procedure mix, and production at risk.", nextAction: "Connect live schedule and production data." },
-      { title: "Room and staffing board", system: "Rooms and team", status: "Open", route: "/app/rooms?role=practice_manager", primaryWork: "Reassign staff, clear blocked chairs, manage turnover, and watch provider delays.", nextAction: "Assign owner for blocked rooms and staff gaps." },
-      { title: "Front desk command queue", system: "Phones, forms, messaging", status: "Setup required", route: "/app/modules?role=practice_manager#telephony", primaryWork: "Monitor missed calls, appointment requests, confirmations, forms, and patient messages.", nextAction: "Connect communications and intake channels." },
-      { title: "RCM backlog monitor", system: "RCM", status: "Setup required", route: "/app/modules?role=practice_manager#rcm", primaryWork: "Watch eligibility failures, claim backlog, payer follow-up, and billing team workload.", nextAction: "Connect RCM queues and payer sources." },
+      { title: "Daily schedule control", system: "PMS schedule", status: "Setup required", route: "/app/work/pms-schedule?role=practice_manager", primaryWork: "Monitor schedule gaps, provider columns, confirmations, procedure mix, and production at risk.", nextAction: "Connect live schedule and production data." },
+      { title: "Room and staffing board", system: "Rooms and team", status: "Open", route: "/app/work/rooms-chairs?role=practice_manager", primaryWork: "Reassign staff, clear blocked chairs, manage turnover, and watch provider delays.", nextAction: "Assign owner for blocked rooms and staff gaps." },
+      { title: "Front desk command queue", system: "Phones, forms, messaging", status: "Setup required", route: "/app/work/phone-inbox?role=practice_manager", primaryWork: "Monitor missed calls, appointment requests, confirmations, forms, and patient messages.", nextAction: "Connect communications and intake channels." },
+      { title: "RCM backlog monitor", system: "RCM", status: "Setup required", route: "/app/work/rcm-queue?role=practice_manager", primaryWork: "Watch eligibility failures, claim backlog, payer follow-up, and billing team workload.", nextAction: "Connect RCM queues and payer sources." },
     ],
     kpis: [
       { label: "Schedule at risk", value: "$31.0K", detail: "Unconfirmed, holes, and patients not ready", tone: "red" },
@@ -1071,14 +1081,52 @@ export const dailyDashboards: Record<RoleKey, DailyDashboard> = {
     decisions: ["Assign queue owners", "Fill schedule holes", "Rebalance staff", "Escalate production risk"],
     modulesInFocus: ["Practice intelligence and analytics", "Scheduling, intake, and forms", "Rooms", "Telephony and AI phone", "Reputation management"],
   },
+  marketing_growth: {
+    role: "marketing_growth",
+    title: "Growth and reputation workday",
+    summary: "Marketing sees review recovery, review request readiness, AI Studio drafts, campaign audiences, Local SEO, AI SEO, listing health, and attribution back to booked care.",
+    huddleFocus: "Turn patient experience into growth without creating compliance risk: resolve unhappy feedback first, approve safe AI content, fix local visibility gaps, and connect every campaign to booked appointments.",
+    workAreas: [
+      { title: "Reputation and service recovery", system: "Reputation management", status: "Setup required", route: "/app/work/growth-reputation?role=marketing_growth", primaryWork: "Work review requests, negative feedback, service recovery holds, AI response drafts, and review velocity by location.", nextAction: "Connect review sources, consent, and approval rules." },
+      { title: "AI Studio campaign queue", system: "AI Studio", status: "Approval locked", route: "/app/work/marketing-studio?role=marketing_growth", primaryWork: "Draft campaigns, GBP posts, local page content, patient education, FAQs, and review replies behind approval.", nextAction: "Approve brand voice, PHI boundaries, and publishing policy." },
+      { title: "Local SEO and AI SEO", system: "Local search", status: "Setup required", route: "/app/work/local-ai-seo?role=marketing_growth", primaryWork: "Fix listing gaps, GBP readiness, service-category coverage, local pages, and AI search visibility risks.", nextAction: "Connect listings, GBP, website, and AI visibility sources." },
+      { title: "Growth attribution", system: "Marketing analytics", status: "Setup required", route: "/app/work/marketing-studio?role=marketing_growth", primaryWork: "Tie campaigns, calls, reviews, local pages, and source channels to booked patients, treatment acceptance, and production.", nextAction: "Connect PMS, phone, reputation, and web analytics feeds." },
+    ],
+    kpis: [
+      { label: "Review opportunities", value: "18", detail: "Post-visit patients eligible for request after consent and recovery checks", tone: "green" },
+      { label: "Service recovery holds", value: "2", detail: "Automation paused until manager completes patient recovery", tone: "red" },
+      { label: "AI drafts pending", value: "7", detail: "Review replies, GBP posts, implant page, and perio campaign need approval", tone: "amber" },
+      { label: "Local visibility gaps", value: "14", detail: "Listings, categories, service pages, photos, and AI search sources need cleanup", tone: "amber" },
+    ],
+    workQueues: [
+      {
+        title: "Reputation and recovery",
+        items: [
+          { label: "Aurora negative feedback", detail: "Long-wait complaint must be recovered before review request automation resumes.", meta: "Service recovery", priority: "Today" },
+          { label: "Review batch ready", detail: "18 patients qualify for review request after consent and appointment outcome checks.", meta: "Reviews", priority: "Today" },
+          { label: "AI reply approvals", detail: "Three responses are drafted but need owner/compliance approval before posting.", meta: "AI Studio", priority: "Blocked" },
+        ],
+      },
+      {
+        title: "Search and campaigns",
+        items: [
+          { label: "Implant visibility gap", detail: "Aurora does not have enough local/category/source evidence for implant searches.", meta: "Local SEO", priority: "Today" },
+          { label: "Perio reactivation", detail: "42-patient audience needs exclusions and PHI-safe messaging before launch.", meta: "Campaign", priority: "Next" },
+          { label: "AI search sentiment issue", detail: "AI search summaries over-weight wait-time complaints for one location.", meta: "AI SEO", priority: "Watch" },
+        ],
+      },
+    ],
+    decisions: ["Approve safe AI drafts", "Assign recovery owner", "Stage listing corrections", "Prepare campaign audience", "Validate growth attribution"],
+    modulesInFocus: ["Reputation management", "Digital marketing, Local SEO, and AI SEO", "AI Studio", "Telephony and AI phone", "Practice intelligence and analytics"],
+  },
   dso_regional: {
     role: "dso_regional",
     title: "Regional performance control",
     summary: "The regional manager sees location comparisons, rollout status, production outliers, RCM backlog, reputation risk, and playbook adoption.",
     huddleFocus: "Find the outliers: which location is behind goal, which queue is overloaded, where patient access is leaking, and where standards are not being followed.",
     workAreas: [
-      { title: "Location scorecards", system: "Practice intelligence", status: "Open", route: "/app/modules?role=dso_regional#analytics", primaryWork: "Compare production, collections, provider utilization, hygiene, phones, reviews, and RCM backlog by location.", nextAction: "Use source-backed data once live connectors are enabled." },
-      { title: "Rollout and connector readiness", system: "Integration marketplace", status: "Setup required", route: "/app/modules?role=dso_regional#marketplace", primaryWork: "Track PMS, payer, phone, payment, imaging, and marketing connector setup across locations.", nextAction: "Approve connector setup and owner handoffs." },
+      { title: "Location scorecards", system: "Practice intelligence", status: "Open", route: "/app/work/growth-reputation?role=dso_regional", primaryWork: "Compare production, collections, provider utilization, hygiene, phones, reviews, and RCM backlog by location.", nextAction: "Use source-backed data once live connectors are enabled." },
+      { title: "Rollout and connector readiness", system: "Integration marketplace", status: "Setup required", route: "/app/work/connector-setup?role=dso_regional", primaryWork: "Track PMS, payer, phone, payment, imaging, and marketing connector setup across locations.", nextAction: "Approve connector setup and owner handoffs." },
       { title: "Playbook adoption", system: "Work rules", status: "Open", route: "/app/workflows?role=dso_regional", primaryWork: "Review standards for RCM attachments, phone recovery, hygiene reappointment, and service recovery.", nextAction: "Assign locations that are off standard." },
     ],
     kpis: [
@@ -1115,8 +1163,8 @@ export const dailyDashboards: Record<RoleKey, DailyDashboard> = {
     huddleFocus: "Control risk before automation expands: who accessed what, which AI action needs approval, what connector failed, and what evidence must be retained.",
     workAreas: [
       { title: "Audit event review", system: "Security and audit", status: "Open", route: "/app/audit?role=compliance_admin", primaryWork: "Review allowed, blocked, and read-only events by actor, role, target, and data class.", nextAction: "Investigate blocked access and export evidence." },
-      { title: "AI approval policy", system: "AI Studio and clinical AI", status: "Approval locked", route: "/app/modules?role=compliance_admin#ai_studio", primaryWork: "Approve prompt policy, PHI boundaries, clinical claims, content rules, and writeback gates.", nextAction: "Configure AI approval rules before automation." },
-      { title: "Consent and support access", system: "Communications and support", status: "Setup required", route: "/app/modules?role=compliance_admin#security_compliance", primaryWork: "Monitor SMS/call consent, break-glass support access, and credential policy.", nextAction: "Connect identity, consent ledger, and support-access policy." },
+      { title: "AI approval policy", system: "AI Studio and clinical AI", status: "Approval locked", route: "/app/work/marketing-studio?role=compliance_admin", primaryWork: "Approve prompt policy, PHI boundaries, clinical claims, content rules, and writeback gates.", nextAction: "Configure AI approval rules before automation." },
+      { title: "Consent and support access", system: "Communications and support", status: "Setup required", route: "/app/work/connector-setup?role=compliance_admin", primaryWork: "Monitor SMS/call consent, break-glass support access, and credential policy.", nextAction: "Connect identity, consent ledger, and support-access policy." },
     ],
     kpis: [
       { label: "Blocked access attempts", value: "3", detail: "Clinical AI and patient PHI outside role", tone: "red" },
@@ -1151,9 +1199,9 @@ export const dailyDashboards: Record<RoleKey, DailyDashboard> = {
     summary: "Support sees connector setup health, environment readiness, support access status, deployment health, and tenant configuration issues without owning practice work.",
     huddleFocus: "Keep production setup clean: services healthy, connectors staged, no unauthorized PHI access, and no broken setup flows.",
     workAreas: [
-      { title: "Connector setup workbench", system: "Integration marketplace", status: "Setup required", route: "/app/modules?role=support_admin#marketplace", primaryWork: "Stage PMS, payer, phone, payment, imaging, lab, eRx, and marketing connector setup checks.", nextAction: "Build smoke tests and credential vault workflow." },
-      { title: "Tenant setup checklist", system: "Platform setup", status: "Open", route: "/app/modules?role=support_admin#security_compliance", primaryWork: "Review locations, roles, work rules, audit controls, and production readiness tasks.", nextAction: "Confirm tenant setup with owner before live PHI." },
-      { title: "Deployment health", system: "Infrastructure", status: "Open", route: "/app/modules?role=support_admin#security_compliance", primaryWork: "Verify service health, deploy status, environment variables, and isolated DentalRCM service.", nextAction: "Fix CI Node runtime deprecation before runner default changes." },
+      { title: "Connector setup workbench", system: "Integration marketplace", status: "Setup required", route: "/app/work/connector-setup?role=support_admin", primaryWork: "Stage PMS, payer, phone, payment, imaging, lab, eRx, and marketing connector setup checks.", nextAction: "Build smoke tests and credential vault workflow." },
+      { title: "Tenant setup checklist", system: "Platform setup", status: "Open", route: "/app/work/connector-setup?role=support_admin", primaryWork: "Review locations, roles, work rules, audit controls, and production readiness tasks.", nextAction: "Confirm tenant setup with owner before live PHI." },
+      { title: "Deployment health", system: "Infrastructure", status: "Open", route: "/app/work/connector-setup?role=support_admin", primaryWork: "Verify service health, deploy status, environment variables, and isolated DentalRCM service.", nextAction: "Fix CI Node runtime deprecation before runner default changes." },
     ],
     kpis: [
       { label: "Service health", value: "OK", detail: "1DentalAI and isolated DentalRCM health checks passing", tone: "green" },

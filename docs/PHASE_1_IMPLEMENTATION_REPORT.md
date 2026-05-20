@@ -113,3 +113,5 @@ Screenshots captured:
 ## Notes
 
 The product foundation uses typed synthetic demo data only. It is ready for the next phase plan, but the next phase still requires fresh research and Gaurav approval before coding.
+
+Dashboard work-entry cards such as "Where to work today" are now treated as temporary navigation/orientation only. The next approved product phase must replace them with real role-specific workbench areas for PMS schedule, patient chart, perio charting, RCM queues, phone inbox, forms/intake, treatment plans, imaging, labs/referrals, rooms/chairs, reputation management, AI Studio, Local SEO, AI SEO, campaign/growth marketing, and connector setup. Those workbenches must contain role-owned queues, actionable buttons, permission checks, truthful setup or blocked states, audit trail, and clear next actions.
