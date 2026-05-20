@@ -33,9 +33,9 @@ export default async function AppOverview({
   return (
     <FoundationShell active="/app" roleKey={role.key}>
       <PageHeader
-        eyebrow="Phase 1 foundation"
-        title="The operating base for every dental workflow."
-        body="This demo foundation shows the global platform view and the minute practice details: locations, rooms, chairs, staff roles, permissions, workflow templates, module readiness, and audit activity."
+        eyebrow="Practice command center"
+        title="Run the day from production, schedule, rooms, and revenue."
+        body="This demo shows the first operating view for 1DentalAI: practice performance, location capacity, chair flow, team access, configured work rules, and audit history. No live patient data is connected yet."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app" />
 
@@ -43,8 +43,8 @@ export default async function AppOverview({
         {[
           ["Practice", foundationPractice.name, foundationPractice.mode],
           ["Locations", String(locations.length), "multi-site"],
-          ["Team roles", String(roles.length), "RBAC"],
-          ["Booked revenue", formatCurrency(totalBookedRevenue), "synthetic demo"],
+          ["Team roles", String(roles.length), "role-based access"],
+          ["Booked revenue", formatCurrency(totalBookedRevenue), "demo data"],
         ].map(([label, value, detail]) => (
           <div key={label} className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-sm">
             <p className="text-sm font-medium text-neutral-500">{label}</p>
@@ -58,7 +58,7 @@ export default async function AppOverview({
         <div className="rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <p className="text-sm font-semibold text-cyan-700">Current role lens</p>
+              <p className="text-sm font-semibold text-cyan-700">Viewing as</p>
               <h2 className="mt-2 text-2xl font-semibold text-neutral-950">{role.title}</h2>
               <p className="mt-2 text-sm leading-6 text-neutral-600">{role.description}</p>
             </div>
@@ -71,7 +71,7 @@ export default async function AppOverview({
                   {scope.replaceAll("_", " ")}
                 </p>
                 <p className="mt-1 text-xs leading-5 text-neutral-500">
-                  Allowed for this role in the synthetic foundation model.
+                  Allowed for this role in the demo access model.
                 </p>
               </div>
             ))}
@@ -89,10 +89,10 @@ export default async function AppOverview({
         <div className="rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <p className="text-sm font-semibold text-cyan-700">Practice performance pulse</p>
+              <p className="text-sm font-semibold text-cyan-700">Practice performance</p>
               <h2 className="mt-2 text-2xl font-semibold text-neutral-950">Revenue, schedule, and production mix.</h2>
               <p className="mt-3 text-sm leading-6 text-neutral-600">
-                Synthetic demo analytics, derived from foundation data. This is the kind of daily owner view the platform will harden with live PMS, payment, and RCM sources in later phases.
+                Demo analytics for the owner and manager view. Live PMS, payment, and RCM feeds will replace this sample data in the connector phase.
               </p>
             </div>
             <StatusPill tone="cyan">{totalAppointments} visits</StatusPill>
@@ -148,9 +148,9 @@ export default async function AppOverview({
       </section>
 
       <section className="mt-6 grid gap-6 lg:grid-cols-3">
-        <FoundationLink href={`/app/rooms?role=${role.key}`} title="Minute view" body="Inspect room, operatory, chair status, provider assignment, turnover, and blocked-chair reasons." />
-        <FoundationLink href={`/app/workflows?role=${role.key}`} title="Workflow view" body={`${workflows.length} versioned workflow definitions show what can be customized and what is locked.`} />
-        <FoundationLink href={`/app/modules?role=${role.key}`} title="Module access view" body={`${visibleModules.length} modules visible to ${role.title}; ${blockedModules.length} hidden by access policy.`} />
+        <FoundationLink href={`/app/rooms?role=${role.key}`} title="Room and chair view" body="Inspect operatory status, provider assignment, turnover, emergency capacity, and blocked-chair reasons." />
+        <FoundationLink href={`/app/workflows?role=${role.key}`} title="Work rules" body={`${workflows.length} practice workflows show what each location can adjust and what requires approval.`} />
+        <FoundationLink href={`/app/modules?role=${role.key}`} title="Product areas" body={`${visibleModules.length} areas visible to ${role.title}; ${blockedModules.length} hidden by access controls.`} />
       </section>
     </FoundationShell>
   );

@@ -15,9 +15,9 @@ export default async function AuditPage({
   return (
     <FoundationShell active="/app/audit" roleKey={role.key}>
       <PageHeader
-        eyebrow="Audit foundation"
+        eyebrow="Access and audit"
         title="Access outcomes must be visible from day one."
-        body="This synthetic audit trail shows allowed, blocked, and read-only outcomes. Future live support access, PHI access, clinical signoff, payer actions, and writebacks will use the same audit posture."
+        body="This demo audit trail shows who viewed or attempted work, what they touched, and whether the action was allowed, blocked, or read-only. Live support access, PHI access, clinical signoff, payer actions, and writebacks will use the same accountability model."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/audit" />
 

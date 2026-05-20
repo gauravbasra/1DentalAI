@@ -49,8 +49,8 @@ const operatingSurfaces = [
     body: "AI can draft and recommend, but the product is built around controlled actions: approve, edit, reject, assign, retry, or escalate.",
   },
   {
-    title: "The connector control plane",
-    body: "PMS, payer, phone, payment, reputation, CRM, and clinical integrations are governed by capability maps, smoke tests, cost telemetry, and fallback states.",
+    title: "Integration management",
+    body: "Practice systems connect through setup checks, health monitoring, cost visibility, approval rules, and clear manual work queues when automation is not available.",
   },
 ];
 
@@ -60,7 +60,7 @@ const outcomes = [
   ["Billing", "Fewer invisible claim blockers, better payer follow-up, stronger cash visibility."],
   ["Providers", "Better encounter context, faster note drafting, safer clinical writeback paths."],
   ["Owners", "Higher productivity without turning the practice into a maze of disconnected apps."],
-  ["DSOs", "Central visibility across locations, policies, templates, queues, and rollout readiness."],
+  ["DSOs", "Central visibility across locations, playbooks, approvals, queues, and launch status."],
 ];
 
 export default function ProductPage() {
@@ -102,8 +102,8 @@ export default function ProductPage() {
         <section className="bg-[#f5f5f7] px-6 py-24 sm:px-8">
           <SectionIntro
             eyebrow="How it works"
-            title="Not a dashboard. A workflow engine."
-            body="The product is designed to notice work, understand what it means, propose the next step, and keep the team in control before anything leaves the system."
+            title="Not another dashboard. A working queue for the practice."
+            body="The product is designed to notice work, understand what it means, propose the next step, and keep the team in control before messages, claims, payments, or clinical updates leave the system."
           />
           <div className="mx-auto mt-14 grid max-w-7xl gap-5 md:grid-cols-2 lg:grid-cols-4">
             {workflow.map((item) => (
@@ -184,9 +184,9 @@ export default function ProductPage() {
           </h2>
           <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-neutral-600">
             1DentalAI is designed around an owned connector platform: smart
-            routing, capability maps, cost controls, approval policies, direct
-            integrations, smoke tests, and fallback workflows when a system or
-            payer cannot support real-time automation.
+            system selection, setup checks, cost controls, approval rules, direct
+            integrations, health monitoring, and staff work queues when a system
+            or payer cannot support real-time automation.
           </p>
           <Link
             href="/contact"

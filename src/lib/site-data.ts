@@ -32,7 +32,7 @@ export const productPillars = [
   {
     title: "Universal connectors",
     eyebrow: "PMS, EHR, CRM, payers",
-    body: "Connect PMS, payer, phone, payment, CRM, reputation, and clinical systems through owned routing, capability checks, and approval controls.",
+    body: "Connect PMS, payer, phone, payment, CRM, reputation, and clinical systems with setup checks, health monitoring, cost visibility, and approval controls.",
   },
   {
     title: "Practice intelligence",
@@ -70,7 +70,7 @@ export const useCases = [
   {
     title: "Run every location with one operating system",
     role: "DSO leadership",
-    body: "Central teams see location performance, template adoption, approvals, inboxes, billing queues, and rollout readiness in one place.",
+    body: "Central teams see location performance, approved playbook adoption, approvals, inboxes, billing queues, and launch status in one place.",
   },
 ];
 
@@ -102,7 +102,7 @@ export const resources = [
   {
     title: "PMS and payer connector strategy",
     type: "Technical brief",
-    body: "Why 1DentalAI uses owned routers, capability maps, approval gates, and cost telemetry around vendor APIs.",
+    body: "How 1DentalAI keeps integrations accountable with setup checks, approval gates, cost visibility, and clear manual work queues when automation is limited.",
   },
   {
     title: "AI governance for dental practices",
@@ -119,7 +119,7 @@ export const resources = [
 export const stats = [
   { value: "1", label: "Patient timeline from first call to final payment" },
   { value: "24/7", label: "AI-assisted capture for calls, texts, and requests" },
-  { value: "270/271", label: "Eligibility evidence as a workflow foundation" },
+  { value: "270/271", label: "Eligibility evidence captured before the appointment" },
   { value: "0", label: "Placeholder workflows allowed in production" },
 ];
 

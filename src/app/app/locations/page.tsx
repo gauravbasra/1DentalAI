@@ -19,7 +19,7 @@ export default async function LocationsPage({
       <PageHeader
         eyebrow="Locations"
         title="Every practice location has capacity, people, and permissions."
-        body="Phase 1 models the practice at the location level so later PMS, phone, RCM, clinical, and growth workflows can stay tenant- and location-aware."
+        body="Each location needs its own chairs, providers, staff coverage, schedules, access controls, production targets, and patient flow. This demo keeps those views separated by practice site."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/locations" />
 
@@ -56,9 +56,9 @@ export default async function LocationsPage({
             <Metric label="Chair use" value={`${activeLocation.chairUtilization}%`} />
           </div>
           <div className="mt-6 rounded-2xl bg-neutral-50 p-4">
-            <p className="text-sm font-semibold text-neutral-950">Access posture</p>
+            <p className="text-sm font-semibold text-neutral-950">Access for this location</p>
             <p className="mt-2 text-sm leading-6 text-neutral-600">
-              {role.title} is viewing a synthetic location summary. Future live access will be limited by `LocationAccess`, `ModuleAccess`, and data-class policy.
+              {role.title} is viewing demo location data. Live access will be limited by assigned location, job role, and the type of patient or financial information needed for that job.
             </p>
           </div>
         </div>
@@ -68,7 +68,7 @@ export default async function LocationsPage({
           <div className="mt-5 grid gap-4">
             <div className="rounded-2xl bg-neutral-50 p-4">
               <p className="text-sm font-semibold text-neutral-950">Chairs at this location</p>
-              <p className="mt-2 text-sm text-neutral-600">{locationChairs.length} modeled chairs: {locationChairs.map((chair) => chair.chair).join(", ") || "none yet"}</p>
+              <p className="mt-2 text-sm text-neutral-600">{locationChairs.length} chairs in this demo: {locationChairs.map((chair) => chair.chair).join(", ") || "none yet"}</p>
             </div>
             <div className="rounded-2xl bg-neutral-50 p-4">
               <p className="text-sm font-semibold text-neutral-950">Assigned staff</p>

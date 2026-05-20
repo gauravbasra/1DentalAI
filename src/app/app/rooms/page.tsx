@@ -27,7 +27,7 @@ export default async function RoomsPage({
       <PageHeader
         eyebrow="Rooms, operatories, chairs"
         title="Capacity is clinical, operational, and financial."
-        body="The foundation tracks chair occupancy, room turnover, provider/RDH assignment, blocked reasons, and emergency slot readiness before scheduling and PMS integrations are added."
+        body="Chair time drives access, production, patient experience, and staffing. This demo tracks occupancy, turnover, provider and RDH assignment, blocked rooms, and emergency openings before live scheduling is connected."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/rooms" />
 

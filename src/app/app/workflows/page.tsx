@@ -16,14 +16,14 @@ export default async function WorkflowsPage({
   return (
     <FoundationShell active="/app/workflows" roleKey={role.key}>
       <PageHeader
-        eyebrow="Workflow configuration"
-        title="Opinionated defaults, tenant-safe customization."
-        body="Phase 1 does not execute these workflows yet. It establishes versioned definitions, configurable controls, and locked safety rules so future phases can build without hardcoding every practice."
+        eyebrow="Work rules"
+        title="Standard dental workflows that each practice can adapt."
+        body="These demo workflows show how 1DentalAI will manage real handoffs: who owns the work, what each location can adjust, and which actions require approval before they affect patients, claims, or clinical records."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/workflows" />
 
       <div className="mt-6 rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Domain filter</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Workflow area</p>
         <div className="mt-3 flex gap-2 overflow-x-auto">
           {[{ id: "all", label: "All domains" }, ...domains.map((item) => ({ id: item, label: item }))].map((item) => (
             <Link
@@ -53,10 +53,10 @@ export default async function WorkflowsPage({
               </div>
             </div>
             <div className="mt-5 grid gap-4 lg:grid-cols-3">
-              <WorkflowList title="Tenant configurable" items={workflow.configurable} />
-              <WorkflowList title="Locked for safety" items={workflow.lockedControls} />
+              <WorkflowList title="Practice settings" items={workflow.configurable} />
+              <WorkflowList title="Requires approval" items={workflow.lockedControls} />
               <div className="rounded-2xl bg-amber-50 p-4">
-                <p className="text-sm font-semibold text-amber-950">Dependency</p>
+                <p className="text-sm font-semibold text-amber-950">Needed before this goes live</p>
                 <p className="mt-2 text-sm leading-6 text-amber-900">{workflow.nextPhaseDependency}</p>
               </div>
             </div>

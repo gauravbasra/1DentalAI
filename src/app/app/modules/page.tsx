@@ -22,9 +22,9 @@ export default async function ModulesPage({
   return (
     <FoundationShell active="/app/modules" roleKey={role.key}>
       <PageHeader
-        eyebrow="Module readiness"
-        title="Global product map, truthful states only."
-        body="Telephony, reputation, AI SEO, Local SEO, AI Studio, RCM, clinical AI, imaging, eRx, labs, memberships, and revenue integrity have platform places now, but no fake runtime."
+        eyebrow="Product areas"
+        title="What is available, what needs setup, and what needs approval."
+        body="This view shows the major 1DentalAI product areas in plain practice terms. It separates demo-ready structure from work that still needs live connections, approvals, and patient-safe release."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/modules" />
 
@@ -34,7 +34,7 @@ export default async function ModulesPage({
           {[
             ["visible", "Visible to role"],
             ["hidden", "Hidden by access"],
-            ["all", "All modules"],
+            ["all", "All product areas"],
           ].map(([id, label]) => (
             <Link
               key={id}
@@ -68,9 +68,9 @@ export default async function ModulesPage({
               </StatusPill>
             </div>
             <div className="mt-5 space-y-3">
-              <Readiness label="Foundation ready" body={module.foundationReady} />
-              <Readiness label="Setup required" body={module.setupRequired} />
-              <Readiness label="Future phase" body={module.futurePhase} />
+              <Readiness label="Available in this demo" body={module.foundationReady} />
+              <Readiness label="Needed before live use" body={module.setupRequired} />
+              <Readiness label="Planned build" body={module.futurePhase} />
             </div>
           </article>
         ))}

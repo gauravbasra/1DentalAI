@@ -11,8 +11,8 @@ const appNav = [
   { href: "/app/locations", label: "Locations" },
   { href: "/app/team", label: "Team" },
   { href: "/app/rooms", label: "Rooms" },
-  { href: "/app/modules", label: "Modules" },
-  { href: "/app/workflows", label: "Workflows" },
+  { href: "/app/modules", label: "Product Areas" },
+  { href: "/app/workflows", label: "Work Rules" },
   { href: "/app/audit", label: "Audit" },
 ];
 
@@ -73,7 +73,7 @@ export function FoundationShell({
       </header>
       <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8">{children}</main>
       <footer className="mx-auto max-w-7xl px-5 pb-8 text-xs text-neutral-500 sm:px-8">
-        Phase 1 foundation only. No live PHI, no vendor calls, no production writeback.
+        Demo practice data only. No live patients, no vendor calls, no production writeback.
       </footer>
     </div>
   );

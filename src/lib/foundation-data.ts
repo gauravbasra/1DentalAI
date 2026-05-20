@@ -141,7 +141,7 @@ export const foundationPractice = {
   name: "Summit Dental Group",
   mode: "DEMO" as EnvironmentMode,
   dso: "1DentalAI Demo DSO",
-  label: "Synthetic demo workspace - no live PHI",
+  label: "Demo practice data - no live patients",
 };
 
 export const locations: PracticeLocation[] = [
@@ -181,7 +181,7 @@ export const roles: FoundationRole[] = [
   {
     key: "owner_dentist",
     title: "Owner Dentist",
-    description: "Sees clinical, operational, financial, compliance, and DSO-level foundation views.",
+    description: "Sees practice production, schedule health, clinical operations, collections, compliance, and multi-location rollups.",
     scopes: ["location", "module", "patient_phi", "clinical", "financial", "payer_rcm", "communications", "settings_admin", "audit_security", "ai_governance"],
     hiddenByDefault: [],
     sampleUser: "Dr. Aisha Patel",
@@ -213,7 +213,7 @@ export const roles: FoundationRole[] = [
   {
     key: "front_desk",
     title: "Front Desk",
-    description: "Sees scheduling, check-in, communications, forms, reminders, and setup-required patient front-door modules.",
+    description: "Sees scheduling, check-in, patient messages, forms, reminders, and follow-up work for the front office.",
     scopes: ["location", "module", "communications"],
     hiddenByDefault: ["Clinical note drafts", "Provider compensation", "Security audit"],
     sampleUser: "Emma Brooks",
@@ -237,7 +237,7 @@ export const roles: FoundationRole[] = [
   {
     key: "practice_manager",
     title: "Practice Manager",
-    description: "Sees daily operations, staffing, rooms, modules, audit activity, and practice-level readiness.",
+    description: "Sees daily operations, staffing, rooms, access controls, audit activity, and practice performance.",
     scopes: ["location", "module", "financial", "payer_rcm", "communications", "settings_admin", "audit_security"],
     hiddenByDefault: ["Clinical note signoff"],
     sampleUser: "Grace Morgan",
@@ -245,7 +245,7 @@ export const roles: FoundationRole[] = [
   {
     key: "dso_regional",
     title: "DSO Regional Manager",
-    description: "Sees rollups, location readiness, staffing/utilization, and module adoption with minimized PHI.",
+    description: "Sees location rollups, staffing, chair utilization, production trends, and rollout status with minimized PHI.",
     scopes: ["location", "module", "financial", "payer_rcm", "audit_security"],
     hiddenByDefault: ["Patient-level PHI by default", "Clinical drafts"],
     sampleUser: "Jordan Ellis",
@@ -261,7 +261,7 @@ export const roles: FoundationRole[] = [
   {
     key: "support_admin",
     title: "Support Admin",
-    description: "Special audited support scope with no default practice workflow ownership.",
+    description: "Audited support access for configuration and troubleshooting, with no default ownership of practice work.",
     scopes: ["audit_security", "settings_admin"],
     hiddenByDefault: ["Patient PHI unless break-glass is approved", "Financial write actions"],
     sampleUser: "1DentalAI Support",
@@ -349,13 +349,13 @@ export const chairs: Chair[] = [
 export const modules: FeatureModule[] = [
   {
     id: "pms",
-    name: "PMS-grade practice layer",
-    suite: "Foundation",
+    name: "Practice management system",
+    suite: "Practice operations",
     status: "setup_required",
     visibleTo: ["owner_dentist", "practice_manager", "dso_regional", "support_admin"],
-    foundationReady: "Practice, location, team, room, chair, role, and module registry are available in demo foundation.",
-    setupRequired: "Production PMS connector, database persistence, and writeback approval policy are future phases.",
-    futurePhase: "Phase 2 connector governance and Phase 3 canonical dental data.",
+    foundationReady: "Practice locations, team roles, rooms, chairs, access groups, and daily operating views are modeled in the demo.",
+    setupRequired: "Live PMS sync, permanent database storage, patient records, scheduling, and approved writeback are not enabled yet.",
+    futurePhase: "Next build: connector setup, live dental data model, and controlled PMS writeback.",
   },
   {
     id: "telephony",
@@ -363,9 +363,9 @@ export const modules: FeatureModule[] = [
     suite: "Communications",
     status: "setup_required",
     visibleTo: ["owner_dentist", "front_desk", "practice_manager", "compliance_admin"],
-    foundationReady: "Role access, location scope, emergency slot context, and consent data classes are modeled.",
-    setupRequired: "Phone numbers, call routing, AI receptionist, transcription, SMS consent, and provider escalation need communications phase approval.",
-    futurePhase: "Communications phase with Outreachhubphonesystem workflow reuse.",
+    foundationReady: "Front desk roles, location coverage, emergency slot context, and consent boundaries are modeled.",
+    setupRequired: "Practice phone numbers, call routing, AI receptionist scripts, transcription, SMS consent, and provider escalation are not connected yet.",
+    futurePhase: "Next build: phone, text, chat, missed-call recovery, and AI receptionist using the existing phone app patterns.",
   },
   {
     id: "reputation",
@@ -373,9 +373,9 @@ export const modules: FeatureModule[] = [
     suite: "Growth",
     status: "setup_required",
     visibleTo: ["owner_dentist", "practice_manager", "front_desk", "treatment_coordinator"],
-    foundationReady: "Module access and workflow template slots exist.",
-    setupRequired: "Review platform connectors, service recovery workflow, AI response approvals, and listing sync are future scope.",
-    futurePhase: "Growth and reputation phase.",
+    foundationReady: "Practice roles and follow-up ownership are ready for review requests and service recovery queues.",
+    setupRequired: "Review site connections, response approvals, unhappy-patient recovery, and listing updates are not connected yet.",
+    futurePhase: "Next build: reviews, service recovery, surveys, listing updates, and reputation reporting.",
   },
   {
     id: "local_seo",
@@ -383,19 +383,19 @@ export const modules: FeatureModule[] = [
     suite: "Growth",
     status: "setup_required",
     visibleTo: ["owner_dentist", "practice_manager", "dso_regional"],
-    foundationReady: "Location and DSO hierarchy exists for future listing and page strategy.",
-    setupRequired: "GBP/listing connectors, local page workflow, AI search visibility, and attribution are future scope.",
-    futurePhase: "Growth marketplace phase.",
+    foundationReady: "Locations, providers, and service areas are available for future listing and local-search work.",
+    setupRequired: "Listing connections, location-page publishing, AI search visibility, and attribution reporting are not connected yet.",
+    futurePhase: "Next build: local listings, local pages, AI search monitoring, and booked-production attribution.",
   },
   {
     id: "ai_studio",
     name: "AI Studio",
-    suite: "AI governance",
+    suite: "AI controls",
     status: "setup_required",
     visibleTo: ["owner_dentist", "practice_manager", "compliance_admin", "treatment_coordinator"],
-    foundationReady: "AI governance scope and workflow template objects exist.",
-    setupRequired: "Brand voice, prompt/tool policies, content approvals, campaign generation, and audit are future scope.",
-    futurePhase: "AI governance and growth studio phase.",
+    foundationReady: "AI access roles and approval boundaries are modeled for practice-safe content and automation.",
+    setupRequired: "Brand voice, approved prompts, content review, campaign generation, and audit reports are not connected yet.",
+    futurePhase: "Next build: approved AI content, patient-safe messaging, campaign workflows, and audit reporting.",
   },
   {
     id: "rcm",
@@ -403,9 +403,9 @@ export const modules: FeatureModule[] = [
     suite: "Revenue",
     status: "setup_required",
     visibleTo: ["owner_dentist", "billing_rcm", "practice_manager", "dso_regional"],
-    foundationReady: "Biller role, payer/financial scopes, and audit foundation exist.",
-    setupRequired: "Payer routing, eligibility, claims, EOB/ERA, denials, credentialing, and approval policies are future scope.",
-    futurePhase: "RCM and payer phase with DentalRCM research validation.",
+    foundationReady: "Billing roles, financial access, payer work ownership, and audit history are modeled.",
+    setupRequired: "Eligibility, benefits, claims, attachments, EOB/ERA, denials, credentialing, and payer follow-up are not connected yet.",
+    futurePhase: "Next build: insurance verification, claims, payer follow-up, payment posting, and credentialing workflows.",
   },
   {
     id: "revenue_integrity",
@@ -413,29 +413,29 @@ export const modules: FeatureModule[] = [
     suite: "Revenue",
     status: "setup_required",
     visibleTo: ["owner_dentist", "billing_rcm", "practice_manager", "dso_regional"],
-    foundationReady: "Financial and payer access scopes exist.",
-    setupRequired: "Historical claim audits, underpayment detection, contract variance, and recovery queues need RCM phase approval.",
-    futurePhase: "Revenue integrity phase.",
+    foundationReady: "Financial roles and payer-work access are modeled for leakage review.",
+    setupRequired: "Past-claim audits, underpayment detection, contract variance, missed billing, and recovery queues are not connected yet.",
+    futurePhase: "Next build: revenue leakage detection, recovery worklists, and owner-level revenue reporting.",
   },
   {
     id: "clinical_ai",
     name: "Clinical AI and scribe",
-    suite: "Clinical",
+    suite: "Clinical care",
     status: "locked_by_policy",
     visibleTo: ["owner_dentist", "associate_provider", "rdh", "compliance_admin"],
-    foundationReady: "Clinical data-class and provider role boundaries exist.",
-    setupRequired: "AI scribe, clinical drafts, provider signoff, source evidence, and writeback are future scope.",
-    futurePhase: "Clinical AI phase.",
+    foundationReady: "Provider roles, clinical access boundaries, and approval requirements are modeled.",
+    setupRequired: "AI scribe, chart notes, provider signoff, source evidence, and EHR/PMS writeback are not connected yet.",
+    futurePhase: "Next build: scribing, charting, perio support, provider review, and signed clinical writeback.",
   },
   {
     id: "imaging",
     name: "Imaging AI and CBCT",
-    suite: "Clinical",
+    suite: "Clinical care",
     status: "setup_required",
     visibleTo: ["owner_dentist", "associate_provider", "rdh", "dental_assistant"],
-    foundationReady: "Clinical roles and room/chair context exist.",
-    setupRequired: "Imaging connectors, DICOM storage, findings, overlays, and clinician review are future scope.",
-    futurePhase: "Imaging phase.",
+    foundationReady: "Clinical roles, room context, and provider review boundaries are modeled.",
+    setupRequired: "X-ray/CBCT connections, DICOM storage, AI findings, overlays, measurements, and clinician review are not connected yet.",
+    futurePhase: "Next build: imaging import, AI-assisted findings, evidence capture, and claim-ready attachments.",
   },
   {
     id: "financial_products",
@@ -443,9 +443,9 @@ export const modules: FeatureModule[] = [
     suite: "Patient financials",
     status: "setup_required",
     visibleTo: ["owner_dentist", "treatment_coordinator", "practice_manager", "billing_rcm"],
-    foundationReady: "Financial access scopes and treatment coordinator role exist.",
-    setupRequired: "Financing offers, membership enrollment, recurring billing, and agreements are future scope.",
-    futurePhase: "Patient financial products phase.",
+    foundationReady: "Treatment coordinator and financial access roles are modeled.",
+    setupRequired: "Financing offers, in-house payment plans, memberships, recurring billing, signed agreements, and failed-payment recovery are not connected yet.",
+    futurePhase: "Next build: financing, membership plans, practice plans, payment schedules, and production reporting.",
   },
 ];
 
@@ -453,12 +453,12 @@ export const workflows: WorkflowDefinition[] = [
   {
     id: "wf_emergency_triage",
     name: "Emergency triage intake",
-    domain: "Communications and doctor-owner safety",
+    domain: "Patient access and emergency care",
     version: "0.1-draft",
     inheritedFrom: "1DentalAI default",
-    configurable: ["front desk routing", "doctor callback owner", "same-day slot pool"],
-    lockedControls: ["red flag escalation", "AI cannot final-disposition medical emergencies"],
-    nextPhaseDependency: "Telephony and emergency workflow implementation",
+    configurable: ["front desk owner", "doctor callback provider", "same-day appointment pool"],
+    lockedControls: ["red flag escalation", "AI cannot make final medical decisions"],
+    nextPhaseDependency: "Requires live phone routing, consent checks, provider escalation, and schedule access.",
   },
   {
     id: "wf_chair_flow",
@@ -466,9 +466,9 @@ export const workflows: WorkflowDefinition[] = [
     domain: "Practice operations",
     version: "0.1-draft",
     inheritedFrom: "Location override",
-    configurable: ["turnover target minutes", "assistant assignment", "blocked-room reason list"],
-    lockedControls: ["audit chair blocks", "no PHI in public room boards"],
-    nextPhaseDependency: "Scheduling/PMS phase",
+    configurable: ["turnover target", "assistant assignment", "blocked-room reasons"],
+    lockedControls: ["blocked-chair history is recorded", "patient details stay off public room boards"],
+    nextPhaseDependency: "Requires live schedule, room assignments, provider calendars, and PMS sync.",
   },
   {
     id: "wf_rcm_leakage",
@@ -476,9 +476,9 @@ export const workflows: WorkflowDefinition[] = [
     domain: "Revenue",
     version: "0.1-draft",
     inheritedFrom: "DSO template",
-    configurable: ["minimum recoverable amount", "payer priority", "appeal owner"],
+    configurable: ["minimum recovery amount", "payer priority", "appeal owner"],
     lockedControls: ["write-off reversal requires approval", "payer-facing action requires approval"],
-    nextPhaseDependency: "RCM and revenue integrity phase",
+    nextPhaseDependency: "Requires live claims, payments, fee schedules, payer contracts, and EOB/ERA data.",
   },
   {
     id: "wf_review_recovery",
@@ -486,19 +486,19 @@ export const workflows: WorkflowDefinition[] = [
     domain: "Growth",
     version: "0.1-draft",
     inheritedFrom: "1DentalAI default",
-    configurable: ["review request timing", "negative feedback owner", "location-specific templates"],
+    configurable: ["review request timing", "unhappy-patient owner", "location-specific templates"],
     lockedControls: ["AI response requires approval", "respect opt-out and consent"],
-    nextPhaseDependency: "Reputation/local SEO phase",
+    nextPhaseDependency: "Requires review-site connections, consent, approved response templates, and patient follow-up queues.",
   },
   {
     id: "wf_ai_studio",
     name: "AI Studio content approval",
-    domain: "AI governance and growth",
+    domain: "AI content and growth",
     version: "0.1-draft",
     inheritedFrom: "DSO template",
     configurable: ["brand voice", "campaign approver", "channel templates"],
     lockedControls: ["no unapproved clinical claims", "PHI cannot enter marketing prompts"],
-    nextPhaseDependency: "AI Studio phase",
+    nextPhaseDependency: "Requires approved brand rules, channel connections, compliance review, and publishing permissions.",
   },
 ];
 
@@ -508,7 +508,7 @@ export const auditEvents: AuditEvent[] = [
     at: "2026-05-20T09:10:00-06:00",
     actor: "Dr. Aisha Patel",
     role: "owner_dentist",
-    action: "Viewed foundation dashboard",
+    action: "Viewed practice dashboard",
     target: "Summit Dental Group",
     dataClass: "settings_admin",
     outcome: "allowed",
@@ -518,7 +518,7 @@ export const auditEvents: AuditEvent[] = [
     at: "2026-05-20T09:12:00-06:00",
     actor: "Priya Shah",
     role: "billing_rcm",
-    action: "Opened revenue module readiness",
+    action: "Opened revenue operations view",
     target: "RCM and payer workflows",
     dataClass: "payer_rcm",
     outcome: "read_only",
@@ -598,7 +598,13 @@ export function getLocationName(locationId: string) {
 }
 
 export function statusLabel(status: ModuleStatus | ChairStatus) {
-  return status.replaceAll("_", " ");
+  const labels: Record<string, string> = {
+    foundation_ready: "ready for setup",
+    setup_required: "setup required",
+    locked_by_policy: "approval locked",
+    read_only: "read only",
+  };
+  return labels[status] ?? status.replaceAll("_", " ");
 }
 
 export function formatCurrency(value: number) {
