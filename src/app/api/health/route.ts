@@ -7,7 +7,7 @@ export function GET() {
     {
       ok: true,
       app: "1DentalAI",
-      phase: "phase-0-bootstrap",
+      phase: "phase-1-core-platform-foundation",
       dentalRcmPort3000Shared: false,
       servicePort: Number(process.env.PORT ?? 3001),
       timestamp: new Date().toISOString(),

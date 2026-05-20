@@ -19,12 +19,20 @@ export function SiteHeader() {
             </Link>
           ))}
         </div>
-        <Link
-          href="/contact"
-          className="rounded-full bg-neutral-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-cyan-700"
-        >
-          Early access
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/app"
+            className="hidden rounded-full border border-neutral-300 px-4 py-2 text-xs font-semibold text-neutral-800 transition hover:border-neutral-950 sm:inline-flex"
+          >
+            Open platform
+          </Link>
+          <Link
+            href="/contact"
+            className="rounded-full bg-neutral-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-cyan-700"
+          >
+            Early access
+          </Link>
+        </div>
       </nav>
       <div className="mx-auto flex max-w-7xl gap-5 overflow-x-auto px-5 pb-3 sm:px-8 lg:hidden">
         {navItems.map((item) => (
