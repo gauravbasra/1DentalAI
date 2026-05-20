@@ -5,8 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "next start -H 127.0.0.1 -p ${PORT:-3001}",
+    "lint": "eslint",
+    "check": "npm run lint && npm run build"
   },
   "dependencies": {
     "next": "16.2.6",

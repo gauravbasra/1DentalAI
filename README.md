@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 1DentalAI
 
-## Getting Started
+1DentalAI is the new production-grade dental AI operating system project.
 
-First, run the development server:
+This repo is intentionally separate from DentalRCM. DentalRCM currently runs on the droplet at `http://162.243.186.191:3000/`; 1DentalAI is designed to run as an independent service on port `3001` and be reverse-proxied from `http://162.243.186.191/`.
+
+## Current State
+
+Phase 0 bootstrap only:
+
+- Next.js App Router app
+- TypeScript
+- Tailwind CSS
+- Health endpoint at `/api/health`
+- Production start script bound to `127.0.0.1:${PORT:-3001}`
+- AGENTS.md phase-gated development rules
+
+No product module is considered implemented yet. The visible app reports only truthful infrastructure and phase status.
+
+## Commands
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run lint
+npm run build
+PORT=3001 npm run start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## DigitalOcean Topology
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Target:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Public app URL: `http://162.243.186.191/`
+- 1DentalAI service: `127.0.0.1:3001`
+- Existing DentalRCM service: `http://162.243.186.191:3000/`
 
-## Learn More
+The deployment must not stop, replace, or bind over DentalRCM on port `3000`.
 
-To learn more about Next.js, take a look at the following resources:
+## Next Required Approval
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Create and approve the Phase 0 architecture packet before product coding:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Repo strategy
+- DentalRCM reuse boundary
+- Phone app scan
+- Deployment topology
+- Connector extraction decision
+- Initial database/environment strategy
