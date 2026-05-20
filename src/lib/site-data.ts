@@ -12,32 +12,32 @@ export const productPillars = [
   {
     title: "AI communications",
     eyebrow: "Phones, text, chat",
-    body: "Answer calls, summarize conversations, match patients, draft replies, route follow-ups, and keep every message inside one patient timeline.",
+    body: "Capture the first ring, match the patient, summarize the conversation, draft the reply, and turn every call or text into accountable follow-up.",
   },
   {
     title: "Insurance and RCM",
     eyebrow: "Eligibility to payment",
-    body: "Turn payer checks, benefit details, claim readiness, attachments, denials, and ERA activity into clear operating queues.",
+    body: "Move eligibility, benefit evidence, claim readiness, attachment risk, payer follow-up, denials, and ERA activity into work queues teams can trust.",
   },
   {
     title: "Growth and reputation",
     eyebrow: "Reviews, recalls, recovery",
-    body: "Request reviews, triage unhappy feedback, reactivate overdue patients, follow up on unscheduled treatment, and measure booked production.",
+    body: "Recover missed opportunities, request reviews at the right moment, follow up on unscheduled treatment, and connect campaigns to booked production.",
   },
   {
     title: "Clinical AI",
     eyebrow: "Scribing, charting, perio",
-    body: "Assist providers with draft notes, treatment context, perio workflows, and writeback requests behind explicit approval gates.",
+    body: "Give providers encounter context, draft documentation, perio workflow support, and controlled writeback paths that stay behind clinical approval.",
   },
   {
     title: "Universal connectors",
     eyebrow: "PMS, EHR, CRM, payers",
-    body: "Connect through owned routers first, with NexHealth and Stedi as accelerators rather than permanent product dependencies.",
+    body: "Use NexHealth and Stedi to move faster where they help, while building owned PMS, payer, phone, payment, CRM, and clinical connector contracts.",
   },
   {
     title: "Practice intelligence",
     eyebrow: "Truthful analytics",
-    body: "Show production, collections, call conversion, payer delay, treatment acceptance, and data quality with source-backed evidence.",
+    body: "See production, collections, call conversion, payer delay, treatment acceptance, and data quality with source-backed evidence instead of guesswork.",
   },
 ];
 
@@ -45,32 +45,32 @@ export const useCases = [
   {
     title: "Never miss the patient who is ready to book",
     role: "Front desk",
-    body: "AI phone and messaging workflows catch missed calls, identify known patients, convert new patient leads, and open follow-up tasks.",
+    body: "AI phone and messaging workflows catch missed calls, identify known patients, convert new patient leads, and open the exact follow-up task.",
   },
   {
     title: "Clear tomorrow's schedule before the morning rush",
     role: "Insurance coordinator",
-    body: "Eligibility, benefits, missing demographic data, prior auth risk, and claim blockers are organized before the patient arrives.",
+    body: "Eligibility, benefits, missing demographics, prior auth risk, and claim blockers are organized before the patient reaches the chair.",
   },
   {
     title: "Turn treatment plans into accepted care",
     role: "Treatment coordinator",
-    body: "Patients get clear follow-ups, financing prompts, payment links, and reminders tied to the exact recommended treatment.",
+    body: "Patients get timely follow-ups, financing prompts, payment links, and reminders tied to the exact treatment that was recommended.",
   },
   {
     title: "Know which payers are slowing cash",
     role: "Billing manager",
-    body: "Payer performance, claim status, ERA details, denials, and manual fallback work show up as measurable operational queues.",
+    body: "Payer performance, claim status, ERA details, denials, and fallback work show up as measurable queues instead of hallway updates.",
   },
   {
     title: "Give providers clinical context without extra clicks",
     role: "Dentist and hygienist",
-    body: "Call notes, forms, insurance context, treatment history, AI note drafts, and perio data stay connected to the encounter.",
+    body: "Call notes, forms, benefits, treatment history, AI note drafts, and perio data stay connected to the appointment and encounter.",
   },
   {
     title: "Run every location with one operating system",
     role: "DSO leadership",
-    body: "Central teams can see location performance, templates, approvals, inboxes, billing queues, and rollout readiness in one place.",
+    body: "Central teams see location performance, template adoption, approvals, inboxes, billing queues, and rollout readiness in one place.",
   },
 ];
 
@@ -117,10 +117,10 @@ export const resources = [
 ];
 
 export const stats = [
-  { value: "1", label: "Patient timeline for every workflow" },
-  { value: "24/7", label: "AI-assisted call and message capture" },
-  { value: "270/271", label: "Eligibility workflow foundation" },
-  { value: "0", label: "Fake production shortcuts allowed" },
+  { value: "1", label: "Patient timeline from first call to final payment" },
+  { value: "24/7", label: "AI-assisted capture for calls, texts, and requests" },
+  { value: "270/271", label: "Eligibility evidence as a workflow foundation" },
+  { value: "0", label: "Placeholder workflows allowed in production" },
 ];
 
 export const imageUrls = {
