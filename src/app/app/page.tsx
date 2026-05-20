@@ -1,17 +1,13 @@
 import Link from "next/link";
 import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
 import {
-  appointmentMetrics,
-  formatCurrency,
   foundationPractice,
+  getDailyDashboard,
   getRole,
   getVisibleModules,
-  getLocationName,
-  locationPerformance,
   locations,
-  providerRevenue,
-  serviceRevenue,
   workflows,
+  type DailyDashboardItem,
   type RoleKey,
 } from "@/lib/foundation-data";
 
@@ -22,11 +18,9 @@ export default async function AppOverview({
 }) {
   const params = await searchParams;
   const role = getRole(params.role);
+  const dashboard = getDailyDashboard(role.key);
   const visibleModules = getVisibleModules(role.key).filter((module) => module.visible);
   const blockedModules = getVisibleModules(role.key).filter((module) => !module.visible);
-  const totalAppointments = appointmentMetrics.reduce((sum, item) => sum + item.count, 0);
-  const maxServiceRevenue = Math.max(...serviceRevenue.map((item) => item.bookedRevenue));
-  const maxProviderRevenue = Math.max(...providerRevenue.map((item) => item.bookedRevenue));
   const setupRequired = visibleModules.filter((module) => module.status === "setup_required").length;
   const approvalLocked = visibleModules.filter((module) => module.status === "locked_by_policy").length;
   const modeLabel = foundationPractice.mode === "PRODUCTION_SETUP" ? "Production setup" : "Live";
@@ -93,97 +87,55 @@ export default async function AppOverview({
         </div>
       </section>
 
-      <section className="mt-6 grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
-        <div className="rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-cyan-700">Viewing as</p>
-              <h2 className="mt-2 text-2xl font-semibold text-neutral-950">{role.title}</h2>
-              <p className="mt-2 text-sm leading-6 text-neutral-600">{role.description}</p>
-            </div>
-            <StatusPill tone="green">minimum necessary</StatusPill>
+      <section className="mt-6 rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-cyan-700">{role.title}</p>
+            <h2 className="mt-2 text-3xl font-semibold tracking-tight text-neutral-950">{dashboard.title}</h2>
+            <p className="mt-3 max-w-4xl text-sm leading-6 text-neutral-600">{dashboard.summary}</p>
           </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {role.scopes.map((scope) => (
-              <div key={scope} className="rounded-2xl bg-neutral-50 p-4">
-                <p className="text-sm font-semibold capitalize text-neutral-950">
-                  {scope.replaceAll("_", " ")}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-neutral-500">
-                  Allowed for this role under the current access model.
-                </p>
-              </div>
-            ))}
-          </div>
-          {role.hiddenByDefault.length > 0 ? (
-            <div className="mt-5 rounded-2xl bg-amber-50 p-4">
-              <p className="text-sm font-semibold text-amber-900">Hidden by default</p>
-              <p className="mt-2 text-sm leading-6 text-amber-900">
-                {role.hiddenByDefault.join(", ")}
-              </p>
-            </div>
-          ) : null}
+          <StatusPill tone="green">job-specific view</StatusPill>
         </div>
-
-        <div className="rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-                <p className="text-sm font-semibold text-cyan-700">Practice performance</p>
-              <h2 className="mt-2 text-2xl font-semibold text-neutral-950">Revenue, schedule, and production mix.</h2>
-              <p className="mt-3 text-sm leading-6 text-neutral-600">
-                Current setup analytics for the owner and manager view. Live PMS, payment, and RCM feeds are required before this becomes source-backed production reporting.
-              </p>
+        <div className="mt-5 rounded-2xl bg-cyan-50 p-4">
+          <p className="text-sm font-semibold text-cyan-950">Morning huddle focus</p>
+          <p className="mt-2 text-sm leading-6 text-cyan-900">{dashboard.huddleFocus}</p>
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {dashboard.kpis.map((kpi) => (
+            <div key={kpi.label} className="rounded-3xl border border-neutral-200 bg-neutral-50 p-5">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm font-medium text-neutral-500">{kpi.label}</p>
+                <StatusPill tone={kpi.tone}>{kpi.tone === "red" ? "risk" : kpi.tone === "amber" ? "watch" : "ok"}</StatusPill>
+              </div>
+              <p className="mt-3 text-3xl font-semibold tracking-tight text-neutral-950">{kpi.value}</p>
+              <p className="mt-2 text-sm leading-6 text-neutral-600">{kpi.detail}</p>
             </div>
-            <StatusPill tone="cyan">{totalAppointments} visits</StatusPill>
-          </div>
-          <div className="mt-5 space-y-4">
-            {serviceRevenue.map((item) => (
-              <BarMetric
-                key={item.service}
-                label={item.service}
-                value={`${formatCurrency(item.bookedRevenue)} · ${item.appointments} appts`}
-                percent={(item.bookedRevenue / maxServiceRevenue) * 100}
-              />
-            ))}
-          </div>
+          ))}
         </div>
       </section>
 
-      <section className="mt-6 grid gap-6 lg:grid-cols-3">
-        <AnalyticsPanel title="Provider production">
-          {providerRevenue.map((item) => (
-            <BarMetric
-              key={item.provider}
-              label={`${item.provider} · ${item.role}`}
-              value={`${formatCurrency(item.bookedRevenue)} · ${item.completedAppointments} visits`}
-              percent={(item.bookedRevenue / maxProviderRevenue) * 100}
-            />
-          ))}
-        </AnalyticsPanel>
-        <AnalyticsPanel title="Schedule status">
-          {appointmentMetrics.map((item) => (
-            <div key={item.label} className="rounded-2xl bg-neutral-50 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold text-neutral-950">{item.label}</p>
-                <p className="text-sm font-semibold text-cyan-700">{item.count}</p>
+      <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_1fr_0.8fr]">
+        {dashboard.workQueues.map((queue) => (
+          <DailyQueue key={queue.title} title={queue.title} items={queue.items} />
+        ))}
+        <div className="rounded-[2rem] border border-neutral-200 bg-white p-5 shadow-sm">
+          <p className="text-lg font-semibold text-neutral-950">Decisions to make</p>
+          <div className="mt-4 space-y-3">
+            {dashboard.decisions.map((decision) => (
+              <div key={decision} className="rounded-2xl bg-neutral-50 p-4 text-sm font-semibold text-neutral-800">
+                {decision}
               </div>
-              <p className="mt-2 text-xs text-neutral-500">{formatCurrency(item.production)} production tied to this status</p>
-            </div>
-          ))}
-        </AnalyticsPanel>
-        <AnalyticsPanel title="Location performance">
-          {locationPerformance.map((item) => (
-            <div key={item.locationId} className="rounded-2xl bg-neutral-50 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold text-neutral-950">{getLocationName(item.locationId)}</p>
-                <p className="text-sm font-semibold text-cyan-700">{item.chairUtilization}%</p>
-              </div>
-              <p className="mt-2 text-xs text-neutral-500">
-                {formatCurrency(item.bookedRevenue)} booked · {formatCurrency(item.unscheduledTreatment)} unscheduled
-              </p>
-            </div>
-          ))}
-        </AnalyticsPanel>
+            ))}
+          </div>
+          <p className="mt-6 text-lg font-semibold text-neutral-950">Modules in focus</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {dashboard.modulesInFocus.map((module) => (
+              <span key={module} className="rounded-full bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-800">
+                {module}
+              </span>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section className="mt-6 grid gap-6 lg:grid-cols-3">
@@ -195,35 +147,31 @@ export default async function AppOverview({
   );
 }
 
-function BarMetric({
-  label,
-  value,
-  percent,
-}: {
-  label: string;
-  value: string;
-  percent: number;
-}) {
+function DailyQueue({ title, items }: { title: string; items: DailyDashboardItem[] }) {
   return (
-    <div>
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-neutral-950">{label}</p>
-        <p className="text-xs font-semibold text-neutral-500">{value}</p>
-      </div>
-      <div className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-100">
-        <div className="h-full rounded-full bg-cyan-700" style={{ width: `${Math.max(8, Math.min(100, percent))}%` }} />
+    <div className="rounded-[2rem] border border-neutral-200 bg-white p-5 shadow-sm">
+      <p className="text-lg font-semibold text-neutral-950">{title}</p>
+      <div className="mt-4 space-y-3">
+        {items.map((item) => (
+          <div key={item.label} className="rounded-2xl bg-neutral-50 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-sm font-semibold text-neutral-950">{item.label}</p>
+              <StatusPill tone={priorityTone(item.priority)}>{item.priority}</StatusPill>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-neutral-600">{item.detail}</p>
+            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">{item.meta}</p>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function AnalyticsPanel({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-[2rem] border border-neutral-200 bg-white p-5 shadow-sm">
-      <p className="text-lg font-semibold text-neutral-950">{title}</p>
-      <div className="mt-4 space-y-3">{children}</div>
-    </div>
-  );
+function priorityTone(priority: DailyDashboardItem["priority"]) {
+  if (priority === "Today") return "red";
+  if (priority === "Blocked") return "amber";
+  if (priority === "Watch") return "cyan";
+  return "neutral";
 }
 
 function FoundationLink({ href, title, body }: { href: string; title: string; body: string }) {
