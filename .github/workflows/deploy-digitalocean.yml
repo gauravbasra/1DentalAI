@@ -58,12 +58,11 @@ jobs:
           ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
             set -euo pipefail
             cd "${DEPLOY_PATH}"
-            docker compose up -d --build
-            install -m 0644 ops/nginx/1dentalai.conf /etc/nginx/sites-available/1dentalai.conf
-            ln -sfn /etc/nginx/sites-available/1dentalai.conf /etc/nginx/sites-enabled/1dentalai.conf
-            rm -f /etc/nginx/sites-enabled/default
-            nginx -t
-            systemctl reload nginx
+            docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build
+            for i in 1 2 3 4 5; do
+              curl -fsS http://127.0.0.1:3001/api/health && break
+              sleep 3
+            done
             curl -fsS http://127.0.0.1:3001/api/health
           EOF
 
@@ -71,7 +70,7 @@ jobs:
         run: |
           for i in 1 2 3 4 5; do
             code=$(curl -s -o /tmp/1dentalai-health.json -w "%{http_code}" "http://${{ secrets.DO_SSH_HOST }}/api/health" || true)
-            if [ "$code" = "200" ]; then
+            if [ "$code" = "200" ] && grep -q '"app":"1DentalAI"' /tmp/1dentalai-health.json; then
               cat /tmp/1dentalai-health.json
               exit 0
             fi
