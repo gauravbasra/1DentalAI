@@ -241,14 +241,14 @@ export async function ingestSmsStatus(payload: TwilioPayload, tenantId = default
   const normalizedStatus = mapTwilioSmsStatus(payload.MessageStatus || payload.SmsStatus || "unknown");
   const result = await query<{ id: string; tenantId: string }>(
     `update "PhoneOutboundMessage"
-     set "deliveryStatus" = $3,
-       "providerStatus" = $4,
-       "providerError" = coalesce($5, "providerError"),
-       "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioLastStatusAt', current_timestamp, 'twilioDeliveryStatus', $3),
+     set "deliveryStatus" = $2,
+       "providerStatus" = $3,
+       "providerError" = coalesce($4, "providerError"),
+       "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioLastStatusAt', current_timestamp, 'twilioDeliveryStatus', $2),
        "updatedAt" = current_timestamp
-     where "provider" = 'TWILIO' and "providerMessageId" = $2
+     where "provider" = 'TWILIO' and "providerMessageId" = $1
      returning "id", "tenantId"`,
-    [tenantId, providerMessageId, normalizedStatus, payload.MessageStatus || payload.SmsStatus || "unknown", payload.ErrorMessage || payload.ErrorCode || null],
+    [providerMessageId, normalizedStatus, payload.MessageStatus || payload.SmsStatus || "unknown", payload.ErrorMessage || payload.ErrorCode || null],
   );
   const message = result.rows[0];
   await addAudit(message?.tenantId ?? tenantId, "twilio_webhook", "TWILIO_SMS_STATUS_RECEIVED", "PhoneOutboundMessage", message?.id ?? null, message ? "ALLOWED" : "BLOCKED", {
