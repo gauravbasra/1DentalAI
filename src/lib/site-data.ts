@@ -2,7 +2,7 @@ export const navItems = [
   { href: "/product", label: "Product" },
   { href: "/features", label: "Features" },
   { href: "/use-cases", label: "Use Cases" },
-  { href: "/demos", label: "Demos" },
+  { href: "/demos", label: "Workflows" },
   { href: "/resources", label: "Resources" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
@@ -102,12 +102,12 @@ export const resources = [
   {
     title: "PMS and payer connector strategy",
     type: "Technical brief",
-    body: "How 1DentalAI keeps integrations accountable with setup checks, approval gates, cost visibility, and clear manual work queues when automation is limited.",
+    body: "How 1DentalAI keeps integrations accountable with setup checks, review controls, cost visibility, and clear work queues.",
   },
   {
     title: "AI governance for dental practices",
     type: "Checklist",
-    body: "Human approval, PHI controls, audit evidence, demo/live separation, and safe automation rules.",
+    body: "Human review, PHI controls, audit evidence, role permissions, and safe automation rules.",
   },
   {
     title: "Front desk productivity calculator",
@@ -120,7 +120,7 @@ export const stats = [
   { value: "1", label: "Patient timeline from first call to final payment" },
   { value: "24/7", label: "AI-assisted capture for calls, texts, and requests" },
   { value: "270/271", label: "Eligibility evidence captured before the appointment" },
-  { value: "0", label: "Placeholder workflows allowed in production" },
+  { value: "1", label: "Accountable queue for calls, claims, care, and collections" },
 ];
 
 export const imageUrls = {

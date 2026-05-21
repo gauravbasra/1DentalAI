@@ -7,9 +7,9 @@ export default function DemosPage() {
     <MarketingShell>
       <main>
         <PageHero
-          eyebrow="Demos"
-          title="See the workflows before the software gets noisy."
-          body="These demo tracks show how 1DentalAI is planned to move real dental work from intake to action with source evidence and human approval."
+          eyebrow="Workflows"
+          title="See how dental work moves from intake to action."
+          body="1DentalAI connects intake, eligibility, clinical documentation, treatment follow-up, RCM, and analytics with source evidence and human review."
         />
         <section className="mx-auto grid max-w-7xl gap-5 px-6 pb-24 sm:px-8 md:grid-cols-2">
           {demoWorkflows.map((demo) => (
@@ -30,14 +30,14 @@ export default function DemosPage() {
         </section>
         <section className="bg-neutral-950 px-6 py-24 text-center text-white sm:px-8">
           <h2 className="mx-auto max-w-4xl text-4xl font-semibold tracking-tight sm:text-6xl">
-            Want the first guided walkthrough?
+            Ready to see the platform workflow?
           </h2>
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-8 text-neutral-300">
-            Early demos are guided so the workflow can be matched to your PMS,
-            payer mix, phone setup, and practice size.
+            A walkthrough can be matched to your PMS, payer mix, phone setup,
+            and practice size.
           </p>
           <Link href="/contact" className="mt-8 inline-flex rounded-full bg-white px-6 py-3 text-sm font-semibold text-neutral-950">
-            Request a demo
+            Request a walkthrough
           </Link>
         </section>
       </main>

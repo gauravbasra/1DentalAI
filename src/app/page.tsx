@@ -16,8 +16,8 @@ export default function Home() {
                 One platform for every dental workflow.
               </h1>
               <p className="mt-7 max-w-2xl text-lg leading-8 text-neutral-600 sm:text-xl">
-                1DentalAI is being built to connect phones, scheduling, patient
-                messaging, insurance, RCM, reputation, clinical AI, and practice
+                1DentalAI connects phones, scheduling, patient messaging,
+                insurance, RCM, reputation, clinical AI, and practice
                 intelligence into one governed system.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -25,7 +25,7 @@ export default function Home() {
                   href="/demos"
                   className="rounded-full bg-neutral-950 px-6 py-3 text-center text-sm font-semibold text-white transition hover:bg-cyan-700"
                 >
-                  Explore demos
+                  Explore workflows
                 </Link>
                 <Link
                   href="/product"

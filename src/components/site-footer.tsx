@@ -8,13 +8,9 @@ export function SiteFooter() {
         <div>
           <p className="text-lg font-semibold text-neutral-950">1DentalAI</p>
           <p className="mt-3 max-w-xl text-sm leading-6 text-neutral-600">
-            A phase-gated dental AI operating system being built for practices
-            that want phones, patient communication, insurance, RCM, clinical
-            AI, reputation, and analytics in one governed workflow.
-          </p>
-          <p className="mt-6 text-xs text-neutral-500">
-            Early access product. Production features are released only after
-            approved phase plans, implementation, and verification.
+            A dental AI operating system for practices that want phones,
+            patient communication, insurance, RCM, clinical AI, reputation, and
+            analytics in one governed workflow.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
