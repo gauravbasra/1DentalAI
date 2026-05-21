@@ -2,6 +2,7 @@ import fs from "node:fs";
 
 const page = fs.readFileSync("src/app/app/phone/page.tsx", "utf8");
 const repository = fs.readFileSync("src/lib/operating-system-repository.ts", "utf8");
+const webchatRepository = fs.readFileSync("src/lib/webchat/repository.ts", "utf8");
 const twilioWebhooks = fs.readFileSync("src/lib/twilio-webhooks.ts", "utf8");
 const schema = fs.readFileSync("prisma/schema.prisma", "utf8");
 
@@ -48,6 +49,14 @@ const requiredTokens = [
   "TWILIO_TRANSCRIPTION_RECEIVED",
   "TWILIO_WEBHOOK_VALIDATION_REQUIRED",
   "x-twilio-signature",
+  "Lead qualification board",
+  "OutreachHub-style conversation-to-conversion queue",
+  "rules_v3_dental_qualification",
+  "leadScore",
+  "qualificationStage",
+  "campaignSource",
+  "nextBestAction",
+  "staffOwnerDueAt",
 ];
 
 const failures = [];
@@ -55,7 +64,7 @@ for (const model of requiredSchemaModels) {
   if (!schema.includes(`model ${model}`)) failures.push(`Missing phone Prisma model: ${model}`);
 }
 
-const haystack = `${page}\n${repository}\n${twilioWebhooks}`;
+const haystack = `${page}\n${repository}\n${webchatRepository}\n${twilioWebhooks}`;
 for (const token of requiredTokens) {
   if (!haystack.includes(token)) failures.push(`Missing phone workbench token: ${token}`);
 }
