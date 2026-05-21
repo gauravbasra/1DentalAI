@@ -519,6 +519,117 @@ model PmsPatientPharmacy {
   @@index([patientId, isPreferred])
 }
 
+model PmsFormTemplate {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  formType    String
+  version     Int      @default(1)
+  status      String   @default("ACTIVE")
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, name, version])
+  @@index([tenantId, formType, status])
+}
+
+model PmsFormField {
+  id          String   @id @default(cuid())
+  templateId  String
+  fieldKey    String
+  label       String
+  fieldType   String
+  required    Boolean  @default(false)
+  options     Json?
+  displayOrder Int
+  helpText    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([templateId, fieldKey])
+  @@index([templateId, displayOrder])
+}
+
+model PmsFormFieldMapping {
+  id          String   @id @default(cuid())
+  fieldId     String
+  targetModel String
+  targetField String
+  transformRule String?
+  reviewRequired Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([fieldId, targetModel, targetField])
+}
+
+model PmsFormAssignment {
+  id          String   @id @default(cuid())
+  tenantId    String
+  patientId   String
+  templateId  String
+  appointmentId String?
+  status      String   @default("ASSIGNED")
+  assignedByRole String
+  dueAt       DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, status, dueAt])
+  @@index([patientId, status])
+}
+
+model PmsFormResponse {
+  id          String   @id @default(cuid())
+  assignmentId String
+  patientId   String
+  submittedByName String?
+  submittedByType String @default("STAFF_KIOSK")
+  status      String   @default("SUBMITTED")
+  signatureName String?
+  signatureAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([assignmentId, status])
+  @@index([patientId, createdAt])
+}
+
+model PmsFormResponseAnswer {
+  id          String   @id @default(cuid())
+  responseId  String
+  fieldId     String
+  fieldKey    String
+  answerValue String
+  createdAt   DateTime @default(now())
+
+  @@unique([responseId, fieldId])
+  @@index([fieldKey])
+}
+
+model PmsProfileChangeRequest {
+  id          String   @id @default(cuid())
+  tenantId    String
+  patientId   String
+  responseId  String?
+  fieldId     String?
+  targetModel String
+  targetField String
+  currentValue String?
+  proposedValue String
+  status      String   @default("PENDING")
+  reviewNote  String?
+  reviewedByRole String?
+  reviewedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, status, createdAt])
+  @@index([patientId, status])
+}
+
 model PmsClinicalNote {
   id         String    @id @default(cuid())
   patientId  String

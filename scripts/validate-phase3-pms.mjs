@@ -5,6 +5,7 @@ const requiredFiles = [
   "src/app/app/pms/schedule/page.tsx",
   "src/app/app/pms/patients/page.tsx",
   "src/app/app/pms/patients/[patientId]/page.tsx",
+  "src/app/app/pms/forms/page.tsx",
   "src/app/app/pms/chart/[patientId]/page.tsx",
   "src/app/app/pms/perio/[patientId]/page.tsx",
   "src/app/app/pms/imaging/page.tsx",
@@ -38,6 +39,13 @@ const requiredSchemaModels = [
   "PmsPatientConsent",
   "PmsMedicalHistoryEntry",
   "PmsPatientPharmacy",
+  "PmsFormTemplate",
+  "PmsFormField",
+  "PmsFormFieldMapping",
+  "PmsFormAssignment",
+  "PmsFormResponse",
+  "PmsFormResponseAnswer",
+  "PmsProfileChangeRequest",
   "PmsClinicalNote",
   "PmsPerioExam",
   "PmsTreatmentPlan",
@@ -85,6 +93,7 @@ for (const token of ["Operatory day sheet", "Pinboard", "Recall", "Lab case", "A
 
 const patientsPage = fs.readFileSync("src/app/app/pms/patients/page.tsx", "utf8");
 const patientRecordPage = fs.readFileSync("src/app/app/pms/patients/[patientId]/page.tsx", "utf8");
+const formsPage = fs.readFileSync("src/app/app/pms/forms/page.tsx", "utf8");
 const chartPage = fs.readFileSync("src/app/app/pms/chart/[patientId]/page.tsx", "utf8");
 const treatmentPlanPage = fs.readFileSync("src/app/app/pms/treatment-plans/page.tsx", "utf8");
 const insurancePage = fs.readFileSync("src/app/app/pms/insurance/page.tsx", "utf8");
@@ -105,6 +114,14 @@ for (const token of ["updatePatientAdministrativeProfile", "addCommunicationPref
   const haystack = `${schema}\n${patientRecordPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS patient profile depth token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["PmsFormTemplate", "PmsFormAssignment", "PmsProfileChangeRequest", "assignFormToPatient", "recordFormResponse", "reviewProfileChangeRequest", "Intake forms and profile review", "Record response for review", "Accept update"]) {
+  const haystack = `${schema}\n${formsPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+  if (!haystack.includes(token)) {
+    console.error(`PMS forms foundation token missing: ${token}`);
     process.exit(1);
   }
 }

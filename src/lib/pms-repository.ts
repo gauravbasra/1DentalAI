@@ -574,6 +574,233 @@ export async function addMedication(input: { patientId: string; name: string; do
   return result.rows[0];
 }
 
+export async function getFormsWorkbench(tenantId = defaultTenantId) {
+  const [templates, fields, assignments, changes, patients] = await Promise.all([
+    query(
+      `select t.*, count(f."id")::int as "fieldCount"
+       from "PmsFormTemplate" t
+       left join "PmsFormField" f on f."templateId" = t."id"
+       where t."tenantId" = $1
+       group by t."id"
+       order by t."formType", t."name"`,
+      [tenantId],
+    ),
+    query(
+      `select f.*, m."targetModel", m."targetField"
+       from "PmsFormField" f
+       left join "PmsFormFieldMapping" m on m."fieldId" = f."id"
+       join "PmsFormTemplate" t on t."id" = f."templateId"
+       where t."tenantId" = $1
+       order by f."templateId", f."displayOrder"`,
+      [tenantId],
+    ),
+    query(
+      `select a.*, t."name" as "templateName", t."formType", p."firstName", p."lastName", p."chartNumber",
+        coalesce(cr.pending_changes, 0)::int as "pendingChanges"
+       from "PmsFormAssignment" a
+       join "PmsFormTemplate" t on t."id" = a."templateId"
+       join "PmsPatient" p on p."id" = a."patientId"
+       left join (
+         select "patientId", count(*) as pending_changes
+         from "PmsProfileChangeRequest"
+         where "tenantId" = $1 and "status" = 'PENDING'
+         group by "patientId"
+       ) cr on cr."patientId" = a."patientId"
+       where a."tenantId" = $1
+       order by
+        case a."status" when 'SUBMITTED' then 1 when 'ASSIGNED' then 2 when 'REVIEWED' then 3 else 4 end,
+        a."dueAt" asc nulls last, a."createdAt" desc`,
+      [tenantId],
+    ),
+    query(
+      `select c.*, p."firstName", p."lastName", p."chartNumber"
+       from "PmsProfileChangeRequest" c
+       join "PmsPatient" p on p."id" = c."patientId"
+       where c."tenantId" = $1
+       order by case c."status" when 'PENDING' then 1 else 2 end, c."createdAt" desc`,
+      [tenantId],
+    ),
+    listPatients(tenantId),
+  ]);
+
+  return {
+    templates: templates.rows,
+    fields: fields.rows,
+    assignments: assignments.rows,
+    changes: changes.rows,
+    patients,
+  };
+}
+
+export async function assignFormToPatient(input: {
+  tenantId?: string;
+  patientId: string;
+  templateId: string;
+  appointmentId?: string;
+  dueAt?: string;
+  assignedByRole?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("formassign");
+  const result = await query(
+    `insert into "PmsFormAssignment"
+       ("id", "tenantId", "patientId", "templateId", "appointmentId", "status", "assignedByRole", "dueAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, 'ASSIGNED', $6, $7::timestamp, current_timestamp)
+     returning *`,
+    [id, tenantId, input.patientId, input.templateId, input.appointmentId?.trim() || null, input.assignedByRole ?? "front_desk", input.dueAt || null],
+  );
+  await addAudit(tenantId, input.assignedByRole ?? "front_desk", "FORM_ASSIGNED", "PmsFormAssignment", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function getFormAssignmentDetail(assignmentId: string) {
+  const assignment = await query(
+    `select a.*, t."name" as "templateName", t."formType", p."firstName", p."lastName", p."chartNumber"
+     from "PmsFormAssignment" a
+     join "PmsFormTemplate" t on t."id" = a."templateId"
+     join "PmsPatient" p on p."id" = a."patientId"
+     where a."id" = $1`,
+    [assignmentId],
+  );
+  const row = assignment.rows[0];
+  if (!row) return null;
+  const fields = await query(
+    `select f.*, m."targetModel", m."targetField"
+     from "PmsFormField" f
+     left join "PmsFormFieldMapping" m on m."fieldId" = f."id"
+     where f."templateId" = $1
+     order by f."displayOrder"`,
+    [row.templateId],
+  );
+  return { assignment: row, fields: fields.rows };
+}
+
+export async function recordFormResponse(input: {
+  assignmentId: string;
+  submittedByName?: string;
+  submittedByType?: string;
+  signatureName?: string;
+  answers: Record<string, string>;
+  actorRole?: string;
+}) {
+  const detail = await getFormAssignmentDetail(input.assignmentId);
+  if (!detail) throw new Error("Form assignment not found");
+  const assignment = detail.assignment as { tenantId: string; patientId: string; id: string };
+  const responseId = newId("formresp");
+  await query(
+    `insert into "PmsFormResponse"
+       ("id", "assignmentId", "patientId", "submittedByName", "submittedByType", "status", "signatureName", "signatureAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, 'SUBMITTED', $6, case when $6 is null then null else current_timestamp end, current_timestamp)`,
+    [
+      responseId,
+      input.assignmentId,
+      assignment.patientId,
+      input.submittedByName?.trim() || null,
+      input.submittedByType ?? "STAFF_KIOSK",
+      input.signatureName?.trim() || null,
+    ],
+  );
+
+  for (const field of detail.fields as Array<{ id: string; fieldKey: string; targetModel?: string | null; targetField?: string | null }>) {
+    const value = input.answers[field.fieldKey]?.trim();
+    if (!value) continue;
+    await query(
+      `insert into "PmsFormResponseAnswer" ("id", "responseId", "fieldId", "fieldKey", "answerValue")
+       values ($1, $2, $3, $4, $5)
+       on conflict ("responseId", "fieldId") do update set "answerValue" = excluded."answerValue"`,
+      [newId("answer"), responseId, field.id, field.fieldKey, value],
+    );
+
+    if (field.targetModel && field.targetField) {
+      const currentValue = await getCurrentProfileValue(assignment.patientId, field.targetModel, field.targetField);
+      await query(
+        `insert into "PmsProfileChangeRequest"
+           ("id", "tenantId", "patientId", "responseId", "fieldId", "targetModel", "targetField", "currentValue", "proposedValue", "status", "updatedAt")
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'PENDING', current_timestamp)`,
+        [newId("change"), assignment.tenantId, assignment.patientId, responseId, field.id, field.targetModel, field.targetField, currentValue, value],
+      );
+    }
+  }
+
+  await query(
+    `update "PmsFormAssignment"
+     set "status" = 'SUBMITTED', "completedAt" = current_timestamp, "updatedAt" = current_timestamp
+     where "id" = $1`,
+    [input.assignmentId],
+  );
+  await addAudit(assignment.tenantId, input.actorRole ?? "front_desk", "FORM_RESPONSE_RECORDED", "PmsFormResponse", responseId, "ALLOWED");
+  return { responseId };
+}
+
+export async function reviewProfileChangeRequest(input: {
+  changeId: string;
+  decision: "ACCEPTED" | "REJECTED";
+  reviewNote?: string;
+  reviewedByRole?: string;
+}) {
+  const changeResult = await query<{
+    id: string;
+    tenantId: string;
+    patientId: string;
+    targetModel: string;
+    targetField: string;
+    proposedValue: string;
+    status: string;
+  }>(`select * from "PmsProfileChangeRequest" where "id" = $1`, [input.changeId]);
+  const change = changeResult.rows[0];
+  if (!change || change.status !== "PENDING") return null;
+
+  if (input.decision === "ACCEPTED") {
+    await applyProfileChange(change.patientId, change.targetModel, change.targetField, change.proposedValue);
+  }
+
+  const result = await query(
+    `update "PmsProfileChangeRequest"
+     set "status" = $2, "reviewNote" = $3, "reviewedByRole" = $4, "reviewedAt" = current_timestamp, "updatedAt" = current_timestamp
+     where "id" = $1
+     returning *`,
+    [input.changeId, input.decision, input.reviewNote?.trim() || null, input.reviewedByRole ?? "front_desk"],
+  );
+  await addAudit(change.tenantId, input.reviewedByRole ?? "front_desk", `PROFILE_CHANGE_${input.decision}`, "PmsProfileChangeRequest", input.changeId, "ALLOWED");
+  return result.rows[0];
+}
+
+async function getCurrentProfileValue(patientId: string, targetModel: string, targetField: string) {
+  if (targetModel === "PmsPatient" && ["phone", "email", "emergencyContactName", "emergencyContactPhone", "patientNote"].includes(targetField)) {
+    const result = await query(`select "${targetField}"::text as value from "PmsPatient" where "id" = $1`, [patientId]);
+    return result.rows[0]?.value ?? null;
+  }
+  if (targetModel === "PmsPatientCommunicationPreference") {
+    const result = await query(`select "consentStatus" as value from "PmsPatientCommunicationPreference" where "patientId" = $1 and "channel" = 'SMS' order by "priority" limit 1`, [patientId]);
+    return result.rows[0]?.value ?? null;
+  }
+  return null;
+}
+
+async function applyProfileChange(patientId: string, targetModel: string, targetField: string, proposedValue: string) {
+  if (targetModel === "PmsPatient" && ["phone", "email", "emergencyContactName", "emergencyContactPhone", "patientNote"].includes(targetField)) {
+    await query(`update "PmsPatient" set "${targetField}" = $2, "updatedAt" = current_timestamp where "id" = $1`, [patientId, proposedValue]);
+    return;
+  }
+  if (targetModel === "PmsPatientCommunicationPreference" && targetField === "SMS.consentStatus") {
+    const patient = await query<{ phone: string | null }>(`select "phone" from "PmsPatient" where "id" = $1`, [patientId]);
+    const destination = patient.rows[0]?.phone || "SMS destination pending";
+    await addCommunicationPreference({ patientId, channel: "SMS", destination, consentStatus: proposedValue, source: "FORM_REVIEW" });
+    return;
+  }
+  if (targetModel === "PmsMedicalHistoryEntry" && targetField === "condition") {
+    await addMedicalHistoryEntry({ patientId, category: "FORM_REPORTED", condition: proposedValue, status: "ACTIVE", severity: "MODERATE", notes: "Accepted from patient form review." });
+    return;
+  }
+  if (targetModel === "PmsAllergy" && targetField === "allergen") {
+    await addAllergy({ patientId, allergen: proposedValue, severity: "MODERATE", reaction: "Accepted from patient form review." });
+    return;
+  }
+  if (targetModel === "PmsPatientConsent" && targetField === "consentType") {
+    await addPatientConsent({ patientId, consentType: proposedValue, status: "SIGNED", signedAt: new Date().toISOString(), signedByName: "Form signer" });
+  }
+}
+
 export async function listSchedule(tenantId = defaultTenantId, date?: string) {
   const result = await query<PmsAppointmentRow>(
     `select
