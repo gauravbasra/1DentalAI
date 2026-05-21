@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-const sessionCookieName = "__Host-1dentalai_session";
+const sessionCookieNames = ["__Secure-1dentalai_session", "__Host-1dentalai_session"];
 const canonicalHost = "1dentalai.com";
 
 function canonicalizeHost(request: NextRequest) {
@@ -30,11 +30,13 @@ async function hmac(value: string) {
 }
 
 async function hasValidSignedCookie(request: NextRequest) {
-  const cookieValue = request.cookies.get(sessionCookieName)?.value;
-  if (!cookieValue) return false;
-  const [token, signature] = cookieValue.split(".");
-  if (!token || !signature) return false;
-  return signature === await hmac(token);
+  for (const cookieName of sessionCookieNames) {
+    const cookieValue = request.cookies.get(cookieName)?.value;
+    if (!cookieValue) continue;
+    const [token, signature] = cookieValue.split(".");
+    if (token && signature && signature === await hmac(token)) return true;
+  }
+  return false;
 }
 
 export async function proxy(request: NextRequest) {

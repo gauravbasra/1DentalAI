@@ -8,7 +8,8 @@ import { query, newId } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
 
 const pbkdf2 = promisify(pbkdf2Callback);
-const sessionCookieName = "__Host-1dentalai_session";
+const sessionCookieName = "__Secure-1dentalai_session";
+const legacySessionCookieName = "__Host-1dentalai_session";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
 const passwordIterations = 310_000;
 
@@ -87,6 +88,11 @@ async function requestHashes() {
     ipHash: sha256(forwardedFor),
     userAgentHash: sha256(userAgent),
   };
+}
+
+function requestHostDomain(headerList: Awaited<ReturnType<typeof headers>>) {
+  const host = (headerList.get("x-forwarded-host") || headerList.get("host") || "").split(":")[0]?.toLowerCase();
+  return host === "1dentalai.com" || host.endsWith(".1dentalai.com") ? ".1dentalai.com" : undefined;
 }
 
 async function hashPassword(password: string, salt: string, iterations = passwordIterations) {
@@ -195,13 +201,18 @@ export async function loginWithPassword(formData: FormData): Promise<LoginResult
      where "id" = $1`,
     [user.id],
   );
-  (await cookies()).set(sessionCookieName, signToken(rawToken), {
+  const cookieStore = await cookies();
+  const headerList = await headers();
+  const cookieDomain = requestHostDomain(headerList);
+  cookieStore.set(sessionCookieName, signToken(rawToken), {
     httpOnly: true,
     secure: true,
     sameSite: "lax",
     path: "/",
     maxAge: sessionMaxAgeSeconds,
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
   });
+  cookieStore.delete(legacySessionCookieName);
   await auditAuth({
     tenantId: user.tenantId,
     userId: user.id,
@@ -267,7 +278,7 @@ export async function signupAction(_previousState: AuthActionState, formData: Fo
 
 export async function logout() {
   const cookieStore = await cookies();
-  const token = readSignedToken(cookieStore.get(sessionCookieName)?.value);
+  const token = readSignedToken(cookieStore.get(sessionCookieName)?.value) ?? readSignedToken(cookieStore.get(legacySessionCookieName)?.value);
   if (token) {
     const result = await query<{ id: string; tenantId: string; userId: string }>(
       `update "AuthSession"
@@ -288,11 +299,25 @@ export async function logout() {
       });
     }
   }
+  const headerList = await headers();
+  const cookieDomain = requestHostDomain(headerList);
   cookieStore.delete(sessionCookieName);
+  cookieStore.delete(legacySessionCookieName);
+  if (cookieDomain) {
+    cookieStore.set(sessionCookieName, "", {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      domain: cookieDomain,
+      maxAge: 0,
+    });
+  }
 }
 
 export async function currentSession() {
-  const token = readSignedToken((await cookies()).get(sessionCookieName)?.value);
+  const cookieStore = await cookies();
+  const token = readSignedToken(cookieStore.get(sessionCookieName)?.value) ?? readSignedToken(cookieStore.get(legacySessionCookieName)?.value);
   if (!token) return null;
 
   const result = await query<AuthSessionRow>(
