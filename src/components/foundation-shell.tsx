@@ -90,11 +90,12 @@ export function RoleSwitcher({
   basePath: string;
 }) {
   return (
-    <div className="mb-3 flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 shadow-sm">
+    <div className="mb-3 flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-neutral-200 bg-white px-3 py-2 shadow-sm">
       <p className="shrink-0 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">
         Role
       </p>
-      <div className="flex gap-1 overflow-x-auto">
+      <div className="min-w-0 flex-1 overflow-x-auto">
+        <div className="flex w-max gap-1">
         {roles.map((role) => (
           <Link
             key={role.key}
@@ -108,6 +109,7 @@ export function RoleSwitcher({
             {role.title}
           </Link>
         ))}
+        </div>
       </div>
     </div>
   );
