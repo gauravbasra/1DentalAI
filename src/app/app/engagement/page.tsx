@@ -103,7 +103,9 @@ const channels = ["SMS", "EMAIL", "PHONE", "PORTAL"];
 
 function fmtDate(value: Date | string | null) {
   if (!value) return "Not scheduled";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date needs review";
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 }
 
 function signalValue(signals: SignalRow[], key: string) {
