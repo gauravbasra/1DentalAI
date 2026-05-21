@@ -567,12 +567,18 @@ model PmsInsurancePlan {
   payerName   String
   payerId     String?
   planName    String
+  planType    String   @default("PPO")
   groupNumber String?
+  employerName String?
+  effectiveDate DateTime?
+  terminationDate DateTime?
+  networkStatus String @default("UNKNOWN")
   status      String   @default("ACTIVE")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([tenantId, payerName])
+  @@index([tenantId, status])
 }
 
 model PmsPatientInsurance {
@@ -580,14 +586,18 @@ model PmsPatientInsurance {
   patientId     String
   planId        String
   subscriberId  String
+  memberNumber  String?
+  employer      String?
   relationship  String
   priority      Int
   eligibilityStatus String @default("NOT_CHECKED")
   lastVerifiedAt DateTime?
+  verificationNote String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   @@index([patientId, priority])
+  @@index([planId, eligibilityStatus])
 }
 
 model PmsBenefitSummary {
@@ -610,19 +620,45 @@ model PmsClaim {
   id              String   @id @default(cuid())
   tenantId        String
   patientId       String
+  patientInsuranceId String?
   appointmentId   String?
   payerName       String
+  claimNumber     String?
+  clearinghouseTraceId String?
+  attachmentStatus String @default("NOT_REQUIRED")
   status          String
   billedCents     Int      @default(0)
   allowedCents    Int      @default(0)
   paidCents       Int      @default(0)
   patientDueCents Int      @default(0)
   submittedAt     DateTime?
+  lastStatusAt    DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([tenantId, status])
   @@index([patientId, createdAt])
+  @@index([patientInsuranceId, status])
+}
+
+model PmsClaimLine {
+  id              String   @id @default(cuid())
+  claimId         String
+  procedureLogId  String?
+  procedureCodeId String
+  tooth           String?
+  surface         String?
+  serviceDate     DateTime?
+  feeCents        Int      @default(0)
+  allowedCents    Int      @default(0)
+  paidCents       Int      @default(0)
+  patientDueCents Int      @default(0)
+  status          String   @default("READY")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([claimId, status])
+  @@index([procedureLogId])
 }
 
 model PmsLedgerEntry {
@@ -630,16 +666,20 @@ model PmsLedgerEntry {
   tenantId      String
   patientId     String
   claimId       String?
+  procedureLogId String?
+  treatmentPlanId String?
   entryType     String
   description   String
   amountCents   Int
   balanceCents  Int      @default(0)
+  status        String   @default("POSTED")
   serviceDate   DateTime?
   postedAt      DateTime @default(now())
   createdAt     DateTime @default(now())
 
   @@index([tenantId, postedAt])
   @@index([patientId, postedAt])
+  @@index([claimId, entryType])
 }
 
 model PmsPayment {
@@ -649,12 +689,45 @@ model PmsPayment {
   ledgerEntryId String?
   paymentType String
   amountCents Int
+  reference   String?
+  unappliedCents Int @default(0)
   status      String
   postedAt    DateTime @default(now())
   createdAt   DateTime @default(now())
 
   @@index([tenantId, postedAt])
   @@index([patientId, postedAt])
+}
+
+model PmsLedgerAdjustment {
+  id             String   @id @default(cuid())
+  tenantId       String
+  patientId      String
+  ledgerEntryId  String?
+  adjustmentType String
+  reason         String
+  amountCents    Int
+  status         String   @default("POSTED")
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([patientId, createdAt])
+}
+
+model PmsStatement {
+  id              String   @id @default(cuid())
+  tenantId        String
+  patientId       String
+  familyAccountId String?
+  statementDate   DateTime @default(now())
+  totalCents      Int      @default(0)
+  status          String   @default("DRAFT")
+  deliveryMethod  String   @default("PORTAL")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([patientId, statementDate])
 }
 
 model PmsDocument {

@@ -35,7 +35,9 @@ const requiredSchemaModels = [
   "PmsTreatmentPlan",
   "PmsInsurancePlan",
   "PmsClaim",
+  "PmsClaimLine",
   "PmsLedgerEntry",
+  "PmsLedgerAdjustment",
   "PmsDocument",
   "PmsLabCase",
   "PmsTask",
@@ -72,10 +74,20 @@ const patientsPage = fs.readFileSync("src/app/app/pms/patients/page.tsx", "utf8"
 const patientRecordPage = fs.readFileSync("src/app/app/pms/patients/[patientId]/page.tsx", "utf8");
 const chartPage = fs.readFileSync("src/app/app/pms/chart/[patientId]/page.tsx", "utf8");
 const treatmentPlanPage = fs.readFileSync("src/app/app/pms/treatment-plans/page.tsx", "utf8");
+const insurancePage = fs.readFileSync("src/app/app/pms/insurance/page.tsx", "utf8");
+const ledgerPage = fs.readFileSync("src/app/app/pms/ledger/page.tsx", "utf8");
 for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addToothCondition", "addProcedureLog", "Treatment plan builder", "addTreatmentPlanItem", "updateTreatmentPlanStatus"]) {
-  const haystack = `${schema}\n${patientsPage}\n${patientRecordPage}\n${chartPage}\n${treatmentPlanPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+  const haystack = `${schema}\n${patientsPage}\n${patientRecordPage}\n${chartPage}\n${treatmentPlanPage}\n${insurancePage}\n${ledgerPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS family/chart production token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["createInsurancePlan", "attachInsuranceToPatient", "createClaimFromProcedures", "postLedgerCharge", "postPatientPayment", "Create claim", "Post patient payment"]) {
+  const haystack = `${schema}\n${insurancePage}\n${ledgerPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+  if (!haystack.includes(token)) {
+    console.error(`PMS financial workflow token missing: ${token}`);
     process.exit(1);
   }
 }

@@ -704,23 +704,307 @@ async function recalculateTreatmentPlan(treatmentPlanId: string) {
 
 export async function listLedger(tenantId = defaultTenantId) {
   return (await query(
-    `select le.*, p."firstName", p."lastName"
-     from "PmsLedgerEntry" le join "PmsPatient" p on p."id" = le."patientId"
-     where le."tenantId" = $1 order by le."postedAt" desc limit 100`,
+    `select le.*, p."firstName", p."lastName", p."chartNumber", c."claimNumber", c."status" as "claimStatus"
+     from "PmsLedgerEntry" le
+     join "PmsPatient" p on p."id" = le."patientId"
+     left join "PmsClaim" c on c."id" = le."claimId"
+     where le."tenantId" = $1
+     order by le."postedAt" desc limit 100`,
     [tenantId],
   )).rows;
 }
 
+export async function getLedgerBoard(tenantId = defaultTenantId) {
+  const [entries, payments, claims, balances] = await Promise.all([
+    listLedger(tenantId),
+    query(
+      `select pay.*, p."firstName", p."lastName", p."chartNumber"
+       from "PmsPayment" pay
+       join "PmsPatient" p on p."id" = pay."patientId"
+       where pay."tenantId" = $1
+       order by pay."postedAt" desc limit 50`,
+      [tenantId],
+    ),
+    query(
+      `select c.*, p."firstName", p."lastName", p."chartNumber", pi."subscriberId"
+       from "PmsClaim" c
+       join "PmsPatient" p on p."id" = c."patientId"
+       left join "PmsPatientInsurance" pi on pi."id" = c."patientInsuranceId"
+       where c."tenantId" = $1
+       order by c."createdAt" desc limit 75`,
+      [tenantId],
+    ),
+    query<{ totalBalanceCents: string; patientCount: string }>(
+      `select coalesce(sum(patient_balance), 0)::text as "totalBalanceCents", count(*)::text as "patientCount"
+       from (
+         select "patientId", coalesce(sum("balanceCents"), 0) as patient_balance
+         from "PmsLedgerEntry"
+         where "tenantId" = $1
+         group by "patientId"
+         having coalesce(sum("balanceCents"), 0) <> 0
+       ) balances`,
+      [tenantId],
+    ),
+  ]);
+
+  return {
+    entries,
+    payments: payments.rows,
+    claims: claims.rows,
+    totalBalanceCents: Number(balances.rows[0]?.totalBalanceCents ?? 0),
+    patientCountWithBalance: Number(balances.rows[0]?.patientCount ?? 0),
+  };
+}
+
 export async function listInsurance(tenantId = defaultTenantId) {
   return (await query(
-    `select pi.*, p."firstName", p."lastName", ip."payerName", ip."planName", bs."annualMaxCents", bs."annualUsedCents"
+    `select pi.*, p."firstName", p."lastName", p."chartNumber",
+       ip."payerName", ip."payerId", ip."planName", ip."planType", ip."groupNumber", ip."employerName", ip."networkStatus",
+       bs."benefitYear", bs."deductibleCents", bs."deductibleMetCents", bs."annualMaxCents", bs."annualUsedCents"
      from "PmsPatientInsurance" pi
      join "PmsPatient" p on p."id" = pi."patientId"
      join "PmsInsurancePlan" ip on ip."id" = pi."planId"
      left join "PmsBenefitSummary" bs on bs."patientInsuranceId" = pi."id"
-     where ip."tenantId" = $1 order by pi."lastVerifiedAt" asc nulls first`,
+     where ip."tenantId" = $1
+     order by pi."eligibilityStatus" asc, pi."lastVerifiedAt" asc nulls first, p."lastName", p."firstName"`,
     [tenantId],
   )).rows;
+}
+
+export async function listInsurancePlans(tenantId = defaultTenantId) {
+  return (await query(
+    `select ip.*, coalesce(covered.covered_patients, 0)::int as "coveredPatients"
+     from "PmsInsurancePlan" ip
+     left join (
+       select "planId", count(*) as covered_patients
+       from "PmsPatientInsurance"
+       group by "planId"
+     ) covered on covered."planId" = ip."id"
+     where ip."tenantId" = $1
+     order by ip."payerName", ip."planName"`,
+    [tenantId],
+  )).rows;
+}
+
+export async function getInsuranceBoard(tenantId = defaultTenantId) {
+  const [coverage, plans, claims, readyProcedures] = await Promise.all([
+    listInsurance(tenantId),
+    listInsurancePlans(tenantId),
+    query(
+      `select c.*, p."firstName", p."lastName", p."chartNumber", coalesce(lines.line_count, 0)::int as "lineCount"
+       from "PmsClaim" c
+       join "PmsPatient" p on p."id" = c."patientId"
+       left join (
+         select "claimId", count(*) as line_count
+         from "PmsClaimLine"
+         group by "claimId"
+       ) lines on lines."claimId" = c."id"
+       where c."tenantId" = $1
+       order by c."updatedAt" desc limit 50`,
+      [tenantId],
+    ),
+    listClaimReadyProcedures(tenantId),
+  ]);
+
+  return { coverage, plans, claims: claims.rows, readyProcedures };
+}
+
+export async function createInsurancePlan(input: {
+  tenantId?: string;
+  payerName: string;
+  payerId?: string;
+  planName: string;
+  planType?: string;
+  groupNumber?: string;
+  employerName?: string;
+  networkStatus?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("iplan");
+  const result = await query(
+    `insert into "PmsInsurancePlan"
+       ("id", "tenantId", "payerName", "payerId", "planName", "planType", "groupNumber", "employerName", "networkStatus", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, current_timestamp)
+     returning *`,
+    [
+      id,
+      tenantId,
+      input.payerName.trim(),
+      input.payerId?.trim() || null,
+      input.planName.trim(),
+      input.planType?.trim() || "PPO",
+      input.groupNumber?.trim() || null,
+      input.employerName?.trim() || null,
+      input.networkStatus?.trim() || "UNKNOWN",
+    ],
+  );
+  await addAudit(tenantId, "insurance_coordinator", "INSURANCE_PLAN_CREATED", "PmsInsurancePlan", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function attachInsuranceToPatient(input: {
+  patientId: string;
+  planId: string;
+  subscriberId: string;
+  memberNumber?: string;
+  employer?: string;
+  relationship: string;
+  priority?: number;
+  eligibilityStatus?: string;
+  verificationNote?: string;
+  benefitYear?: number;
+  deductibleCents?: number;
+  deductibleMetCents?: number;
+  annualMaxCents?: number;
+  annualUsedCents?: number;
+}) {
+  const id = newId("pins");
+  const result = await query<{ id: string; planId: string }>(
+    `insert into "PmsPatientInsurance"
+       ("id", "patientId", "planId", "subscriberId", "memberNumber", "employer", "relationship", "priority", "eligibilityStatus", "lastVerifiedAt", "verificationNote", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, coalesce($8::int, 1), $9, case when $9 <> 'NOT_CHECKED' then current_timestamp else null end, $10, current_timestamp)
+     returning "id", "planId"`,
+    [
+      id,
+      input.patientId,
+      input.planId,
+      input.subscriberId.trim(),
+      input.memberNumber?.trim() || null,
+      input.employer?.trim() || null,
+      input.relationship.trim() || "SELF",
+      input.priority ?? 1,
+      input.eligibilityStatus?.trim() || "NOT_CHECKED",
+      input.verificationNote?.trim() || null,
+    ],
+  );
+  const benefitId = newId("ben");
+  await query(
+    `insert into "PmsBenefitSummary"
+       ("id", "patientInsuranceId", "benefitYear", "deductibleCents", "deductibleMetCents", "annualMaxCents", "annualUsedCents", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, current_timestamp)`,
+    [
+      benefitId,
+      id,
+      input.benefitYear ?? new Date().getFullYear(),
+      input.deductibleCents ?? 0,
+      input.deductibleMetCents ?? 0,
+      input.annualMaxCents ?? 0,
+      input.annualUsedCents ?? 0,
+    ],
+  );
+  const plan = (await query<{ tenantId: string }>(`select "tenantId" from "PmsInsurancePlan" where "id" = $1`, [result.rows[0]?.planId])).rows[0];
+  await addAudit(plan?.tenantId ?? defaultTenantId, "insurance_coordinator", "PATIENT_INSURANCE_ATTACHED", "PmsPatientInsurance", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function listClaimReadyProcedures(tenantId = defaultTenantId) {
+  return (await query(
+    `select pl."id", pl."patientId", pl."procedureCodeId", pl."tooth", pl."surface", pl."status", pl."feeCents", pl."serviceDate"::text as "serviceDate",
+       pc."code", pc."description", p."firstName", p."lastName", p."chartNumber",
+       pi."id" as "patientInsuranceId", ip."payerName", ip."planName"
+     from "PmsProcedureLog" pl
+     join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
+     join "PmsPatient" p on p."id" = pl."patientId"
+     left join "PmsClaimLine" cl on cl."procedureLogId" = pl."id"
+     left join "PmsPatientInsurance" pi on pi."patientId" = pl."patientId" and pi."priority" = 1
+     left join "PmsInsurancePlan" ip on ip."id" = pi."planId"
+     where p."tenantId" = $1 and cl."id" is null and pl."status" in ('COMPLETED', 'TREATMENT_PLANNED')
+     order by pl."serviceDate" desc nulls last, p."lastName", pc."code"
+     limit 100`,
+    [tenantId],
+  )).rows;
+}
+
+export async function createClaimFromProcedures(input: { tenantId?: string; patientId: string; patientInsuranceId: string; procedureLogIds: string[] }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const procedureIds = input.procedureLogIds.filter(Boolean);
+  if (!input.patientId || !input.patientInsuranceId || procedureIds.length === 0) {
+    throw new Error("A patient, insurance coverage, and at least one procedure are required to create a claim.");
+  }
+  const coverage = (await query<{ payerName: string }>(
+    `select ip."payerName"
+     from "PmsPatientInsurance" pi
+     join "PmsInsurancePlan" ip on ip."id" = pi."planId"
+     where pi."id" = $1 and pi."patientId" = $2`,
+    [input.patientInsuranceId, input.patientId],
+  )).rows[0];
+  if (!coverage) {
+    throw new Error("Selected coverage does not belong to the selected patient.");
+  }
+
+  const procedures = (await query<{
+    id: string;
+    procedureCodeId: string;
+    tooth: string | null;
+    surface: string | null;
+    feeCents: number;
+    serviceDate: string | null;
+  }>(
+    `select pl."id", pl."procedureCodeId", pl."tooth", pl."surface", pl."feeCents", pl."serviceDate"::text as "serviceDate"
+     from "PmsProcedureLog" pl
+     left join "PmsClaimLine" cl on cl."procedureLogId" = pl."id"
+     where pl."patientId" = $1 and pl."id" = any($2::text[]) and cl."id" is null`,
+    [input.patientId, procedureIds],
+  )).rows;
+  if (!procedures.length) {
+    throw new Error("No unclaimed procedures were available for the selected patient.");
+  }
+
+  const billedCents = procedures.reduce((sum, procedure) => sum + Number(procedure.feeCents ?? 0), 0);
+  const claimId = newId("claim");
+  const claimNumber = `CLM-${new Date().getFullYear()}-${claimId.slice(-6).toUpperCase()}`;
+  await query(
+    `insert into "PmsClaim"
+       ("id", "tenantId", "patientId", "patientInsuranceId", "payerName", "claimNumber", "status", "billedCents", "lastStatusAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'READY', $7, current_timestamp, current_timestamp)`,
+    [claimId, tenantId, input.patientId, input.patientInsuranceId, coverage.payerName, claimNumber, billedCents],
+  );
+
+  for (const procedure of procedures) {
+    await query(
+      `insert into "PmsClaimLine"
+         ("id", "claimId", "procedureLogId", "procedureCodeId", "tooth", "surface", "serviceDate", "feeCents", "patientDueCents", "updatedAt")
+       values ($1, $2, $3, $4, $5, $6, $7::timestamp, $8, 0, current_timestamp)`,
+      [newId("cline"), claimId, procedure.id, procedure.procedureCodeId, procedure.tooth, procedure.surface, procedure.serviceDate, procedure.feeCents],
+    );
+  }
+  await addAudit(tenantId, "insurance_coordinator", "CLAIM_CREATED_FROM_PROCEDURES", "PmsClaim", claimId, "ALLOWED");
+  return { id: claimId, claimNumber, billedCents };
+}
+
+export async function postLedgerCharge(input: { tenantId?: string; patientId: string; description: string; amountCents: number; procedureLogId?: string; claimId?: string; serviceDate?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("led");
+  const result = await query(
+    `insert into "PmsLedgerEntry"
+       ("id", "tenantId", "patientId", "claimId", "procedureLogId", "entryType", "description", "amountCents", "balanceCents", "serviceDate")
+     values ($1, $2, $3, $4, $5, 'CHARGE', $6, $7, $7, coalesce($8::timestamp, current_timestamp))
+     returning *`,
+    [id, tenantId, input.patientId, input.claimId ?? null, input.procedureLogId ?? null, input.description.trim(), input.amountCents, input.serviceDate ?? null],
+  );
+  await addAudit(tenantId, "billing_coordinator", "LEDGER_CHARGE_POSTED", "PmsLedgerEntry", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function postPatientPayment(input: { tenantId?: string; patientId: string; amountCents: number; paymentType: string; reference?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const ledgerEntryId = newId("led");
+  const paymentId = newId("pay");
+  await query(
+    `insert into "PmsLedgerEntry"
+       ("id", "tenantId", "patientId", "entryType", "description", "amountCents", "balanceCents")
+     values ($1, $2, $3, 'PATIENT_PAYMENT', $4, $5, $5)`,
+    [ledgerEntryId, tenantId, input.patientId, `${input.paymentType} patient payment`, -Math.abs(input.amountCents)],
+  );
+  const result = await query(
+    `insert into "PmsPayment"
+       ("id", "tenantId", "patientId", "ledgerEntryId", "paymentType", "amountCents", "reference", "unappliedCents", "status")
+     values ($1, $2, $3, $4, $5, $6, $7, 0, 'POSTED')
+     returning *`,
+    [paymentId, tenantId, input.patientId, ledgerEntryId, input.paymentType.trim(), Math.abs(input.amountCents), input.reference?.trim() || null],
+  );
+  await addAudit(tenantId, "billing_coordinator", "PATIENT_PAYMENT_POSTED", "PmsPayment", paymentId, "ALLOWED");
+  return result.rows[0];
 }
 
 export async function listDocuments(tenantId = defaultTenantId) {
