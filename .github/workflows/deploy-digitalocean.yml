@@ -53,7 +53,7 @@ jobs:
             -e "ssh -p ${DEPLOY_PORT} -i ~/.ssh/do_deploy_key" \
             ./ "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}:${DEPLOY_PATH}/"
 
-      - name: Install and restart 1DentalAI service
+      - name: Provision database and run migrations
         run: |
           ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
             set -euo pipefail
@@ -73,7 +73,14 @@ jobs:
               chmod 600 .env
             fi
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
-            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate
+            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate < /dev/null
+          EOF
+
+      - name: Install and restart 1DentalAI service
+        run: |
+          ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
+            set -euo pipefail
+            cd "${DEPLOY_PATH}"
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build app
             for i in 1 2 3 4 5; do
               curl -fsS http://127.0.0.1:3001/api/health && break
