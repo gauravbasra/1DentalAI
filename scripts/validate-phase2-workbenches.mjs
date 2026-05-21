@@ -36,12 +36,19 @@ const requiredModels = [
 ];
 
 const failures = [];
+const promotedProductionRoutes = new Map([
+  ["pms-schedule", "/app/pms/schedule?role="],
+  ["patient-chart", "/app/pms/patients?role="],
+  ["perio-charting", "/app/pms/patients?role="],
+  ["treatment-plans", "/app/pms/treatment-plans?role="],
+]);
 
 for (const slug of requiredSlugs) {
   if (!workbenchData.includes(`slug: "${slug}"`)) {
     failures.push(`Missing workbench slug in workbench-data.ts: ${slug}`);
   }
-  if (!foundationData.includes(`/app/work/${slug}?role=`)) {
+  const promotedRoute = promotedProductionRoutes.get(slug);
+  if (!foundationData.includes(`/app/work/${slug}?role=`) && (!promotedRoute || !foundationData.includes(promotedRoute))) {
     failures.push(`Dashboard does not route to workbench slug: ${slug}`);
   }
 }

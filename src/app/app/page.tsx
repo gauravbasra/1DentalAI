@@ -53,9 +53,9 @@ export default async function AppOverview({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-cyan-700">Daily operating view</p>
-            <h2 className="mt-2 text-3xl font-semibold tracking-tight text-neutral-950">Where to work today.</h2>
+            <h2 className="mt-2 text-3xl font-semibold tracking-tight text-neutral-950">Role command areas</h2>
             <p className="mt-3 max-w-4xl text-sm leading-6 text-neutral-600">
-              Start in the work areas owned by {role.title.toLowerCase()}, then use the queue and metrics below to decide what needs attention first.
+              Start in the PMS, clinical, RCM, communications, marketing, and operations areas owned by {role.title.toLowerCase()}, then use the queue and metrics below to decide what needs attention first.
             </p>
           </div>
           <StatusPill tone="green">job-specific view</StatusPill>
@@ -124,7 +124,7 @@ export default async function AppOverview({
       <section className="mt-6 grid gap-6 lg:grid-cols-3">
         <FoundationLink href={`/app/rooms?role=${role.key}`} title="Room and chair view" body="Inspect operatory status, provider assignment, turnover, emergency capacity, and blocked-chair reasons." />
         <FoundationLink href={`/app/workflows?role=${role.key}`} title="Work rules" body={`${workflows.length} practice workflows show what each location can adjust and what requires approval.`} />
-        <FoundationLink href={`/app/modules?role=${role.key}`} title="Product areas" body={`${visibleModules.length} areas visible to ${role.title}; ${blockedModules.length} hidden by access controls.`} />
+        <FoundationLink href={`/app/modules?role=${role.key}`} title="Product map" body={`${visibleModules.length} areas visible to ${role.title}; ${blockedModules.length} hidden by access controls.`} />
       </section>
     </FoundationShell>
   );

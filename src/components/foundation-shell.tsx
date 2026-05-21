@@ -8,11 +8,11 @@ import {
 
 const appNav = [
   { href: "/app", label: "Overview" },
-  { href: "/app/work/pms-schedule", label: "Workbenches" },
+  { href: "/app/pms", label: "PMS" },
   { href: "/app/locations", label: "Locations" },
   { href: "/app/team", label: "Team" },
   { href: "/app/rooms", label: "Rooms" },
-  { href: "/app/modules", label: "Product Areas" },
+  { href: "/app/modules", label: "Product Map" },
   { href: "/app/workflows", label: "Work Rules" },
   { href: "/app/audit", label: "Audit" },
 ];

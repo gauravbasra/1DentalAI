@@ -190,3 +190,418 @@ model WorkbenchAuditEvent {
   @@index([actorRole])
   @@index([outcome])
 }
+
+model PmsFamilyAccount {
+  id            String   @id @default(cuid())
+  tenantId      String
+  accountNumber String
+  displayName   String
+  billingStatus String   @default("CURRENT")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, accountNumber])
+  @@index([tenantId, billingStatus])
+}
+
+model PmsPatient {
+  id              String    @id @default(cuid())
+  tenantId        String
+  familyAccountId String?
+  chartNumber     String
+  firstName       String
+  lastName        String
+  preferredName   String?
+  dateOfBirth     DateTime?
+  phone           String?
+  email           String?
+  status          String    @default("ACTIVE")
+  privacyLevel    String    @default("STANDARD")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([tenantId, chartNumber])
+  @@index([tenantId, lastName, firstName])
+  @@index([tenantId, status])
+}
+
+model PmsProvider {
+  id            String   @id @default(cuid())
+  tenantId      String
+  displayName   String
+  providerType  String
+  npi           String?
+  licenseNumber String?
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId, providerType])
+  @@index([tenantId, status])
+}
+
+model PmsStaffMember {
+  id          String   @id @default(cuid())
+  tenantId    String
+  displayName String
+  roleKey     String
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, roleKey])
+}
+
+model PmsOperatory {
+  id         String   @id @default(cuid())
+  tenantId   String
+  locationId String
+  code       String
+  name       String
+  status     String   @default("READY")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([tenantId, locationId, code])
+  @@index([tenantId, status])
+}
+
+model PmsAppointment {
+  id              String   @id @default(cuid())
+  tenantId        String
+  patientId       String?
+  providerId      String?
+  operatoryId     String?
+  startsAt        DateTime
+  endsAt          DateTime
+  status          String
+  appointmentType String
+  productionCents Int      @default(0)
+  readinessStatus String   @default("NEEDS_REVIEW")
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, startsAt])
+  @@index([tenantId, providerId, startsAt])
+  @@index([tenantId, operatoryId, startsAt])
+  @@index([tenantId, status])
+}
+
+model PmsProcedureCode {
+  id              String   @id @default(cuid())
+  tenantId        String
+  code            String
+  description     String
+  category        String
+  defaultFeeCents Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId, category])
+}
+
+model PmsAppointmentProcedure {
+  id              String   @id @default(cuid())
+  appointmentId   String
+  procedureCodeId String
+  tooth           String?
+  surface         String?
+  feeCents        Int      @default(0)
+  status          String   @default("PLANNED")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([appointmentId])
+}
+
+model PmsMedicalAlert {
+  id        String   @id @default(cuid())
+  patientId String
+  severity  String
+  title     String
+  details   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId, active])
+}
+
+model PmsMedication {
+  id        String   @id @default(cuid())
+  patientId String
+  name      String
+  dosage    String?
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId, status])
+}
+
+model PmsAllergy {
+  id        String   @id @default(cuid())
+  patientId String
+  allergen  String
+  reaction  String?
+  severity  String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId, active])
+}
+
+model PmsClinicalNote {
+  id         String    @id @default(cuid())
+  patientId  String
+  providerId String?
+  noteType   String
+  status     String    @default("DRAFT")
+  body       String
+  signedAt   DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([patientId, createdAt])
+  @@index([providerId, status])
+}
+
+model PmsToothCondition {
+  id        String   @id @default(cuid())
+  patientId String
+  tooth     String
+  surface   String?
+  condition String
+  status    String
+  source    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId, tooth])
+}
+
+model PmsProcedureLog {
+  id              String    @id @default(cuid())
+  patientId       String
+  providerId      String?
+  procedureCodeId String
+  tooth           String?
+  surface         String?
+  status          String
+  feeCents        Int       @default(0)
+  serviceDate     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([patientId, status])
+  @@index([providerId, serviceDate])
+}
+
+model PmsPerioExam {
+  id            String   @id @default(cuid())
+  patientId     String
+  providerId    String?
+  examDate      DateTime @default(now())
+  status        String   @default("IN_PROGRESS")
+  diagnosis     String?
+  bleedingScore Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([patientId, examDate])
+}
+
+model PmsPerioMeasure {
+  id           String   @id @default(cuid())
+  perioExamId  String
+  tooth        String
+  site         String
+  probingDepth Int
+  bleeding     Boolean  @default(false)
+  recession    Int?
+  mobility     String?
+  furcation    String?
+  createdAt    DateTime @default(now())
+
+  @@unique([perioExamId, tooth, site])
+}
+
+model PmsTreatmentPlan {
+  id             String   @id @default(cuid())
+  tenantId       String
+  patientId      String
+  providerId     String?
+  name           String
+  status         String   @default("DRAFT")
+  totalFeeCents  Int      @default(0)
+  patientEstimateCents Int @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([patientId, status])
+}
+
+model PmsTreatmentPlanItem {
+  id              String   @id @default(cuid())
+  treatmentPlanId String
+  procedureCodeId String
+  sequence        Int
+  tooth           String?
+  surface         String?
+  feeCents        Int      @default(0)
+  status          String   @default("PROPOSED")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([treatmentPlanId, sequence])
+}
+
+model PmsInsurancePlan {
+  id          String   @id @default(cuid())
+  tenantId    String
+  payerName   String
+  payerId     String?
+  planName    String
+  groupNumber String?
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, payerName])
+}
+
+model PmsPatientInsurance {
+  id            String   @id @default(cuid())
+  patientId     String
+  planId        String
+  subscriberId  String
+  relationship  String
+  priority      Int
+  eligibilityStatus String @default("NOT_CHECKED")
+  lastVerifiedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([patientId, priority])
+}
+
+model PmsBenefitSummary {
+  id                 String   @id @default(cuid())
+  patientInsuranceId String
+  benefitYear        Int
+  deductibleCents    Int      @default(0)
+  deductibleMetCents Int      @default(0)
+  annualMaxCents     Int      @default(0)
+  annualUsedCents    Int      @default(0)
+  frequencies        Json?
+  limitations        Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([patientInsuranceId, benefitYear])
+}
+
+model PmsClaim {
+  id              String   @id @default(cuid())
+  tenantId        String
+  patientId       String
+  appointmentId   String?
+  payerName       String
+  status          String
+  billedCents     Int      @default(0)
+  allowedCents    Int      @default(0)
+  paidCents       Int      @default(0)
+  patientDueCents Int      @default(0)
+  submittedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([patientId, createdAt])
+}
+
+model PmsLedgerEntry {
+  id            String   @id @default(cuid())
+  tenantId      String
+  patientId     String
+  claimId       String?
+  entryType     String
+  description   String
+  amountCents   Int
+  balanceCents  Int      @default(0)
+  serviceDate   DateTime?
+  postedAt      DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, postedAt])
+  @@index([patientId, postedAt])
+}
+
+model PmsPayment {
+  id          String   @id @default(cuid())
+  tenantId    String
+  patientId   String
+  ledgerEntryId String?
+  paymentType String
+  amountCents Int
+  status      String
+  postedAt    DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, postedAt])
+  @@index([patientId, postedAt])
+}
+
+model PmsDocument {
+  id             String   @id @default(cuid())
+  tenantId       String
+  patientId      String?
+  documentType   String
+  title          String
+  storageUri     String?
+  status         String   @default("REQUIRED")
+  signatureStatus String  @default("NOT_REQUIRED")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([patientId, documentType])
+}
+
+model PmsTask {
+  id            String   @id @default(cuid())
+  tenantId      String
+  patientId     String?
+  appointmentId String?
+  ownerRoleKey  String
+  title         String
+  taskType      String
+  status        String   @default("OPEN")
+  priority      String   @default("NORMAL")
+  dueAt         DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId, ownerRoleKey, status])
+  @@index([tenantId, dueAt])
+}
+
+model PmsAuditEvent {
+  id        String   @id @default(cuid())
+  tenantId  String
+  actorRole String
+  eventType String
+  targetType String
+  targetId  String?
+  outcome   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([targetType, targetId])
+}

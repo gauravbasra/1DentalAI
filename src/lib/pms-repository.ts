@@ -1,0 +1,387 @@
+import { newId, query } from "@/lib/db";
+
+export const defaultTenantId = "tenant_1dentalai_production";
+
+export type PmsPatientSummary = {
+  id: string;
+  chartNumber: string;
+  firstName: string;
+  lastName: string;
+  preferredName: string | null;
+  dateOfBirth: string | null;
+  phone: string | null;
+  email: string | null;
+  status: string;
+  privacyLevel: string;
+  openTasks: number;
+  balanceCents: number;
+};
+
+export type PmsAppointmentRow = {
+  id: string;
+  patientId: string | null;
+  patientName: string | null;
+  providerName: string | null;
+  operatoryName: string | null;
+  startsAt: string;
+  endsAt: string;
+  status: string;
+  appointmentType: string;
+  productionCents: number;
+  readinessStatus: string;
+  notes: string | null;
+};
+
+export function cents(amount: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(amount / 100);
+}
+
+export async function getPmsDashboard(tenantId = defaultTenantId) {
+  const [patients, schedule, tasks, claims, ledgers, procedures] = await Promise.all([
+    query<{ count: string }>(`select count(*)::text as count from "PmsPatient" where "tenantId" = $1 and "status" = 'ACTIVE'`, [tenantId]),
+    query<{ count: string; production: string }>(
+      `select count(*)::text as count, coalesce(sum("productionCents"), 0)::text as production
+       from "PmsAppointment"
+       where "tenantId" = $1 and "startsAt"::date = current_date`,
+      [tenantId],
+    ),
+    query<{ count: string }>(`select count(*)::text as count from "PmsTask" where "tenantId" = $1 and "status" = 'OPEN'`, [tenantId]),
+    query<{ count: string; billed: string }>(
+      `select count(*)::text as count, coalesce(sum("billedCents" - "paidCents"), 0)::text as billed
+       from "PmsClaim"
+       where "tenantId" = $1 and "status" in ('READY', 'SUBMITTED', 'REJECTED', 'DENIED')`,
+      [tenantId],
+    ),
+    query<{ balance: string }>(
+      `select coalesce(sum("balanceCents"), 0)::text as balance from "PmsLedgerEntry" where "tenantId" = $1`,
+      [tenantId],
+    ),
+    query<{ count: string }>(`select count(*)::text as count from "PmsProcedureCode" where "tenantId" = $1`, [tenantId]),
+  ]);
+
+  return {
+    activePatients: Number(patients.rows[0]?.count ?? 0),
+    todayAppointments: Number(schedule.rows[0]?.count ?? 0),
+    todayProductionCents: Number(schedule.rows[0]?.production ?? 0),
+    openTasks: Number(tasks.rows[0]?.count ?? 0),
+    claimExposureCents: Number(claims.rows[0]?.billed ?? 0),
+    openClaimCount: Number(claims.rows[0]?.count ?? 0),
+    patientBalanceCents: Number(ledgers.rows[0]?.balance ?? 0),
+    procedureCodeCount: Number(procedures.rows[0]?.count ?? 0),
+  };
+}
+
+export async function listPatients(tenantId = defaultTenantId, search = "") {
+  const like = `%${search.trim()}%`;
+  const result = await query<PmsPatientSummary>(
+    `select
+      p."id",
+      p."chartNumber",
+      p."firstName",
+      p."lastName",
+      p."preferredName",
+      p."dateOfBirth"::text as "dateOfBirth",
+      p."phone",
+      p."email",
+      p."status",
+      p."privacyLevel",
+      coalesce(t.open_tasks, 0)::int as "openTasks",
+      coalesce(l.balance_cents, 0)::int as "balanceCents"
+     from "PmsPatient" p
+     left join (
+       select "patientId", count(*) as open_tasks
+       from "PmsTask"
+       where "tenantId" = $1 and "status" = 'OPEN'
+       group by "patientId"
+     ) t on t."patientId" = p."id"
+     left join (
+       select "patientId", sum("balanceCents") as balance_cents
+       from "PmsLedgerEntry"
+       where "tenantId" = $1
+       group by "patientId"
+     ) l on l."patientId" = p."id"
+     where p."tenantId" = $1
+       and ($2 = '%%' or p."firstName" ilike $2 or p."lastName" ilike $2 or p."chartNumber" ilike $2 or p."phone" ilike $2)
+     order by p."lastName", p."firstName"
+     limit 100`,
+    [tenantId, like],
+  );
+  return result.rows;
+}
+
+export async function createPatient(input: {
+  tenantId?: string;
+  firstName: string;
+  lastName: string;
+  preferredName?: string;
+  dateOfBirth?: string;
+  phone?: string;
+  email?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const chart = await query<{ next: string }>(
+    `select ('P' || lpad((coalesce(max(substring("chartNumber" from 2)::int), 0) + 1)::text, 6, '0')) as next
+     from "PmsPatient"
+     where "tenantId" = $1 and "chartNumber" ~ '^P[0-9]+$'`,
+    [tenantId],
+  );
+  const id = newId("pat");
+  const chartNumber = chart.rows[0]?.next ?? "P000001";
+
+  const result = await query<PmsPatientSummary>(
+    `insert into "PmsPatient"
+       ("id", "tenantId", "chartNumber", "firstName", "lastName", "preferredName", "dateOfBirth", "phone", "email", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7::timestamp, $8, $9, current_timestamp)
+     returning "id", "chartNumber", "firstName", "lastName", "preferredName", "dateOfBirth"::text as "dateOfBirth",
+       "phone", "email", "status", "privacyLevel", 0::int as "openTasks", 0::int as "balanceCents"`,
+    [
+      id,
+      tenantId,
+      chartNumber,
+      input.firstName.trim(),
+      input.lastName.trim(),
+      input.preferredName?.trim() || null,
+      input.dateOfBirth || null,
+      input.phone?.trim() || null,
+      input.email?.trim() || null,
+    ],
+  );
+
+  await addAudit(tenantId, "front_desk", "PATIENT_CREATED", "PmsPatient", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function getPatient(patientId: string) {
+  const result = await query<PmsPatientSummary>(
+    `select
+      p."id", p."chartNumber", p."firstName", p."lastName", p."preferredName", p."dateOfBirth"::text as "dateOfBirth",
+      p."phone", p."email", p."status", p."privacyLevel",
+      coalesce(t.open_tasks, 0)::int as "openTasks",
+      coalesce(l.balance_cents, 0)::int as "balanceCents"
+     from "PmsPatient" p
+     left join (
+       select "patientId", count(*) as open_tasks from "PmsTask" where "status" = 'OPEN' group by "patientId"
+     ) t on t."patientId" = p."id"
+     left join (
+       select "patientId", sum("balanceCents") as balance_cents from "PmsLedgerEntry" group by "patientId"
+     ) l on l."patientId" = p."id"
+     where p."id" = $1`,
+    [patientId],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function listSchedule(tenantId = defaultTenantId, date?: string) {
+  const result = await query<PmsAppointmentRow>(
+    `select
+      a."id",
+      a."patientId",
+      case when p."id" is null then null else p."lastName" || ', ' || p."firstName" end as "patientName",
+      pr."displayName" as "providerName",
+      op."name" as "operatoryName",
+      a."startsAt"::text as "startsAt",
+      a."endsAt"::text as "endsAt",
+      a."status",
+      a."appointmentType",
+      a."productionCents",
+      a."readinessStatus",
+      a."notes"
+     from "PmsAppointment" a
+     left join "PmsPatient" p on p."id" = a."patientId"
+     left join "PmsProvider" pr on pr."id" = a."providerId"
+     left join "PmsOperatory" op on op."id" = a."operatoryId"
+     where a."tenantId" = $1 and a."startsAt"::date = coalesce($2::date, current_date)
+     order by a."startsAt", op."code"`,
+    [tenantId, date ?? null],
+  );
+  return result.rows;
+}
+
+export async function listProviders(tenantId = defaultTenantId) {
+  return (await query<{ id: string; displayName: string; providerType: string }>(
+    `select "id", "displayName", "providerType" from "PmsProvider" where "tenantId" = $1 and "status" = 'ACTIVE' order by "providerType", "displayName"`,
+    [tenantId],
+  )).rows;
+}
+
+export async function listOperatories(tenantId = defaultTenantId) {
+  return (await query<{ id: string; code: string; name: string; status: string }>(
+    `select "id", "code", "name", "status" from "PmsOperatory" where "tenantId" = $1 order by "code"`,
+    [tenantId],
+  )).rows;
+}
+
+export async function createAppointmentHold(input: {
+  tenantId?: string;
+  patientId?: string;
+  providerId?: string;
+  operatoryId?: string;
+  startsAt: string;
+  endsAt: string;
+  appointmentType: string;
+  notes?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("appt");
+  const result = await query<PmsAppointmentRow>(
+    `insert into "PmsAppointment"
+       ("id", "tenantId", "patientId", "providerId", "operatoryId", "startsAt", "endsAt", "status", "appointmentType", "notes", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6::timestamp, $7::timestamp, 'HELD', $8, $9, current_timestamp)
+     returning "id", "patientId", null::text as "patientName", null::text as "providerName", null::text as "operatoryName",
+       "startsAt"::text as "startsAt", "endsAt"::text as "endsAt", "status", "appointmentType", "productionCents", "readinessStatus", "notes"`,
+    [id, tenantId, input.patientId ?? null, input.providerId ?? null, input.operatoryId ?? null, input.startsAt, input.endsAt, input.appointmentType, input.notes ?? null],
+  );
+  await addAudit(tenantId, "front_desk", "APPOINTMENT_HELD", "PmsAppointment", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function updateAppointmentStatus(appointmentId: string, status: string) {
+  const result = await query<{ id: string; tenantId: string; status: string }>(
+    `update "PmsAppointment" set "status" = $2, "updatedAt" = current_timestamp where "id" = $1 returning "id", "tenantId", "status"`,
+    [appointmentId, status],
+  );
+  const row = result.rows[0] ?? null;
+  if (row) await addAudit(row.tenantId, "front_desk", "APPOINTMENT_STATUS_UPDATED", "PmsAppointment", appointmentId, "ALLOWED");
+  return row;
+}
+
+export async function getChart(patientId: string) {
+  const [patient, alerts, allergies, meds, conditions, notes, procedures] = await Promise.all([
+    getPatient(patientId),
+    query(`select * from "PmsMedicalAlert" where "patientId" = $1 and "active" = true order by "severity" desc`, [patientId]),
+    query(`select * from "PmsAllergy" where "patientId" = $1 and "active" = true order by "severity" desc`, [patientId]),
+    query(`select * from "PmsMedication" where "patientId" = $1 and "status" = 'ACTIVE' order by "name"`, [patientId]),
+    query(`select * from "PmsToothCondition" where "patientId" = $1 order by "tooth", "surface"`, [patientId]),
+    query(`select * from "PmsClinicalNote" where "patientId" = $1 order by "createdAt" desc limit 50`, [patientId]),
+    query(
+      `select pl.*, pc."code", pc."description"
+       from "PmsProcedureLog" pl join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
+       where pl."patientId" = $1 order by pl."serviceDate" desc nulls last, pl."createdAt" desc`,
+      [patientId],
+    ),
+  ]);
+  return { patient, alerts: alerts.rows, allergies: allergies.rows, medications: meds.rows, conditions: conditions.rows, notes: notes.rows, procedures: procedures.rows };
+}
+
+export async function addClinicalNote(patientId: string, body: string, noteType = "PROGRESS") {
+  const id = newId("note");
+  const result = await query(
+    `insert into "PmsClinicalNote" ("id", "patientId", "noteType", "body", "status", "updatedAt")
+     values ($1, $2, $3, $4, 'DRAFT', current_timestamp)
+     returning *`,
+    [id, patientId, noteType, body.trim()],
+  );
+  await addAudit(defaultTenantId, "associate_provider", "CLINICAL_NOTE_CREATED", "PmsClinicalNote", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function getPerio(patientId: string) {
+  const exam = await query(
+    `select * from "PmsPerioExam" where "patientId" = $1 order by "examDate" desc limit 1`,
+    [patientId],
+  );
+  const examRow = exam.rows[0] ?? null;
+  const measures = examRow
+    ? await query(`select * from "PmsPerioMeasure" where "perioExamId" = $1 order by "tooth", "site"`, [examRow.id])
+    : { rows: [] };
+  return { patient: await getPatient(patientId), exam: examRow, measures: measures.rows };
+}
+
+export async function addPerioMeasure(patientId: string, input: { tooth: string; site: string; probingDepth: number; bleeding?: boolean; recession?: number }) {
+  let exam = (await query<{ id: string }>(`select "id" from "PmsPerioExam" where "patientId" = $1 and "status" = 'IN_PROGRESS' order by "examDate" desc limit 1`, [patientId])).rows[0];
+  if (!exam) {
+    const created = await query<{ id: string }>(
+      `insert into "PmsPerioExam" ("id", "patientId", "status", "updatedAt") values ($1, $2, 'IN_PROGRESS', current_timestamp) returning "id"`,
+      [newId("perio"), patientId],
+    );
+    exam = created.rows[0];
+  }
+
+  const id = newId("pm");
+  const result = await query(
+    `insert into "PmsPerioMeasure" ("id", "perioExamId", "tooth", "site", "probingDepth", "bleeding", "recession")
+     values ($1, $2, $3, $4, $5, $6, $7)
+     on conflict ("perioExamId", "tooth", "site") do update set
+       "probingDepth" = excluded."probingDepth", "bleeding" = excluded."bleeding", "recession" = excluded."recession"
+     returning *`,
+    [id, exam.id, input.tooth, input.site, input.probingDepth, Boolean(input.bleeding), input.recession ?? null],
+  );
+  await addAudit(defaultTenantId, "rdh", "PERIO_MEASURE_RECORDED", "PmsPerioMeasure", result.rows[0].id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function listTreatmentPlans(tenantId = defaultTenantId) {
+  return (await query(
+    `select tp.*, p."firstName", p."lastName", pr."displayName" as "providerName"
+     from "PmsTreatmentPlan" tp
+     join "PmsPatient" p on p."id" = tp."patientId"
+     left join "PmsProvider" pr on pr."id" = tp."providerId"
+     where tp."tenantId" = $1
+     order by tp."updatedAt" desc`,
+    [tenantId],
+  )).rows;
+}
+
+export async function listLedger(tenantId = defaultTenantId) {
+  return (await query(
+    `select le.*, p."firstName", p."lastName"
+     from "PmsLedgerEntry" le join "PmsPatient" p on p."id" = le."patientId"
+     where le."tenantId" = $1 order by le."postedAt" desc limit 100`,
+    [tenantId],
+  )).rows;
+}
+
+export async function listInsurance(tenantId = defaultTenantId) {
+  return (await query(
+    `select pi.*, p."firstName", p."lastName", ip."payerName", ip."planName", bs."annualMaxCents", bs."annualUsedCents"
+     from "PmsPatientInsurance" pi
+     join "PmsPatient" p on p."id" = pi."patientId"
+     join "PmsInsurancePlan" ip on ip."id" = pi."planId"
+     left join "PmsBenefitSummary" bs on bs."patientInsuranceId" = pi."id"
+     where ip."tenantId" = $1 order by pi."lastVerifiedAt" asc nulls first`,
+    [tenantId],
+  )).rows;
+}
+
+export async function listDocuments(tenantId = defaultTenantId) {
+  return (await query(
+    `select d.*, p."firstName", p."lastName"
+     from "PmsDocument" d left join "PmsPatient" p on p."id" = d."patientId"
+     where d."tenantId" = $1 order by d."updatedAt" desc`,
+    [tenantId],
+  )).rows;
+}
+
+export async function listTasks(tenantId = defaultTenantId, role?: string) {
+  return (await query(
+    `select t.*, p."firstName", p."lastName"
+     from "PmsTask" t left join "PmsPatient" p on p."id" = t."patientId"
+     where t."tenantId" = $1 and ($2::text is null or t."ownerRoleKey" = $2)
+     order by t."priority" desc, t."dueAt" asc nulls last, t."createdAt" desc`,
+    [tenantId, role ?? null],
+  )).rows;
+}
+
+export async function createTask(input: { tenantId?: string; patientId?: string; ownerRoleKey: string; title: string; taskType: string; priority?: string; dueAt?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("task");
+  const result = await query(
+    `insert into "PmsTask" ("id", "tenantId", "patientId", "ownerRoleKey", "title", "taskType", "priority", "dueAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, current_timestamp) returning *`,
+    [id, tenantId, input.patientId ?? null, input.ownerRoleKey, input.title.trim(), input.taskType, input.priority ?? "NORMAL", input.dueAt ?? null],
+  );
+  await addAudit(tenantId, input.ownerRoleKey, "TASK_CREATED", "PmsTask", id, "ALLOWED");
+  return result.rows[0];
+}
+
+async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string, outcome: string) {
+  await query(
+    `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome")
+     values ($1, $2, $3, $4, $5, $6, $7)`,
+    [newId("audit"), tenantId, actorRole, eventType, targetType, targetId, outcome],
+  );
+}

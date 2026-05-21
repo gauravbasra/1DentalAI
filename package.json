@@ -10,7 +10,8 @@
     "check": "npm run lint && npm run build",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
-    "test:workbenches": "node scripts/validate-phase2-workbenches.mjs"
+    "test:workbenches": "node scripts/validate-phase2-workbenches.mjs",
+    "test:pms": "node scripts/validate-phase3-pms.mjs"
   },
   "dependencies": {
     "@prisma/client": "^7.8.0",
