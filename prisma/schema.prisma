@@ -1770,6 +1770,135 @@ model PhoneVoicemail {
   @@index([conversationId])
 }
 
+model PatientEngagementChannelSetting {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  channel             String
+  displayName         String
+  status              String   @default("SETUP_REQUIRED")
+  theme               Json?
+  nlpMode             String   @default("RULES_AND_AI_DRAFT")
+  knowledgeBaseStatus String   @default("NEEDS_REVIEW")
+  schedulingStatus    String   @default("PMS_CONNECTOR_REQUIRED")
+  formsStatus         String   @default("PMS_FORMS_REQUIRED")
+  connectorStatus     String   @default("CONNECTOR_REQUIRED")
+  approvalPolicy      Json?
+  nextAction          String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([tenantId, channel])
+  @@index([tenantId, status, channel])
+}
+
+model PatientEngagementKnowledgeSource {
+  id            String   @id @default(cuid())
+  tenantId      String
+  title         String
+  sourceType    String
+  sourceModule  String
+  serviceLine   String?
+  status        String   @default("NEEDS_REVIEW")
+  ownerRoleKey  String   @default("practice_manager")
+  contentSummary String
+  sourceUrl     String?
+  lastReviewedAt DateTime?
+  nextAction    String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId, status, sourceModule])
+  @@index([tenantId, serviceLine])
+}
+
+model PatientWebChatConversation {
+  id              String   @id @default(cuid())
+  tenantId        String
+  patientId       String?
+  appointmentId   String?
+  visitorName     String?
+  visitorPhone    String?
+  visitorEmail    String?
+  sourcePage      String?
+  nlpIntent       String?
+  nlpConfidence   Int      @default(0)
+  status          String   @default("OPEN")
+  transcriptSummary String?
+  schedulingOutcome String @default("NOT_ATTEMPTED")
+  pmsWritebackStatus String @default("PMS_CONNECTOR_REQUIRED")
+  leadFormId      String?
+  ownerRoleKey    String   @default("front_desk")
+  blockedReason   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, createdAt])
+  @@index([patientId, createdAt])
+  @@index([tenantId, nlpIntent])
+}
+
+model PatientEngagementLeadForm {
+  id              String   @id @default(cuid())
+  tenantId        String
+  name            String
+  serviceLine     String
+  sourceChannel   String   @default("WEB_CHAT")
+  status          String   @default("DRAFT")
+  fieldSchema     Json?
+  pmsMapping      Json?
+  routingRule     String?
+  connectorStatus String   @default("PMS_CONNECTOR_REQUIRED")
+  conversionStatus String  @default("NOT_ATTRIBUTED")
+  nextAction      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, serviceLine])
+}
+
+model PatientEngagementFormPacket {
+  id              String   @id @default(cuid())
+  tenantId        String
+  patientId       String?
+  appointmentId   String?
+  packetType      String
+  status          String   @default("DRAFT")
+  formTemplateIds String[]
+  deliveryChannel String   @default("PORTAL")
+  pmsWritebackStatus String @default("PMS_FORMS_REQUIRED")
+  consentStatus   String   @default("UNKNOWN")
+  dueAt           DateTime?
+  nextAction      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, dueAt])
+  @@index([patientId, status])
+  @@index([appointmentId])
+}
+
+model PatientEngagementSchedulingRule {
+  id              String   @id @default(cuid())
+  tenantId        String
+  name            String
+  sourceChannel   String
+  appointmentCategoryId String?
+  providerId      String?
+  locationId      String?
+  status          String   @default("SETUP_REQUIRED")
+  bookingWindowDays Int   @default(30)
+  allowReschedule Boolean @default(true)
+  requireHumanApproval Boolean @default(true)
+  pmsWritebackStatus String @default("PMS_CONNECTOR_REQUIRED")
+  conflictPolicy  Json?
+  nextAction      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, sourceChannel])
+  @@index([appointmentCategoryId])
+}
+
 model ReputationReviewWorkflow {
   id                  String   @id @default(cuid())
   tenantId            String

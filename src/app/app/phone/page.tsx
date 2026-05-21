@@ -65,6 +65,12 @@ type ProviderRow = { id: string; providerType: string; name: string; trunkDomain
 type ActiveCallRow = { id: string; conversationId: string | null; fromNumber: string; toNumber: string; direction: string; callState: string; extensionNumber: string | null; extensionName: string | null; callerName: string | null; aiIntent: string | null; parkedSlot: string | null; holdStartedAt: string | null; startedAt: string };
 type ControlRow = { id: string; actionType: string; requestedByRole: string; targetNumber: string | null; targetParkSlot: string | null; providerStatus: string; blockedReason: string | null; resultSummary: string | null; targetExtensionName: string | null; extensionNumber: string | null; createdAt: string };
 type VoicemailRow = { id: string; callerNumber: string | null; callerName: string | null; status: string; durationSeconds: number | null; transcription: string | null; ownerRoleKey: string; dueAt: string | null; extensionNumber: string | null; extensionName: string | null };
+type ChannelSettingRow = { id: string; channel: string; displayName: string; status: string; theme: unknown; nlpMode: string; knowledgeBaseStatus: string; schedulingStatus: string; formsStatus: string; connectorStatus: string; approvalPolicy: unknown; nextAction: string };
+type KnowledgeSourceRow = { id: string; title: string; sourceType: string; sourceModule: string; serviceLine: string | null; status: string; ownerRoleKey: string; contentSummary: string; sourceUrl: string | null; nextAction: string };
+type WebChatRow = { id: string; visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null; sourcePage: string | null; nlpIntent: string | null; nlpConfidence: number; status: string; transcriptSummary: string | null; schedulingOutcome: string; pmsWritebackStatus: string; leadFormName: string | null; serviceLine: string | null; ownerRoleKey: string; blockedReason: string | null };
+type LeadFormRow = { id: string; name: string; serviceLine: string; sourceChannel: string; status: string; fieldSchema: unknown; pmsMapping: unknown; routingRule: string | null; connectorStatus: string; conversionStatus: string; nextAction: string };
+type FormPacketRow = { id: string; packetType: string; status: string; deliveryChannel: string; pmsWritebackStatus: string; consentStatus: string; dueAt: string | null; nextAction: string; firstName: string | null; lastName: string | null; chartNumber: string | null; appointmentType: string | null; startsAt: string | null };
+type SchedulingRuleRow = { id: string; name: string; sourceChannel: string; appointmentCategoryName: string | null; providerName: string | null; locationName: string | null; status: string; bookingWindowDays: number; allowReschedule: boolean; requireHumanApproval: boolean; pmsWritebackStatus: string; conflictPolicy: unknown; nextAction: string };
 type ScreenPopAppointment = { id: string; appointmentType: string; startsAt: string; status: string; readinessStatus: string; productionCents: number };
 type ScreenPopTreatmentPlan = { id: string; name: string; status: string; totalFeeCents: number; patientEstimateCents: number };
 type ScreenPopRecall = { id: string; recallType: string; dueDate: string; status: string };
@@ -191,7 +197,7 @@ async function voicemailAction(formData: FormData) {
 export default async function PhonePage({ searchParams }: { searchParams: Promise<{ role?: string; view?: string }> }) {
   const params = await searchParams;
   const role = getRole(params.role);
-  const view = ["today", "setup", "calls", "inbox", "messages", "routing"].includes(params.view ?? "") ? String(params.view) : "today";
+  const view = ["today", "setup", "calls", "inbox", "messages", "routing", "webchat", "scheduling", "settings"].includes(params.view ?? "") ? String(params.view) : "today";
   const center = await getPhoneOperatingCenter();
   const metrics = center.metrics;
   const conversations = center.conversations as ConversationRow[];
@@ -207,28 +213,82 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
   const activeCalls = center.activeCalls as ActiveCallRow[];
   const controls = center.controls as ControlRow[];
   const voicemails = center.voicemails as VoicemailRow[];
+  const channelSettings = center.channelSettings as ChannelSettingRow[];
+  const knowledgeSources = center.knowledgeSources as KnowledgeSourceRow[];
+  const webChats = center.webChats as WebChatRow[];
+  const leadForms = center.leadForms as LeadFormRow[];
+  const formPackets = center.formPackets as FormPacketRow[];
+  const schedulingRules = center.schedulingRules as SchedulingRuleRow[];
   const setupReadiness = center.setupReadiness as SetupReadiness;
 
   return (
     <FoundationShell active="/app/phone" roleKey={role.key}>
       <PageHeader
-        eyebrow="Voice, SMS, desk phones, and AI receptionist"
-        title="Dental phone system control center"
-        body="This is the telephony operating layer: carrier setup, number porting, E911, desk phones, softphones, extensions, call routing, hold, transfer, call park, voicemail, missed-call recovery, PMS screen pop, and approved outbound communication."
+        eyebrow="Patient engagement"
+        title="Phone, AI voice, web chat, scheduling, forms, and PMS handoff"
+        body="This is the patient engagement operating layer: phone and SMS, AI voice, NLP-enabled webchat, knowledge base, theme settings, lead forms, patient forms, appointment booking, rescheduling, and PMS writeback governance."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/phone" />
       <PhoneViewNav active={view} roleKey={role.key} />
 
       <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
         <Metric label="Open calls" value={metrics.openCalls} />
+        <Metric label="Web chats" value={metrics.openWebChats ?? 0} />
         <Metric label="Missed calls" value={metrics.missedCalls} />
-        <Metric label="Setup items" value={metrics.setupRequired} />
+        <Metric label="KB review" value={metrics.kbNeedsReview ?? 0} />
+        <Metric label="Scheduling blocks" value={metrics.schedulingBlocked ?? 0} />
+        <Metric label="Form packets" value={metrics.formPackets ?? 0} />
         <Metric label="Offline devices" value={metrics.offlineDevices} />
-        <Metric label="Call controls" value={metrics.activeCallControls} />
-        <Metric label="Voicemails" value={metrics.newVoicemails} />
         <Metric label="Open tasks" value={metrics.openTasks} />
         <Metric label="Opportunity" value={<Money cents={Number(metrics.opportunityCents)} />} />
       </section>
+
+      {view === "today" ? <section className="mt-4 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+        <PmsCard title="Channel readiness" eyebrow="Phone, AI voice, webchat, forms">
+          <div className="grid gap-3 md:grid-cols-2">
+            {channelSettings.map((channel) => (
+              <div key={channel.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{channel.displayName}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{clean(channel.channel)} · {clean(channel.nlpMode)}</p>
+                  </div>
+                  <StatusFor value={channel.status} />
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Knowledge" value={clean(channel.knowledgeBaseStatus)} />
+                  <MiniMetric label="Scheduling" value={clean(channel.schedulingStatus)} />
+                  <MiniMetric label="Forms" value={clean(channel.formsStatus)} />
+                </div>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{channel.nextAction}</p>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+
+        <PmsCard title="Webchat and AI voice opportunities" eyebrow="NLP triage, booking intent, staff approval">
+          <div className="grid gap-3">
+            {webChats.slice(0, 4).map((chat) => (
+              <div key={chat.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{chat.visitorName ?? chat.visitorPhone ?? "Website visitor"} · {clean(chat.nlpIntent ?? "web chat")}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{chat.sourcePage ?? "site"} · confidence {chat.nlpConfidence}% · owner {clean(chat.ownerRoleKey)}</p>
+                  </div>
+                  <StatusFor value={chat.status} />
+                </div>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">{chat.transcriptSummary}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Scheduling" value={clean(chat.schedulingOutcome)} />
+                  <MiniMetric label="PMS writeback" value={clean(chat.pmsWritebackStatus)} />
+                  <MiniMetric label="Lead form" value={chat.leadFormName ?? "not captured"} />
+                </div>
+                {chat.blockedReason ? <p className="mt-2 text-xs leading-5 text-amber-900">{chat.blockedReason}</p> : null}
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </section> : null}
 
       {(view === "today" || view === "setup") ? <section className="mt-4">
         <PmsCard title="Phone setup readiness" eyebrow="No live calling, texting, payment links, or form links until every required connector check passes">
@@ -460,6 +520,120 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
         </PmsCard>
       </section> : null}
 
+      {view === "webchat" ? <section className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <PmsCard title="NLP webchat queue" eyebrow="Lead capture, scheduling handoff, PMS writeback">
+          <div className="grid gap-3">
+            {webChats.map((chat) => (
+              <div key={chat.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{chat.visitorName ?? chat.visitorPhone ?? "Website visitor"}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{chat.sourcePage ?? "site"} · {clean(chat.nlpIntent ?? "unknown intent")} · confidence {chat.nlpConfidence}%</p>
+                  </div>
+                  <StatusFor value={chat.status} />
+                </div>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">{chat.transcriptSummary}</p>
+                <div className="mt-3 grid gap-2 md:grid-cols-4">
+                  <MiniMetric label="Service" value={chat.serviceLine ?? "unknown"} />
+                  <MiniMetric label="Lead form" value={chat.leadFormName ?? "none"} />
+                  <MiniMetric label="Booking" value={clean(chat.schedulingOutcome)} />
+                  <MiniMetric label="PMS" value={clean(chat.pmsWritebackStatus)} />
+                </div>
+                {chat.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{chat.blockedReason}</p> : null}
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+        <PmsCard title="Knowledge base" eyebrow="Controls what webchat and AI voice can say">
+          <div className="grid gap-3">
+            {knowledgeSources.map((source) => (
+              <div key={source.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-sm font-semibold text-neutral-950">{source.title}</p>
+                  <StatusFor value={source.status} />
+                </div>
+                <p className="mt-1 text-xs text-neutral-600">{clean(source.sourceType)} · {source.serviceLine ?? source.sourceModule} · owner {clean(source.ownerRoleKey)}</p>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">{source.contentSummary}</p>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{source.nextAction}</p>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </section> : null}
+
+      {view === "scheduling" ? <section className="mt-4 grid gap-4 xl:grid-cols-2">
+        <PmsCard title="Scheduling and reschedule rules" eyebrow="PMS slot search, writeback, staff approval">
+          <div className="grid gap-3">
+            {schedulingRules.map((rule) => (
+              <div key={rule.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{rule.name}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{clean(rule.sourceChannel)} · {rule.locationName ?? "all locations"} · category {rule.appointmentCategoryName ?? "not mapped"}</p>
+                  </div>
+                  <StatusFor value={rule.status} />
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  <MiniMetric label="Window" value={`${rule.bookingWindowDays} days`} />
+                  <MiniMetric label="Reschedule" value={rule.allowReschedule ? "allowed" : "blocked"} />
+                  <MiniMetric label="Approval" value={rule.requireHumanApproval ? "required" : "not required"} />
+                  <MiniMetric label="PMS" value={clean(rule.pmsWritebackStatus)} />
+                </div>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{rule.nextAction}</p>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+        <PmsCard title="Lead forms and patient forms" eyebrow="Lead capture, intake packets, PMS mapping">
+          <div className="grid gap-3">
+            {leadForms.map((form) => (
+              <div key={form.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3"><p className="text-sm font-semibold text-neutral-950">{form.name}</p><StatusFor value={form.status} /></div>
+                <p className="mt-1 text-xs text-neutral-600">{form.serviceLine} · {clean(form.sourceChannel)} · {clean(form.connectorStatus)}</p>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">Fields: {jsonSummary(form.fieldSchema)}</p>
+                <p className="mt-1 text-xs leading-5 text-neutral-600">PMS mapping: {jsonSummary(form.pmsMapping)}</p>
+              </div>
+            ))}
+            {formPackets.map((packet) => (
+              <div key={packet.id} className="rounded-md border border-neutral-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3"><p className="text-sm font-semibold text-neutral-950">{clean(packet.packetType)}</p><StatusFor value={packet.status} /></div>
+                <p className="mt-1 text-xs text-neutral-600">{packet.lastName ? `${packet.lastName}, ${packet.firstName}` : "template packet"} · {clean(packet.deliveryChannel)} · {clean(packet.pmsWritebackStatus)}</p>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{packet.nextAction}</p>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </section> : null}
+
+      {view === "settings" ? <section className="mt-4 grid gap-4 xl:grid-cols-2">
+        <PmsCard title="Widget themes and channel settings" eyebrow="Colors, launcher, NLP mode, approvals">
+          <div className="grid gap-3">
+            {channelSettings.map((channel) => (
+              <div key={channel.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3"><p className="text-sm font-semibold text-neutral-950">{channel.displayName}</p><StatusFor value={channel.connectorStatus} /></div>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">Theme: {jsonSummary(channel.theme)}</p>
+                <p className="mt-1 text-xs leading-5 text-neutral-600">Approvals: {jsonSummary(channel.approvalPolicy)}</p>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{channel.nextAction}</p>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+        <PmsCard title="PMS integration status" eyebrow="Schedule, reschedule, forms, writeback">
+          <div className="grid gap-3">
+            {channelSettings.map((channel) => (
+              <div key={`${channel.id}-pms`} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <p className="text-sm font-semibold text-neutral-950">{channel.displayName}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Scheduling" value={clean(channel.schedulingStatus)} />
+                  <MiniMetric label="Forms" value={clean(channel.formsStatus)} />
+                  <MiniMetric label="Knowledge" value={clean(channel.knowledgeBaseStatus)} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </section> : null}
+
       {view === "messages" ? <section className="mt-4 grid gap-4 xl:grid-cols-2">
         <PmsCard title="Outbound messages" eyebrow="Approved SMS/email drafts, no fake sends">
           <form action={messageAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
@@ -571,8 +745,11 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
 function PhoneViewNav({ active, roleKey }: { active: string; roleKey: string }) {
   const items = [
     { key: "today", label: "Today" },
-    { key: "setup", label: "Setup" },
-    { key: "calls", label: "Call console" },
+    { key: "calls", label: "Phone" },
+    { key: "webchat", label: "Web chat" },
+    { key: "scheduling", label: "Scheduling" },
+    { key: "settings", label: "Settings" },
+    { key: "setup", label: "Carrier setup" },
     { key: "inbox", label: "PMS inbox" },
     { key: "messages", label: "Messages" },
     { key: "routing", label: "Routing" },
@@ -694,6 +871,14 @@ function readinessSummary(value: unknown) {
   const missing = Array.isArray(readiness.missing) ? readiness.missing.filter(Boolean).join(", ") : "";
   const semantics = typeof readiness.semantics === "string" ? readiness.semantics : "Internal queue only; no external transport is claimed.";
   return missing ? `${semantics} Missing: ${missing}.` : semantics;
+}
+
+function jsonSummary(value: unknown) {
+  if (!value || typeof value !== "object") return "not configured";
+  if (Array.isArray(value)) return value.join(", ");
+  return Object.entries(value as Record<string, unknown>)
+    .map(([key, item]) => `${key}: ${Array.isArray(item) ? item.join(", ") : String(item)}`)
+    .join(" | ");
 }
 
 function clean(value: string) {

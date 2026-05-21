@@ -457,7 +457,7 @@ export async function updateRevenueFindingStatus(id: string, status: string, act
 }
 
 export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
-  const [conversations, messages, routes, tasks, analytics, numbers, extensions, devices, providers, activeCalls, controls, voicemails, metrics, patients] = await Promise.all([
+  const [conversations, messages, routes, tasks, analytics, numbers, extensions, devices, providers, activeCalls, controls, voicemails, channelSettings, knowledgeSources, webChats, leadForms, formPackets, schedulingRules, metrics, patients] = await Promise.all([
     query(
       `select c.*, p."firstName", p."lastName", p."chartNumber", p."phone", p."email",
         a."appointmentType", a."startsAt",
@@ -673,7 +673,38 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
        order by case vm."status" when 'TRIAGE_REQUIRED' then 0 when 'NEW' then 1 else 2 end, vm."dueAt" asc nulls last`,
       [tenantId],
     ),
-    query<{ openCalls: string; missedCalls: string; needsReview: string; highIntent: string; stagedMessages: string; openTasks: string; opportunityCents: string; setupRequired: string; activeCallControls: string; offlineDevices: string; newVoicemails: string }>(
+    query(`select * from "PatientEngagementChannelSetting" where "tenantId" = $1 order by "channel"`, [tenantId]),
+    query(`select * from "PatientEngagementKnowledgeSource" where "tenantId" = $1 order by case "status" when 'NEEDS_REVIEW' then 0 else 1 end, "sourceModule", "title"`, [tenantId]),
+    query(
+      `select wc.*, p."firstName", p."lastName", p."chartNumber", lf."name" as "leadFormName", lf."serviceLine"
+       from "PatientWebChatConversation" wc
+       left join "PmsPatient" p on p."id" = wc."patientId"
+       left join "PatientEngagementLeadForm" lf on lf."id" = wc."leadFormId"
+       where wc."tenantId" = $1
+       order by case wc."status" when 'OPEN' then 0 else 1 end, wc."createdAt" desc`,
+      [tenantId],
+    ),
+    query(`select * from "PatientEngagementLeadForm" where "tenantId" = $1 order by "serviceLine", "name"`, [tenantId]),
+    query(
+      `select fp.*, p."firstName", p."lastName", p."chartNumber", a."appointmentType", a."startsAt"
+       from "PatientEngagementFormPacket" fp
+       left join "PmsPatient" p on p."id" = fp."patientId"
+       left join "PmsAppointment" a on a."id" = fp."appointmentId"
+       where fp."tenantId" = $1
+       order by fp."dueAt" asc nulls last, fp."packetType"`,
+      [tenantId],
+    ),
+    query(
+      `select sr.*, ac."name" as "appointmentCategoryName", pr."displayName" as "providerName", l."name" as "locationName"
+       from "PatientEngagementSchedulingRule" sr
+       left join "PmsAppointmentCategory" ac on ac."id" = sr."appointmentCategoryId"
+       left join "PmsProvider" pr on pr."id" = sr."providerId"
+       left join "Location" l on l."id" = sr."locationId"
+       where sr."tenantId" = $1
+       order by sr."sourceChannel", sr."name"`,
+      [tenantId],
+    ),
+    query<{ openCalls: string; missedCalls: string; needsReview: string; highIntent: string; stagedMessages: string; openTasks: string; opportunityCents: string; setupRequired: string; activeCallControls: string; offlineDevices: string; newVoicemails: string; openWebChats: string; kbNeedsReview: string; schedulingBlocked: string; formPackets: string }>(
       `select
         (select count(*) from "PhoneConversation" where "tenantId" = $1 and "status" = 'OPEN')::text as "openCalls",
         (select count(*) from "PhoneConversation" where "tenantId" = $1 and "outcome" = 'MISSED_CALL')::text as "missedCalls",
@@ -687,7 +718,11 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
          (select count(*) from "PhoneDevice" where "tenantId" = $1 and "registrationStatus" <> 'ONLINE'))::text as "setupRequired",
         (select count(*) from "PhoneCallControlAction" where "tenantId" = $1 and "providerStatus" = 'CONNECTOR_REQUIRED')::text as "activeCallControls",
         (select count(*) from "PhoneDevice" where "tenantId" = $1 and "registrationStatus" <> 'ONLINE')::text as "offlineDevices",
-        (select count(*) from "PhoneVoicemail" where "tenantId" = $1 and "status" in ('NEW','TRIAGE_REQUIRED'))::text as "newVoicemails"`,
+        (select count(*) from "PhoneVoicemail" where "tenantId" = $1 and "status" in ('NEW','TRIAGE_REQUIRED'))::text as "newVoicemails",
+        (select count(*) from "PatientWebChatConversation" where "tenantId" = $1 and "status" = 'OPEN')::text as "openWebChats",
+        (select count(*) from "PatientEngagementKnowledgeSource" where "tenantId" = $1 and "status" = 'NEEDS_REVIEW')::text as "kbNeedsReview",
+        (select count(*) from "PatientEngagementSchedulingRule" where "tenantId" = $1 and "pmsWritebackStatus" <> 'READY')::text as "schedulingBlocked",
+        (select count(*) from "PatientEngagementFormPacket" where "tenantId" = $1 and "status" in ('DRAFT','READY_FOR_REVIEW'))::text as "formPackets"`,
       [tenantId],
     ),
     listPatientOptions(tenantId),
@@ -711,6 +746,12 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
     activeCalls: activeCalls.rows,
     controls: controls.rows,
     voicemails: voicemails.rows,
+    channelSettings: channelSettings.rows,
+    knowledgeSources: knowledgeSources.rows,
+    webChats: webChats.rows,
+    leadForms: leadForms.rows,
+    formPackets: formPackets.rows,
+    schedulingRules: schedulingRules.rows,
     metrics: metrics.rows[0],
     setupReadiness,
     patients,
