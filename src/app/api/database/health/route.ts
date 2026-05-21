@@ -79,6 +79,13 @@ const requiredTables = [
   "PhoneRoutingRule",
   "PhoneCallTask",
   "PhoneCallAnalytics",
+  "PhoneNumber",
+  "PhoneExtension",
+  "PhoneDevice",
+  "PhoneProviderConnection",
+  "PhoneActiveCall",
+  "PhoneCallControlAction",
+  "PhoneVoicemail",
   "ReputationReviewWorkflow",
   "PatientSurvey",
   "ReputationListingProfile",
@@ -96,6 +103,11 @@ const requiredTables = [
   "AuthSession",
   "AuthSignupRequest",
   "AuthAuditEvent",
+  "PlatformOrganization",
+  "PlatformMembership",
+  "RbacRole",
+  "RbacPermission",
+  "RbacRolePermission",
 ];
 
 export async function GET() {

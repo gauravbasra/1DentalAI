@@ -1429,6 +1429,159 @@ model PhoneCallAnalytics {
   @@index([tenantId, serviceRecoveryScore])
 }
 
+model PhoneNumber {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  locationId         String?
+  phoneNumber        String
+  label              String
+  numberType         String   @default("MAIN")
+  provider           String?
+  portStatus         String   @default("NOT_STARTED")
+  e911Status         String   @default("NOT_CONFIGURED")
+  smsStatus          String   @default("NOT_CONFIGURED")
+  voiceStatus        String   @default("NOT_CONFIGURED")
+  recordingPolicy    String   @default("CONSENT_REQUIRED")
+  defaultRouteId     String?
+  emergencyRoute     String?
+  status             String   @default("SETUP_REQUIRED")
+  lastVerifiedAt     DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([tenantId, phoneNumber])
+  @@index([tenantId, status])
+  @@index([locationId, numberType])
+}
+
+model PhoneExtension {
+  id              String   @id @default(cuid())
+  tenantId        String
+  locationId      String?
+  extensionNumber String
+  displayName     String
+  ownerRoleKey    String
+  extensionType   String   @default("USER")
+  voicemailEnabled Boolean @default(true)
+  directDialNumberId String?
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tenantId, extensionNumber])
+  @@index([tenantId, ownerRoleKey, status])
+}
+
+model PhoneDevice {
+  id                String   @id @default(cuid())
+  tenantId          String
+  locationId        String?
+  extensionId       String?
+  deviceType        String
+  label             String
+  manufacturer      String?
+  model             String?
+  macAddress        String?
+  sipUsername       String?
+  provisioningStatus String @default("NOT_PROVISIONED")
+  registrationStatus String @default("OFFLINE")
+  lastSeenAt        DateTime?
+  assignedTo        String?
+  deskLocation      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantId, provisioningStatus, registrationStatus])
+  @@index([extensionId])
+  @@index([locationId, deviceType])
+}
+
+model PhoneProviderConnection {
+  id              String   @id @default(cuid())
+  tenantId        String
+  providerType    String
+  name            String
+  trunkDomain     String?
+  outboundCallerId String?
+  credentialStatus String @default("MISSING")
+  webhookStatus   String @default("NOT_CONFIGURED")
+  e911Status      String @default("NOT_CONFIGURED")
+  status          String @default("SETUP_REQUIRED")
+  capabilityMap   Json?
+  lastSmokeTestAt DateTime?
+  nextAction      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, providerType])
+}
+
+model PhoneActiveCall {
+  id              String   @id @default(cuid())
+  tenantId        String
+  conversationId  String?
+  phoneNumberId   String?
+  fromNumber      String
+  toNumber        String
+  direction       String
+  callState       String   @default("RINGING")
+  currentExtensionId String?
+  parkedSlot      String?
+  holdStartedAt   DateTime?
+  startedAt       DateTime @default(now())
+  endedAt         DateTime?
+  providerCallId  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, callState, startedAt])
+  @@index([conversationId])
+  @@index([currentExtensionId])
+}
+
+model PhoneCallControlAction {
+  id             String   @id @default(cuid())
+  tenantId       String
+  activeCallId   String?
+  conversationId String?
+  actionType     String
+  requestedByRole String @default("front_desk")
+  targetExtensionId String?
+  targetNumber   String?
+  targetParkSlot String?
+  providerStatus String @default("CONNECTOR_REQUIRED")
+  blockedReason  String?
+  resultSummary  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, actionType, providerStatus])
+  @@index([activeCallId])
+  @@index([conversationId])
+}
+
+model PhoneVoicemail {
+  id              String   @id @default(cuid())
+  tenantId        String
+  conversationId  String?
+  extensionId     String?
+  phoneNumberId   String?
+  callerNumber    String?
+  callerName      String?
+  status          String   @default("NEW")
+  durationSeconds Int?
+  transcription   String?
+  recordingUrl    String?
+  ownerRoleKey    String   @default("front_desk")
+  dueAt           DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, dueAt])
+  @@index([extensionId, status])
+  @@index([conversationId])
+}
+
 model ReputationReviewWorkflow {
   id                  String   @id @default(cuid())
   tenantId            String
@@ -1785,4 +1938,75 @@ model AuthAuditEvent {
   @@index([tenantId, createdAt])
   @@index([userId, eventType])
   @@index([outcome])
+}
+
+model PlatformOrganization {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  slug        String
+  orgType     String
+  parentOrgId String?
+  status      String   @default("ONBOARDING")
+  baaStatus   String   @default("NOT_STARTED")
+  phiEnabled  Boolean  @default(false)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, orgType, status])
+  @@index([parentOrgId])
+}
+
+model PlatformMembership {
+  id             String   @id @default(cuid())
+  tenantId       String
+  organizationId String
+  userId         String
+  roleKey        String
+  status         String   @default("ACTIVE")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, userId, roleKey])
+  @@index([tenantId, roleKey, status])
+  @@index([userId, status])
+}
+
+model RbacRole {
+  id          String   @id @default(cuid())
+  tenantId    String
+  roleKey     String
+  title       String
+  scopeType   String
+  description String
+  systemRole  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, roleKey])
+  @@index([tenantId, scopeType])
+}
+
+model RbacPermission {
+  id          String   @id @default(cuid())
+  permissionKey String @unique
+  title       String
+  category    String
+  description String
+  phiRisk     String  @default("NONE")
+  createdAt   DateTime @default(now())
+}
+
+model RbacRolePermission {
+  id            String   @id @default(cuid())
+  tenantId      String
+  roleKey       String
+  permissionKey String
+  createdAt     DateTime @default(now())
+
+  @@unique([tenantId, roleKey, permissionKey])
+  @@index([tenantId, roleKey])
+  @@index([permissionKey])
 }

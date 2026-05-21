@@ -3,13 +3,17 @@ import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundati
 import { Money, PmsCard, StatusFor } from "@/components/pms-ui";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import {
+  createPhoneCallControlAction,
   createPhoneConversation,
   createPhoneOutboundMessage,
   createPhoneRoutingRule,
   getPhoneOperatingCenter,
   updatePhoneCallTaskStatus,
   updatePhoneConversationStatus,
+  updatePhoneDeviceStatus,
   updatePhoneOutboundMessageApproval,
+  updatePhoneProviderStatus,
+  updatePhoneVoicemailStatus,
 } from "@/lib/operating-system-repository";
 
 export const dynamic = "force-dynamic";
@@ -40,23 +44,17 @@ type ConversationRow = {
   keywords: string[] | null;
   riskFlags: string[] | null;
 };
-type MessageRow = {
-  id: string;
-  firstName: string | null;
-  lastName: string | null;
-  chartNumber: string | null;
-  channel: string;
-  recipientNumber: string | null;
-  messageType: string;
-  body: string;
-  approvalStatus: string;
-  deliveryStatus: string;
-  consentStatus: string;
-  blockedReason: string | null;
-};
+type MessageRow = { id: string; firstName: string | null; lastName: string | null; chartNumber: string | null; channel: string; recipientNumber: string | null; messageType: string; body: string; approvalStatus: string; deliveryStatus: string; consentStatus: string; blockedReason: string | null };
 type RouteRow = { id: string; name: string; triggerType: string; destinationType: string; destination: string; priority: number; status: string; failoverAction: string | null; locationName: string | null };
 type TaskRow = { id: string; firstName: string | null; lastName: string | null; chartNumber: string | null; aiIntent: string | null; callerNumber: string | null; taskType: string; priority: string; status: string; dueAt: string | null; ownerRoleKey: string; nextAction: string };
 type AnalyticsRow = { id: string; callerName: string | null; callerNumber: string | null; aiIntent: string | null; firstName: string | null; lastName: string | null; chartNumber: string | null; bookingIntentScore: number; serviceRecoveryScore: number; revenueOpportunityCents: number; keywords: string[] | null; riskFlags: string[] | null; summaryQuality: string };
+type NumberRow = { id: string; phoneNumber: string; label: string; numberType: string; provider: string | null; portStatus: string; e911Status: string; smsStatus: string; voiceStatus: string; recordingPolicy: string; status: string; locationName: string | null; routeName: string | null; defaultRouteId: string | null; emergencyRoute: string | null };
+type ExtensionRow = { id: string; extensionNumber: string; displayName: string; ownerRoleKey: string; extensionType: string; voicemailEnabled: boolean; status: string; locationName: string | null };
+type DeviceRow = { id: string; label: string; deviceType: string; manufacturer: string | null; model: string | null; macAddress: string | null; provisioningStatus: string; registrationStatus: string; assignedTo: string | null; deskLocation: string | null; extensionNumber: string | null; extensionName: string | null };
+type ProviderRow = { id: string; providerType: string; name: string; trunkDomain: string | null; outboundCallerId: string | null; credentialStatus: string; webhookStatus: string; e911Status: string; status: string; capabilityMap: unknown; nextAction: string; lastSmokeTestAt: string | null };
+type ActiveCallRow = { id: string; conversationId: string | null; fromNumber: string; toNumber: string; direction: string; callState: string; extensionNumber: string | null; extensionName: string | null; callerName: string | null; aiIntent: string | null; parkedSlot: string | null; holdStartedAt: string | null; startedAt: string };
+type ControlRow = { id: string; actionType: string; requestedByRole: string; targetNumber: string | null; targetParkSlot: string | null; providerStatus: string; blockedReason: string | null; resultSummary: string | null; targetExtensionName: string | null; extensionNumber: string | null; createdAt: string };
+type VoicemailRow = { id: string; callerNumber: string | null; callerName: string | null; status: string; durationSeconds: number | null; transcription: string | null; ownerRoleKey: string; dueAt: string | null; extensionNumber: string | null; extensionName: string | null };
 
 async function createAction(formData: FormData) {
   "use server";
@@ -120,6 +118,38 @@ async function routeAction(formData: FormData) {
   revalidatePath("/app/phone");
 }
 
+async function callControlAction(formData: FormData) {
+  "use server";
+  await createPhoneCallControlAction({
+    activeCallId: String(formData.get("activeCallId") ?? "") || undefined,
+    conversationId: String(formData.get("conversationId") ?? "") || undefined,
+    actionType: String(formData.get("actionType") ?? "OUTBOUND_DIAL"),
+    requestedByRole: String(formData.get("requestedByRole") ?? "front_desk"),
+    targetExtensionId: String(formData.get("targetExtensionId") ?? "") || undefined,
+    targetNumber: String(formData.get("targetNumber") ?? "") || undefined,
+    targetParkSlot: String(formData.get("targetParkSlot") ?? "") || undefined,
+  });
+  revalidatePath("/app/phone");
+}
+
+async function deviceAction(formData: FormData) {
+  "use server";
+  await updatePhoneDeviceStatus(String(formData.get("id") ?? ""), String(formData.get("provisioningStatus") ?? "NOT_PROVISIONED"), String(formData.get("registrationStatus") ?? "OFFLINE"));
+  revalidatePath("/app/phone");
+}
+
+async function providerAction(formData: FormData) {
+  "use server";
+  await updatePhoneProviderStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "SETUP_REQUIRED"), String(formData.get("credentialStatus") ?? "MISSING"), String(formData.get("webhookStatus") ?? "NOT_CONFIGURED"));
+  revalidatePath("/app/phone");
+}
+
+async function voicemailAction(formData: FormData) {
+  "use server";
+  await updatePhoneVoicemailStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "NEW"));
+  revalidatePath("/app/phone");
+}
+
 export default async function PhonePage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
   const role = getRole(params.role);
@@ -131,30 +161,184 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
   const tasks = center.tasks as TaskRow[];
   const analytics = center.analytics as AnalyticsRow[];
   const patients = center.patients as PatientRow[];
+  const numbers = center.numbers as NumberRow[];
+  const extensions = center.extensions as ExtensionRow[];
+  const devices = center.devices as DeviceRow[];
+  const providers = center.providers as ProviderRow[];
+  const activeCalls = center.activeCalls as ActiveCallRow[];
+  const controls = center.controls as ControlRow[];
+  const voicemails = center.voicemails as VoicemailRow[];
 
   return (
     <FoundationShell active="/app/phone" roleKey={role.key}>
       <PageHeader
-        eyebrow="AI phone and communications"
-        title="Phone inbox, AI receptionist, routing, SMS approvals, and call recovery"
-        body="Mango/Weave-style phone work belongs inside the PMS: screen pop, missed-call recovery, voicemail transcripts, routing rules, call analytics, appointment handoffs, RCM blocks, review recovery, and approved outbound messages are all tied to patient records."
+        eyebrow="Voice, SMS, desk phones, and AI receptionist"
+        title="Dental phone system control center"
+        body="This is the telephony operating layer: carrier setup, number porting, E911, desk phones, softphones, extensions, call routing, hold, transfer, call park, voicemail, missed-call recovery, PMS screen pop, and approved outbound communication."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/phone" />
 
-      <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-7">
+      <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
         <Metric label="Open calls" value={metrics.openCalls} />
         <Metric label="Missed calls" value={metrics.missedCalls} />
-        <Metric label="Needs review" value={metrics.needsReview} />
-        <Metric label="High-intent leads" value={metrics.highIntent} />
-        <Metric label="Staged messages" value={metrics.stagedMessages} />
+        <Metric label="Setup items" value={metrics.setupRequired} />
+        <Metric label="Offline devices" value={metrics.offlineDevices} />
+        <Metric label="Call controls" value={metrics.activeCallControls} />
+        <Metric label="Voicemails" value={metrics.newVoicemails} />
         <Metric label="Open tasks" value={metrics.openTasks} />
         <Metric label="Opportunity" value={<Money cents={Number(metrics.opportunityCents)} />} />
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+        <PmsCard title="Carrier, numbers, and compliance setup" eyebrow="Porting, E911, voice, SMS, recording policy">
+          <div className="grid gap-3">
+            {providers.map((provider) => (
+              <div key={provider.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{provider.name} · {clean(provider.providerType)}</p>
+                    <p className="mt-1 text-xs text-neutral-600">Caller ID {provider.outboundCallerId ?? "not assigned"} · trunk {provider.trunkDomain ?? "not configured"}</p>
+                  </div>
+                  <StatusFor value={provider.status} />
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Credentials" value={clean(provider.credentialStatus)} />
+                  <MiniMetric label="Webhooks" value={clean(provider.webhookStatus)} />
+                  <MiniMetric label="E911" value={clean(provider.e911Status)} />
+                </div>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{provider.nextAction}</p>
+                <form action={providerAction} className="mt-3 grid gap-2 sm:grid-cols-4">
+                  <input type="hidden" name="id" value={provider.id} />
+                  <Select name="status" label="Status" options={["SETUP_REQUIRED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} compact />
+                  <Select name="credentialStatus" label="Credentials" options={["MISSING", "STAGED_IN_VAULT", "VALIDATED"]} compact />
+                  <Select name="webhookStatus" label="Webhooks" options={["NOT_CONFIGURED", "CONFIGURED", "VERIFIED"]} compact />
+                  <label className="grid gap-1 text-xs font-semibold text-transparent">Update<button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700">Update provider</button></label>
+                </form>
+              </div>
+            ))}
+            {numbers.map((number) => (
+              <div key={number.id} className="rounded-md border border-neutral-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{number.label} · {number.phoneNumber}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{clean(number.numberType)} · {number.locationName ?? "Practice"} · route {number.routeName ?? number.defaultRouteId ?? "not assigned"}</p>
+                  </div>
+                  <StatusFor value={number.status} />
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-5">
+                  <MiniMetric label="Port" value={clean(number.portStatus)} />
+                  <MiniMetric label="Voice" value={clean(number.voiceStatus)} />
+                  <MiniMetric label="SMS" value={clean(number.smsStatus)} />
+                  <MiniMetric label="E911" value={clean(number.e911Status)} />
+                  <MiniMetric label="Recording" value={clean(number.recordingPolicy)} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+
+        <PmsCard title="Desk phones, softphones, and extensions" eyebrow="Physical phone service and WebRTC app readiness">
+          <div className="grid gap-3 lg:grid-cols-2">
+            {extensions.map((extension) => (
+              <div key={extension.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">Ext {extension.extensionNumber} · {extension.displayName}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{clean(extension.extensionType)} · owner {clean(extension.ownerRoleKey)} · voicemail {extension.voicemailEnabled ? "on" : "off"}</p>
+                  </div>
+                  <StatusFor value={extension.status} />
+                </div>
+              </div>
+            ))}
+            {devices.map((device) => (
+              <div key={device.id} className="rounded-md border border-neutral-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{device.label}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{clean(device.deviceType)} · {device.manufacturer ?? "Unknown"} {device.model ?? ""} · ext {device.extensionNumber ?? "unassigned"}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{device.assignedTo ?? "No assignment"} · {device.deskLocation ?? "No location"}</p>
+                  </div>
+                  <StatusFor value={device.registrationStatus} />
+                </div>
+                <form action={deviceAction} className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <input type="hidden" name="id" value={device.id} />
+                  <Select name="provisioningStatus" label="Provisioning" options={["NOT_PROVISIONED", "NEEDS_MAC_ADDRESS", "CREDENTIALS_REQUIRED", "PROVISIONED"]} compact />
+                  <Select name="registrationStatus" label="Registration" options={["OFFLINE", "REGISTERING", "ONLINE", "ERROR"]} compact />
+                  <label className="grid gap-1 text-xs font-semibold text-transparent">Update<button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700">Update device</button></label>
+                </form>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <PmsCard title="Active calls and call controls" eyebrow="Dial, answer, hold, warm transfer, call park">
+          <form action={callControlAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="grid gap-1 text-xs font-semibold text-neutral-700">Active call<select name="activeCallId" className="rounded-md border border-neutral-300 px-3 py-2 text-sm"><option value="">New outbound/no active call</option>{activeCalls.map((call) => <option key={call.id} value={call.id}>{call.fromNumber} to {call.toNumber} - {clean(call.callState)}</option>)}</select></label>
+              <Select name="actionType" label="Action" options={["OUTBOUND_DIAL", "ANSWER", "HOLD", "RESUME", "WARM_TRANSFER", "BLIND_TRANSFER", "CALL_PARK", "PICKUP_PARK", "SEND_TO_VOICEMAIL", "END_CALL"]} />
+              <Select name="requestedByRole" label="Role" options={["front_desk", "billing_rcm", "practice_manager", "associate_provider"]} />
+              <label className="grid gap-1 text-xs font-semibold text-neutral-700">Target extension<select name="targetExtensionId" className="rounded-md border border-neutral-300 px-3 py-2 text-sm"><option value="">None</option>{extensions.map((extension) => <option key={extension.id} value={extension.id}>{extension.extensionNumber} - {extension.displayName}</option>)}</select></label>
+              <Input name="targetNumber" label="Target phone number" />
+              <Input name="targetParkSlot" label="Park slot" />
+            </div>
+            <button className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white">Stage call control</button>
+          </form>
+          <div className="grid gap-3">
+            {activeCalls.map((call) => (
+              <div key={call.id} className="rounded-md border border-neutral-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{call.fromNumber} → {call.toNumber}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{clean(call.direction)} · {call.callerName ?? "Unknown caller"} · ext {call.extensionNumber ?? "none"} {call.parkedSlot ? `· parked ${call.parkedSlot}` : ""}</p>
+                  </div>
+                  <StatusFor value={call.callState} />
+                </div>
+              </div>
+            ))}
+            {controls.map((control) => (
+              <div key={control.id} className="rounded-md border border-amber-200 bg-amber-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{clean(control.actionType)} · {control.targetExtensionName ?? control.targetNumber ?? control.targetParkSlot ?? "no target"}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{control.resultSummary}</p>
+                  </div>
+                  <StatusFor value={control.providerStatus} />
+                </div>
+                {control.blockedReason ? <p className="mt-2 text-xs leading-5 text-amber-900">{control.blockedReason}</p> : null}
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+
+        <PmsCard title="Voicemail and missed-call recovery" eyebrow="Transcription, triage, callback ownership">
+          <div className="grid gap-3">
+            {voicemails.map((vm) => (
+              <div key={vm.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{vm.callerName ?? "Unknown caller"} · {vm.callerNumber ?? "No number"}</p>
+                    <p className="mt-1 text-xs text-neutral-600">Ext {vm.extensionNumber ?? "none"} · owner {clean(vm.ownerRoleKey)} · {vm.durationSeconds ?? 0}s</p>
+                  </div>
+                  <StatusFor value={vm.status} />
+                </div>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">{vm.transcription ?? "No transcription yet."}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <VoicemailButton id={vm.id} status="NEW" label="New" />
+                  <VoicemailButton id={vm.id} status="IN_PROGRESS" label="Working" />
+                  <VoicemailButton id={vm.id} status="COMPLETED" label="Done" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-[0.72fr_1.28fr]">
         <PmsCard title="Log or import call" eyebrow="Telephony connector intake">
           <form action={createAction} className="grid gap-3">
-            <label className="grid gap-1 text-xs font-semibold text-neutral-700">Matched patient<select name="patientId" className="rounded-md border border-neutral-300 px-3 py-2 text-sm"><option value="">Unknown caller</option>{patients.map((p) => <option key={p.id} value={p.id}>{p.lastName}, {p.firstName} · {p.chartNumber}</option>)}</select></label>
+            <label className="grid gap-1 text-xs font-semibold text-neutral-700">Matched patient<select name="patientId" className="rounded-md border border-neutral-300 px-3 py-2 text-sm"><option value="">Unknown caller</option>{patients.map((p) => <option key={p.id} value={p.id}>{p.lastName}, {p.firstName} - {p.chartNumber}</option>)}</select></label>
             <div className="grid gap-3 sm:grid-cols-2">
               <Select name="direction" label="Direction" options={["INBOUND", "OUTBOUND"]} />
               <Select name="aiIntent" label="Intent" options={["NEW_PATIENT_BOOKING", "IMPLANT_CONSULT_PRICE", "CONFIRM_APPOINTMENT", "EMERGENCY", "INSURANCE_QUESTION", "PAYMENT_QUESTION", "TREATMENT_INTEREST", "REPUTATION_RECOVERY"]} />
@@ -167,14 +351,14 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
           </form>
         </PmsCard>
 
-        <PmsCard title="Live phone inbox" eyebrow="PMS screen pop and call recovery">
+        <PmsCard title="PMS caller inbox" eyebrow="Screen pop, schedule context, call recovery">
           <div className="grid gap-3">
             {conversations.map((call) => (
               <div key={call.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-neutral-950">{call.callerName ?? call.callerNumber ?? "Unknown caller"} · {clean(call.aiIntent ?? "call")}</p>
-                    <p className="mt-1 text-xs text-neutral-600">{call.lastName ? `${call.lastName}, ${call.firstName} · ${call.chartNumber}` : "No PMS match"} · {new Date(call.startedAt).toLocaleString()}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{call.lastName ? `${call.lastName}, ${call.firstName} - ${call.chartNumber}` : "No PMS match"} · {new Date(call.startedAt).toLocaleString()}</p>
                     {call.appointmentType ? <p className="mt-1 text-xs text-neutral-600">Appointment: {call.appointmentType} · {call.startsAt ? new Date(call.startsAt).toLocaleString() : "not scheduled"}</p> : null}
                   </div>
                   <StatusFor value={call.followUpStatus} />
@@ -218,7 +402,7 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <p className="text-sm font-semibold text-neutral-950">{clean(message.messageType)} · {message.channel}</p>
                   <StatusFor value={message.approvalStatus} />
                 </div>
-                <p className="mt-1 text-xs text-neutral-600">{message.lastName ? `${message.lastName}, ${message.firstName} · ${message.chartNumber}` : message.recipientNumber ?? "No recipient"} · {message.deliveryStatus.toLowerCase()}</p>
+                <p className="mt-1 text-xs text-neutral-600">{message.lastName ? `${message.lastName}, ${message.firstName} - ${message.chartNumber}` : message.recipientNumber ?? "No recipient"} · {clean(message.deliveryStatus)}</p>
                 <p className="mt-2 text-sm leading-6 text-neutral-700">{message.body}</p>
                 {message.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{message.blockedReason}</p> : null}
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
@@ -231,14 +415,14 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
           </div>
         </PmsCard>
 
-        <PmsCard title="Phone tasks" eyebrow="Missed calls, billing handoffs, forms checks">
+        <PmsCard title="Phone tasks and call intelligence" eyebrow="Missed calls, billing handoffs, conversion analytics">
           <div className="grid gap-3">
             {tasks.map((task) => (
               <div key={task.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-neutral-950">{clean(task.taskType)}</p>
-                    <p className="mt-1 text-xs text-neutral-600">{task.lastName ? `${task.lastName}, ${task.firstName} · ${task.chartNumber}` : task.callerNumber ?? "No PMS match"} · owner {clean(task.ownerRoleKey)}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{task.lastName ? `${task.lastName}, ${task.firstName} - ${task.chartNumber}` : task.callerNumber ?? "No PMS match"} · owner {clean(task.ownerRoleKey)}</p>
                   </div>
                   <StatusFor value={task.status} />
                 </div>
@@ -250,49 +434,43 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                 </div>
               </div>
             ))}
-          </div>
-        </PmsCard>
-      </section>
-
-      <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-        <PmsCard title="Routing rules" eyebrow="Queues, ring groups, failover">
-          <form action={routeAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
-            <Input name="name" label="Rule name" />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Select name="triggerType" label="Trigger" options={["INTENT_NEW_PATIENT_OR_IMPLANT", "INTENT_EMERGENCY", "INTENT_BILLING_OR_INSURANCE", "AFTER_HOURS", "MISSED_CALL"]} />
-              <Select name="destinationType" label="Destination type" options={["QUEUE", "RING_GROUP", "VOICEMAIL", "AI_RECEPTIONIST"]} />
-              <Input name="destination" label="Destination" />
-              <Input name="priority" label="Priority" />
-            </div>
-            <Input name="failoverAction" label="Failover action" />
-            <button className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white">Save routing rule</button>
-          </form>
-          <div className="grid gap-3">
-            {routes.map((route) => (
-              <div key={route.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <p className="text-sm font-semibold text-neutral-950">{route.name}</p>
-                  <StatusFor value={route.status} />
-                </div>
-                <p className="mt-1 text-xs text-neutral-600">{clean(route.triggerType)} → {clean(route.destinationType)} · {route.destination}</p>
-                <p className="mt-2 text-xs leading-5 text-neutral-600">Failover: {route.failoverAction ?? "not configured"}</p>
-              </div>
-            ))}
-          </div>
-        </PmsCard>
-
-        <PmsCard title="Call intelligence" eyebrow="Intent, service recovery, revenue opportunity">
-          <div className="grid gap-3 lg:grid-cols-2">
             {analytics.map((row) => (
-              <div key={row.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+              <div key={row.id} className="rounded-md border border-neutral-200 bg-white p-3">
                 <p className="text-sm font-semibold text-neutral-950">{row.callerName ?? row.callerNumber ?? "Unknown caller"} · {clean(row.aiIntent ?? "call")}</p>
-                <p className="mt-1 text-xs text-neutral-600">{row.lastName ? `${row.lastName}, ${row.firstName} · ${row.chartNumber}` : "No PMS match"}</p>
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   <MiniMetric label="Booking" value={`${row.bookingIntentScore}%`} />
                   <MiniMetric label="Recovery" value={`${row.serviceRecoveryScore}%`} />
                   <MiniMetric label="Revenue" value={<Money cents={Number(row.revenueOpportunityCents)} />} />
                 </div>
                 <p className="mt-2 text-xs leading-5 text-neutral-600">{list("Keywords", row.keywords)} {list("Risks", row.riskFlags)}</p>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </section>
+
+      <section className="mt-4">
+        <PmsCard title="Routing rules" eyebrow="Queues, ring groups, AI receptionist, voicemail, failover">
+          <form action={routeAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
+            <Input name="name" label="Rule name" />
+            <div className="grid gap-3 sm:grid-cols-4">
+              <Select name="triggerType" label="Trigger" options={["INTENT_NEW_PATIENT_OR_IMPLANT", "INTENT_EMERGENCY", "INTENT_BILLING_OR_INSURANCE", "AFTER_HOURS", "MISSED_CALL"]} />
+              <Select name="destinationType" label="Destination type" options={["QUEUE", "RING_GROUP", "VOICEMAIL", "AI_RECEPTIONIST", "EXTENSION"]} />
+              <Input name="destination" label="Destination" />
+              <Input name="priority" label="Priority" />
+            </div>
+            <Input name="failoverAction" label="Failover action" />
+            <button className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white">Save routing rule</button>
+          </form>
+          <div className="grid gap-3 lg:grid-cols-3">
+            {routes.map((route) => (
+              <div key={route.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-sm font-semibold text-neutral-950">{route.name}</p>
+                  <StatusFor value={route.status} />
+                </div>
+                <p className="mt-1 text-xs text-neutral-600">{clean(route.triggerType)} to {clean(route.destinationType)} · {route.destination}</p>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">Failover: {route.failoverAction ?? "not configured"}</p>
               </div>
             ))}
           </div>
@@ -314,6 +492,10 @@ function TaskButton({ id, actorRole, status, label }: { id: string; actorRole: s
   return <form action={taskAction}><input type="hidden" name="id" value={id} /><input type="hidden" name="actorRole" value={actorRole} /><input type="hidden" name="status" value={status} /><ActionButton label={label} /></form>;
 }
 
+function VoicemailButton({ id, status, label }: { id: string; status: string; label: string }) {
+  return <form action={voicemailAction}><input type="hidden" name="id" value={id} /><input type="hidden" name="status" value={status} /><ActionButton label={label} /></form>;
+}
+
 function ActionButton({ label }: { label: string }) {
   return <button className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 hover:bg-neutral-50">{label}</button>;
 }
@@ -327,19 +509,19 @@ function MiniMetric({ label, value }: { label: string; value: React.ReactNode })
 }
 
 function Input({ name, label }: { name: string; label: string }) {
-  return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<input name={name} className="rounded-md border border-neutral-300 px-3 py-2 text-sm" /></label>;
+  return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<input name={name} className="min-w-0 rounded-md border border-neutral-300 px-3 py-2 text-sm" /></label>;
 }
 
-function Select({ name, label, options }: { name: string; label: string; options: string[] }) {
-  return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<select name={name} className="rounded-md border border-neutral-300 px-3 py-2 text-sm">{options.map((option) => <option key={option} value={option}>{clean(option)}</option>)}</select></label>;
+function Select({ name, label, options, compact = false }: { name: string; label: string; options: string[]; compact?: boolean }) {
+  return <label className={`grid gap-1 text-xs font-semibold text-neutral-700 ${compact ? "min-w-0" : ""}`}>{label}<select name={name} className="min-w-0 rounded-md border border-neutral-300 px-3 py-2 text-sm">{options.map((option) => <option key={option} value={option}>{clean(option)}</option>)}</select></label>;
 }
 
 function Textarea({ name, label, required = false }: { name: string; label: string; required?: boolean }) {
-  return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<textarea name={name} required={required} rows={4} className="rounded-md border border-neutral-300 px-3 py-2 text-sm" /></label>;
+  return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<textarea name={name} required={required} rows={4} className="min-w-0 rounded-md border border-neutral-300 px-3 py-2 text-sm" /></label>;
 }
 
 function clean(value: string) {
-  return value.replaceAll("_", " ").toLowerCase();
+  return value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function list(label: string, values: string[] | null) {

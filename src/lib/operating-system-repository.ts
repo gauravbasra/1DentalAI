@@ -363,7 +363,7 @@ export async function updateRevenueFindingStatus(id: string, status: string, act
 }
 
 export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
-  const [conversations, messages, routes, tasks, analytics, metrics, patients] = await Promise.all([
+  const [conversations, messages, routes, tasks, analytics, numbers, extensions, devices, providers, activeCalls, controls, voicemails, metrics, patients] = await Promise.all([
     query(
       `select c.*, p."firstName", p."lastName", p."chartNumber", p."phone", p."email",
         a."appointmentType", a."startsAt",
@@ -414,7 +414,60 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
        order by ca."bookingIntentScore" desc, ca."serviceRecoveryScore" desc`,
       [tenantId],
     ),
-    query<{ openCalls: string; missedCalls: string; needsReview: string; highIntent: string; stagedMessages: string; openTasks: string; opportunityCents: string }>(
+    query(
+      `select n.*, l."name" as "locationName", r."name" as "routeName"
+       from "PhoneNumber" n
+       left join "Location" l on l."id" = n."locationId"
+       left join "PhoneRoutingRule" r on r."id" = n."defaultRouteId"
+       where n."tenantId" = $1
+       order by case n."numberType" when 'MAIN' then 0 when 'TRACKING' then 1 else 2 end, n."label"`,
+      [tenantId],
+    ),
+    query(
+      `select e.*, l."name" as "locationName"
+       from "PhoneExtension" e
+       left join "Location" l on l."id" = e."locationId"
+       where e."tenantId" = $1
+       order by e."extensionNumber"`,
+      [tenantId],
+    ),
+    query(
+      `select d.*, e."extensionNumber", e."displayName" as "extensionName", l."name" as "locationName"
+       from "PhoneDevice" d
+       left join "PhoneExtension" e on e."id" = d."extensionId"
+       left join "Location" l on l."id" = d."locationId"
+       where d."tenantId" = $1
+       order by case d."registrationStatus" when 'ONLINE' then 1 else 0 end, d."label"`,
+      [tenantId],
+    ),
+    query(`select * from "PhoneProviderConnection" where "tenantId" = $1 order by "providerType", "name"`, [tenantId]),
+    query(
+      `select ac.*, e."extensionNumber", e."displayName" as "extensionName", c."callerName", c."aiIntent"
+       from "PhoneActiveCall" ac
+       left join "PhoneExtension" e on e."id" = ac."currentExtensionId"
+       left join "PhoneConversation" c on c."id" = ac."conversationId"
+       where ac."tenantId" = $1
+       order by case ac."callState" when 'RINGING' then 0 when 'CONNECTED' then 1 when 'ON_HOLD_REVIEW' then 2 else 3 end, ac."startedAt" desc`,
+      [tenantId],
+    ),
+    query(
+      `select ca.*, e."extensionNumber", e."displayName" as "targetExtensionName"
+       from "PhoneCallControlAction" ca
+       left join "PhoneExtension" e on e."id" = ca."targetExtensionId"
+       where ca."tenantId" = $1
+       order by ca."createdAt" desc
+       limit 30`,
+      [tenantId],
+    ),
+    query(
+      `select vm.*, e."extensionNumber", e."displayName" as "extensionName"
+       from "PhoneVoicemail" vm
+       left join "PhoneExtension" e on e."id" = vm."extensionId"
+       where vm."tenantId" = $1
+       order by case vm."status" when 'TRIAGE_REQUIRED' then 0 when 'NEW' then 1 else 2 end, vm."dueAt" asc nulls last`,
+      [tenantId],
+    ),
+    query<{ openCalls: string; missedCalls: string; needsReview: string; highIntent: string; stagedMessages: string; openTasks: string; opportunityCents: string; setupRequired: string; activeCallControls: string; offlineDevices: string; newVoicemails: string }>(
       `select
         (select count(*) from "PhoneConversation" where "tenantId" = $1 and "status" = 'OPEN')::text as "openCalls",
         (select count(*) from "PhoneConversation" where "tenantId" = $1 and "outcome" = 'MISSED_CALL')::text as "missedCalls",
@@ -422,12 +475,33 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
         (select count(*) from "PhoneConversation" where "tenantId" = $1 and "aiSentiment" = 'HIGH_INTENT')::text as "highIntent",
         (select count(*) from "PhoneOutboundMessage" where "tenantId" = $1 and "approvalStatus" in ('DRAFT','NEEDS_APPROVAL','BLOCKED'))::text as "stagedMessages",
         (select count(*) from "PhoneCallTask" where "tenantId" = $1 and "status" = 'OPEN')::text as "openTasks",
-        (select coalesce(sum("revenueOpportunityCents"), 0) from "PhoneCallAnalytics" where "tenantId" = $1)::text as "opportunityCents"`,
+        (select coalesce(sum("revenueOpportunityCents"), 0) from "PhoneCallAnalytics" where "tenantId" = $1)::text as "opportunityCents",
+        ((select count(*) from "PhoneProviderConnection" where "tenantId" = $1 and "status" <> 'ACTIVE') +
+         (select count(*) from "PhoneNumber" where "tenantId" = $1 and "status" <> 'ACTIVE') +
+         (select count(*) from "PhoneDevice" where "tenantId" = $1 and "registrationStatus" <> 'ONLINE'))::text as "setupRequired",
+        (select count(*) from "PhoneCallControlAction" where "tenantId" = $1 and "providerStatus" = 'CONNECTOR_REQUIRED')::text as "activeCallControls",
+        (select count(*) from "PhoneDevice" where "tenantId" = $1 and "registrationStatus" <> 'ONLINE')::text as "offlineDevices",
+        (select count(*) from "PhoneVoicemail" where "tenantId" = $1 and "status" in ('NEW','TRIAGE_REQUIRED'))::text as "newVoicemails"`,
       [tenantId],
     ),
     listPatientOptions(tenantId),
   ]);
-  return { conversations: conversations.rows, messages: messages.rows, routes: routes.rows, tasks: tasks.rows, analytics: analytics.rows, metrics: metrics.rows[0], patients };
+  return {
+    conversations: conversations.rows,
+    messages: messages.rows,
+    routes: routes.rows,
+    tasks: tasks.rows,
+    analytics: analytics.rows,
+    numbers: numbers.rows,
+    extensions: extensions.rows,
+    devices: devices.rows,
+    providers: providers.rows,
+    activeCalls: activeCalls.rows,
+    controls: controls.rows,
+    voicemails: voicemails.rows,
+    metrics: metrics.rows[0],
+    patients,
+  };
 }
 
 export async function createPhoneConversation(input: {
@@ -528,6 +602,65 @@ export async function createPhoneRoutingRule(input: {
     [id, tenantId, input.name.trim(), input.triggerType, input.destinationType, input.destination.trim(), input.priority, input.failoverAction?.trim() || null],
   );
   await addAudit(tenantId, "practice_manager", "PHONE_ROUTING_RULE_CREATED", "PhoneRoutingRule", id);
+}
+
+export async function createPhoneCallControlAction(input: {
+  tenantId?: string;
+  activeCallId?: string;
+  conversationId?: string;
+  actionType: string;
+  requestedByRole?: string;
+  targetExtensionId?: string;
+  targetNumber?: string;
+  targetParkSlot?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("pctrl");
+  const blockedReason = "Live call control requires configured SIP/WebRTC provider credentials, active call webhooks, and successful smoke test. Internal work item was recorded; no fake call action was sent.";
+  await query(
+    `insert into "PhoneCallControlAction"
+       ("id", "tenantId", "activeCallId", "conversationId", "actionType", "requestedByRole", "targetExtensionId", "targetNumber", "targetParkSlot", "providerStatus", "blockedReason", "resultSummary", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'CONNECTOR_REQUIRED', $10, $11, current_timestamp)`,
+    [id, tenantId, input.activeCallId || null, input.conversationId || null, input.actionType, input.requestedByRole || "front_desk", input.targetExtensionId || null, input.targetNumber || null, input.targetParkSlot || null, blockedReason, `${input.actionType} staged for provider execution.`],
+  );
+  await addAudit(tenantId, input.requestedByRole || "front_desk", "PHONE_CALL_CONTROL_STAGED", "PhoneCallControlAction", id, "BLOCKED", { actionType: input.actionType });
+}
+
+export async function updatePhoneDeviceStatus(id: string, provisioningStatus: string, registrationStatus: string) {
+  const result = await query<{ tenantId: string }>(
+    `update "PhoneDevice"
+     set "provisioningStatus" = $2,
+       "registrationStatus" = $3,
+       "lastSeenAt" = case when $3 = 'ONLINE' then current_timestamp else "lastSeenAt" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId"`,
+    [id, provisioningStatus, registrationStatus],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "practice_manager", "PHONE_DEVICE_STATUS_UPDATED", "PhoneDevice", id, "ALLOWED", { provisioningStatus, registrationStatus });
+}
+
+export async function updatePhoneProviderStatus(id: string, status: string, credentialStatus: string, webhookStatus: string) {
+  const result = await query<{ tenantId: string }>(
+    `update "PhoneProviderConnection"
+     set "status" = $2,
+       "credentialStatus" = $3,
+       "webhookStatus" = $4,
+       "lastSmokeTestAt" = case when $2 = 'ACTIVE' then current_timestamp else "lastSmokeTestAt" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId"`,
+    [id, status, credentialStatus, webhookStatus],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "practice_manager", "PHONE_PROVIDER_STATUS_UPDATED", "PhoneProviderConnection", id, "ALLOWED", { status, credentialStatus, webhookStatus });
+}
+
+export async function updatePhoneVoicemailStatus(id: string, status: string) {
+  const result = await query<{ tenantId: string }>(
+    `update "PhoneVoicemail" set "status" = $2, "updatedAt" = current_timestamp where "id" = $1 returning "tenantId"`,
+    [id, status],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "front_desk", "PHONE_VOICEMAIL_STATUS_UPDATED", "PhoneVoicemail", id, "ALLOWED", { status });
 }
 
 export async function getReputationOperatingCenter(tenantId = defaultTenantId) {

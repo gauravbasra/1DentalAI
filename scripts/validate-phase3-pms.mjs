@@ -80,6 +80,13 @@ const requiredSchemaModels = [
   "PhoneRoutingRule",
   "PhoneCallTask",
   "PhoneCallAnalytics",
+  "PhoneNumber",
+  "PhoneExtension",
+  "PhoneDevice",
+  "PhoneProviderConnection",
+  "PhoneActiveCall",
+  "PhoneCallControlAction",
+  "PhoneVoicemail",
   "ReputationReviewWorkflow",
   "PatientSurvey",
   "ReputationListingProfile",
@@ -203,7 +210,7 @@ for (const token of ["RcmWorkItem", "RcmPriorAuthorization", "RcmDenialCase", "R
   }
 }
 
-for (const token of ["PhoneConversation", "PhoneOutboundMessage", "PhoneRoutingRule", "PhoneCallTask", "PhoneCallAnalytics", "getPhoneOperatingCenter", "AI phone and communications", "MISSED_CALL", "AI_VOICE_REVIEW", "Outbound messages", "Routing rules", "Call intelligence"]) {
+for (const token of ["PhoneConversation", "PhoneOutboundMessage", "PhoneRoutingRule", "PhoneCallTask", "PhoneCallAnalytics", "PhoneNumber", "PhoneExtension", "PhoneDevice", "PhoneProviderConnection", "PhoneActiveCall", "PhoneCallControlAction", "PhoneVoicemail", "getPhoneOperatingCenter", "Dental phone system control center", "Desk phones, softphones, and extensions", "Active calls and call controls", "HOLD", "WARM_TRANSFER", "CALL_PARK", "OUTBOUND_DIAL", "Voicemail and missed-call recovery"]) {
   if (!`${schema}\n${phonePage}\n${osRepository}`.includes(token)) {
     console.error(`Phone operating-system token missing: ${token}`);
     process.exit(1);
