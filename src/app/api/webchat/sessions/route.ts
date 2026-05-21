@@ -15,6 +15,12 @@ export async function POST(request: Request) {
     visitorPhone: typeof body.visitorPhone === "string" ? body.visitorPhone : undefined,
     visitorEmail: typeof body.visitorEmail === "string" ? body.visitorEmail : undefined,
     sourcePage: typeof body.sourcePage === "string" ? body.sourcePage : undefined,
+    serviceLine: typeof body.serviceLine === "string" ? body.serviceLine : undefined,
+    preferredTime: typeof body.preferredTime === "string" ? body.preferredTime : undefined,
+    patientStatus: typeof body.patientStatus === "string" ? body.patientStatus : undefined,
+    urgency: typeof body.urgency === "string" ? body.urgency : undefined,
+    consentAccepted: body.consentAccepted === true,
+    privacyNoticeVersion: typeof body.privacyNoticeVersion === "string" ? body.privacyNoticeVersion : undefined,
   });
   return jsonResponse({ session });
 }

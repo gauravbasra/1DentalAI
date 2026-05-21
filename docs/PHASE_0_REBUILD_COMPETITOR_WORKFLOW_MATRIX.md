@@ -14,6 +14,8 @@ This document replaces any loose interpretation of Phase 0 module completion. A 
 - Every action must create an audit event with actor role, source object, target object, outcome, and blocked reason when blocked.
 - Every page must pass a screen/click test for desktop and mobile before it can be called usable.
 - Every module must expose setup readiness: missing provider credentials, webhook status, phone/carrier status, listing sync status, PMS connector status, payer connector status, and database migration status.
+- Every launch-ready module must have a live matrix row with UI depth, backend, integrations/connector state, process logic, DB migrations, audit, tests, and live status.
+- Every launch-ready module must have route/API/table validation in `scripts/validate-phase0-depth.mjs`; a UI page without required APIs and migration-backed tables is not launch-ready.
 
 ## Phone System Rebuild
 
@@ -71,6 +73,32 @@ Not acceptable:
 - AI copy that is not tied to an audience, service line, compliance note, and approval flow.
 - Landing pages that do not route leads into PMS/CRM work.
 
+## Connector Control Plane Rebuild
+
+Production workbench requirements:
+- Connector definitions for PMS, payer, phone, reputation/listings, marketing/analytics, webchat, forms, payments, and future marketplace routes.
+- Installation readiness with credential status, webhook status, approval status, health status, fallback mode, cost policy, and next action.
+- Capability map by workflow area, transaction direction, supported transactions, required fields, missing fields, approval policy, and fallback policy.
+- Route decision records that explicitly choose live connector, direct API, vendor route, SFTP/bulk import, or manual queue.
+- Health checks and cost telemetry that can block actions before external execution.
+
+Not acceptable:
+- Marking a connector active without validated credentials, verified webhooks, approval, and a healthy check.
+- Generic “integrations connected” copy that does not name capability-level readiness.
+- Running a module-specific send/post/submit action without a connector route decision or manual proof gate.
+
+## Launch-Readiness QA Harness
+
+The live QA harness is `scripts/validate-phase0-depth.mjs`. It must fail fast on:
+
+- Missing product routes for active modules, including Patient Engagement, PMS, Phone, RCM, Reputation, Marketing, Connector control, Huddle, and Patient Finder.
+- Missing API endpoints for PMS CRUD/workflow routes, appointment checkout, webchat widget/session/message/settings/transcript/crawl routes, leads, workbenches, database health, and app health.
+- Missing Prisma models or migration-backed DB tables for the product feature set named in `docs/PHASE_0_FEATURE_COMPLETENESS_MATRIX.md`.
+- Fake external success copy, including patient sends, phone calls, payment completion, payer submission, review publication, listing sync, webchat scheduling, and PMS writeback claims that do not show connector/manual-proof blocking.
+- Matrix drift: every live module row must retain UI depth, backend, integration state, process logic, DB migrations, audit, tests, and live-status cells.
+
+Passing validation does not mean external vendors are live. It means the repo honestly represents what is internal-live, connector-blocked, approval-staged, or manual-proof gated.
+
 ## Patient Engagement Rebuild
 
 Production workbench requirements:
@@ -102,4 +130,3 @@ Not acceptable:
 4. Rebuild RCM workbench with benefits, claims, prior auth, ERA/EOB, denial, and revenue leakage as real work areas.
 5. Rebuild Marketing and AI Studio with PMS audience generation, landing pages, local SEO, and attribution.
 6. Re-run screen/click tests after every slice and document what is real, staged, blocked, or connector-dependent.
-

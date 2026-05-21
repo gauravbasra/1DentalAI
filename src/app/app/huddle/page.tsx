@@ -9,10 +9,15 @@ export const dynamic = "force-dynamic";
 type SnapshotRow = { id: string; tab: string; label: string; valueText: string; detailText: string | null; sourceModule: string; drilldownRoute: string | null; ownerRoleKey: string | null };
 type DayMetrics = Record<string, string>;
 type OpeningRow = { day: string; openings: string; scheduledProductionCents: string };
-type ProviderGoalRow = { id: string; displayName: string; providerType: string; dailyGoalCents: number; todayScheduledCents: number; yesterdayProductionCents: number; clinicalHours: number; readinessBlocks: number };
+type ProviderGoalRow = { id: string; displayName: string; providerType: string; dailyGoalCents: number; todayScheduledCents: number; scheduled30Cents: number; yesterdayProductionCents: number; last30RevenueCents: number; clinicalHours: number; readinessBlocks: number };
 type ServiceLineRow = { serviceLine: string; yesterdayCents: number; todayScheduledCents: number; tomorrowScheduledCents: number; readinessBlocks: number };
 type WorkQueueRow = { day: string; workType: string; patientId: string | null; firstName: string | null; lastName: string | null; eventAt: string | null; signal: string; opportunityCents: number; nextAction: string; route: string; ownerRoleKey: string };
 type SuggestedPatientRow = { id: string; firstName: string; lastName: string; chartNumber: string; phone: string | null; email: string | null; suggestionType: string; reason: string; opportunityCents: number; nextAction: string };
+type HuddleAnalytics = {
+  hygieneRecall: { dueCount: number; overdueCount: number; unscheduledDueCount: number; recallOpportunityCents: number; hygieneVisits30: number; hygieneReappointed30: number; reappointmentRate: number };
+  brokenImpact: { brokenCount: number; noShowCount: number; cancelCount: number; lostProductionCents: number; unscheduledPatientCount: number; recoveredCount: number; recoveredProductionCents: number };
+  roomProviderProduction: Array<{ roomName: string; providerName: string; scheduledCents: number; bookedMinutes: number; appointmentCount: number }>;
+};
 
 export default async function HuddlePage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
@@ -24,6 +29,7 @@ export default async function HuddlePage({ searchParams }: { searchParams: Promi
   const serviceLines = huddle.serviceLines as ServiceLineRow[];
   const workQueue = huddle.workQueue as WorkQueueRow[];
   const suggestedPatients = huddle.suggestedPatients as SuggestedPatientRow[];
+  const analytics = huddle.analytics as HuddleAnalytics;
 
   return (
     <FoundationShell active="/app/huddle" roleKey={role.key}>
@@ -52,7 +58,7 @@ export default async function HuddlePage({ searchParams }: { searchParams: Promi
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className="bg-neutral-50 text-[11px] uppercase tracking-[0.08em] text-neutral-500">
-                <tr><th className="px-3 py-2">Provider</th><th className="px-3 py-2">Goal pace</th><th className="px-3 py-2">Today</th><th className="px-3 py-2">Hours</th><th className="px-3 py-2">Blocks</th></tr>
+                <tr><th className="px-3 py-2">Provider</th><th className="px-3 py-2">Goal pace</th><th className="px-3 py-2">Today</th><th className="px-3 py-2">30-day actual</th><th className="px-3 py-2">30-day booked</th><th className="px-3 py-2">Hours</th><th className="px-3 py-2">Blocks</th></tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
                 {providerGoals.map((row) => {
@@ -65,6 +71,8 @@ export default async function HuddlePage({ searchParams }: { searchParams: Promi
                         <p className="mt-1 text-xs text-neutral-500">{pace}% of <Money cents={row.dailyGoalCents} /></p>
                       </td>
                       <td className="px-3 py-3 font-semibold text-neutral-950"><Money cents={row.todayScheduledCents} /></td>
+                      <td className="px-3 py-3 font-semibold text-neutral-950"><Money cents={row.last30RevenueCents} /></td>
+                      <td className="px-3 py-3 text-neutral-700"><Money cents={row.scheduled30Cents} /></td>
                       <td className="px-3 py-3 text-neutral-700">{row.clinicalHours.toFixed(1)}</td>
                       <td className="px-3 py-3 text-neutral-700">{row.readinessBlocks}</td>
                     </tr>
@@ -86,6 +94,40 @@ export default async function HuddlePage({ searchParams }: { searchParams: Promi
                   <MiniMoney label="Yesterday" cents={row.yesterdayCents} />
                   <MiniMoney label="Today" cents={row.todayScheduledCents} />
                   <MiniMoney label="Tomorrow" cents={row.tomorrowScheduledCents} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-3">
+        <PmsCard title="Hygiene and recall" eyebrow="Reappointment and recare gap">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MiniMetric label="Due" value={analytics.hygieneRecall.dueCount} detail={`${analytics.hygieneRecall.overdueCount} overdue`} />
+            <MiniMetric label="Unscheduled" value={analytics.hygieneRecall.unscheduledDueCount} detail={<Money cents={analytics.hygieneRecall.recallOpportunityCents} />} />
+            <MiniMetric label="Reappointment" value={`${analytics.hygieneRecall.reappointmentRate}%`} detail={`${analytics.hygieneRecall.hygieneReappointed30}/${analytics.hygieneRecall.hygieneVisits30} hygiene visits`} />
+            <MiniMetric label="Next action" value="Fill" detail="Use tomorrow openings before broad outreach." />
+          </div>
+        </PmsCard>
+        <PmsCard title="No-show/cancel impact" eyebrow="Last 30 days">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MiniMetric label="Broken" value={analytics.brokenImpact.brokenCount} detail={`${analytics.brokenImpact.noShowCount} no-show · ${analytics.brokenImpact.cancelCount} cancel`} />
+            <MiniMetric label="Lost prod." value={<Money cents={analytics.brokenImpact.lostProductionCents} />} detail="scheduled value" />
+            <MiniMetric label="Recovered" value={analytics.brokenImpact.recoveredCount} detail={<Money cents={analytics.brokenImpact.recoveredProductionCents} />} />
+            <MiniMetric label="Still unscheduled" value={analytics.brokenImpact.unscheduledPatientCount} detail="patients" />
+          </div>
+        </PmsCard>
+        <PmsCard title="Room/provider production" eyebrow="Next 30 days">
+          <div className="grid gap-2">
+            {analytics.roomProviderProduction.map((row) => (
+              <div key={`${row.roomName}-${row.providerName}`} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{row.roomName}</p>
+                    <p className="mt-1 text-xs text-neutral-500">{row.providerName} · {row.appointmentCount} visits · {Math.round(row.bookedMinutes / 60)}h</p>
+                  </div>
+                  <p className="text-sm font-semibold text-neutral-950"><Money cents={row.scheduledCents} /></p>
                 </div>
               </div>
             ))}
@@ -194,6 +236,10 @@ function RouteCard({ title, href, body }: { title: string; href: string; body: s
 
 function Metric({ label, value, detail }: { label: string; value: React.ReactNode; detail: React.ReactNode }) {
   return <div className="rounded-lg border border-neutral-200 bg-white px-4 py-3 shadow-sm"><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p><p className="mt-1 text-2xl font-semibold text-neutral-950">{value}</p><p className="mt-1 text-xs text-neutral-500">{detail}</p></div>;
+}
+
+function MiniMetric({ label, value, detail }: { label: string; value: React.ReactNode; detail: React.ReactNode }) {
+  return <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3"><p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-neutral-500">{label}</p><p className="mt-2 text-xl font-semibold text-neutral-950">{value}</p><p className="mt-1 text-xs leading-5 text-neutral-600">{detail}</p></div>;
 }
 
 function MiniMoney({ label, cents }: { label: string; cents: number }) {

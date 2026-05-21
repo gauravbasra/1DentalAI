@@ -41,6 +41,8 @@ type ClaimRow = {
   id: string;
   patientId: string;
   claimNumber: string | null;
+  clearinghouseTraceId: string | null;
+  submittedAt: string | null;
   status: string;
   attachmentStatus: string;
   lastName: string;
@@ -52,7 +54,13 @@ type ClaimRow = {
   paidCents: number;
   patientDueCents: number;
   lineCount: number;
+  readyLines: number;
   blockedLines: number;
+  openDenialCount: number;
+  eraPostingCount: number;
+  payerFollowUpCount: number;
+  claimLineDetails: unknown;
+  claimLifecycle: unknown;
 };
 
 type BenefitRow = {
@@ -75,6 +83,7 @@ type BenefitRow = {
   annualUsedCents: number | null;
   frequencies: Record<string, string> | null;
   limitations: Record<string, string> | null;
+  coverageSnapshot: unknown;
 };
 
 type TreatmentPlanRow = {
@@ -104,6 +113,7 @@ type PriorAuthRow = {
   status: string;
   requiredEvidence: string[] | null;
   evidenceChecklist: unknown;
+  treatmentPlanEvidence: unknown;
   submissionReadiness: unknown;
   connectorStatus: string;
   blockedReason: string | null;
@@ -120,11 +130,16 @@ type DenialRow = {
   payerName: string;
   denialCode: string | null;
   denialReason: string;
+  rootCause: string | null;
   deniedCents: number;
   appealDeadline: string | null;
+  appealDaysRemaining: number | null;
+  claimStatus: string;
+  attachmentStatus: string;
   status: string;
   appealPacketStatus: string;
   requiredEvidence: string[] | null;
+  appealPackageChecklist: unknown;
   submissionReadiness: unknown;
   connectorStatus: string;
   blockedReason: string | null;
@@ -139,13 +154,16 @@ type EraRow = {
   chartNumber: string;
   payerName: string;
   eraTraceNumber: string | null;
+  eobDocumentId: string | null;
   allowedCents: number;
   paidCents: number;
   patientDueCents: number;
   adjustmentCents: number;
+  postingVarianceCents: number;
   status: string;
   exceptionReason: string | null;
   postingReadiness: unknown;
+  postingChecklist: unknown;
   connectorStatus: string;
   blockedReason: string | null;
 };
@@ -185,6 +203,7 @@ type RevenueFindingRow = {
   recoveryStatus: string;
   connectorStatus: string;
   proofRequired: unknown;
+  leakageWorkflow: unknown;
   nextAction: string;
 };
 
@@ -278,6 +297,7 @@ async function denialAction(formData: FormData) {
     payerName,
     denialCode: String(formData.get("denialCode") ?? ""),
     denialReason: String(formData.get("denialReason") ?? ""),
+    rootCause: String(formData.get("rootCause") ?? ""),
     deniedCents: moneyToCents(formData.get("deniedDollars")) || Number(billed || 0),
     appealDeadline: String(formData.get("appealDeadline") ?? "") || undefined,
     requiredEvidence: evidenceList(formData.get("requiredEvidence")),
@@ -365,7 +385,7 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
       </section>
 
       {(view === "today" || view === "benefits") ? <section className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <PmsCard title="Coverage and benefits" eyebrow="Eligibility, annual max, deductible, limitations">
+        <PmsCard title="Coverage and benefits" eyebrow="Eligibility, annual max, deductible, frequency, limitations">
           <div className="grid gap-3 lg:grid-cols-2">
             {benefits.map((row) => (
               <div key={row.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
@@ -381,9 +401,11 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
                   <MiniMetric label="Annual max" value={<Money cents={Number(row.annualMaxCents ?? 0)} />} />
                   <MiniMetric label="Remaining" value={<Money cents={Math.max(0, Number(row.annualMaxCents ?? 0) - Number(row.annualUsedCents ?? 0))} />} />
                 </div>
+                <Checklist title="Coverage checklist" value={row.coverageSnapshot} itemKey="coverageChecklist" />
                 <div className="mt-3 grid gap-2 text-xs leading-5 text-neutral-600">
                   <p><span className="font-semibold text-neutral-800">Frequencies:</span> {jsonSummary(row.frequencies)}</p>
                   <p><span className="font-semibold text-neutral-800">Limitations:</span> {jsonSummary(row.limitations)}</p>
+                  <p><span className="font-semibold text-neutral-800">Network:</span> {clean(row.networkStatus)} · verified {fieldText(row.coverageSnapshot, "verificationAgeDays") ?? "not recorded"} day(s) ago</p>
                   {row.verificationNote ? <p><span className="font-semibold text-neutral-800">Evidence:</span> {row.verificationNote}</p> : null}
                 </div>
               </div>
@@ -432,10 +454,12 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
                   <MiniMetric label="Connector" value={clean(auth.connectorStatus)} />
                   <MiniMetric label="Readiness" value={jsonSummary(auth.submissionReadiness)} />
                 </div>
+                <Checklist title="Prior auth evidence checklist" value={auth.evidenceChecklist} itemKey="items" />
+                <p className="mt-2 text-xs leading-5 text-neutral-600"><span className="font-semibold text-neutral-800">Treatment evidence:</span> {jsonSummary(auth.treatmentPlanEvidence)}</p>
                 {auth.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{auth.blockedReason}</p> : null}
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <PriorAuthStatusButton id={auth.id} status="READY_FOR_REVIEW" label="Ready for review" />
-                  <PriorAuthStatusButton id={auth.id} status="APPROVED_STAGED" label="Stage for payer" />
+                  <PriorAuthStatusButton id={auth.id} status="APPROVED_STAGED" label="Stage connector packet" />
                 </div>
               </WorkCard>
             ))}
@@ -453,11 +477,19 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
               <tbody className="divide-y divide-neutral-100">
                 {claims.map((claim) => (
                   <tr key={claim.id} className="align-top">
-                    <td className="px-3 py-3"><p className="font-semibold text-neutral-950">{claim.claimNumber ?? claim.id}</p><p className="mt-1 text-xs text-neutral-500">{claim.lineCount} line(s)</p></td>
+                    <td className="px-3 py-3"><p className="font-semibold text-neutral-950">{claim.claimNumber ?? claim.id}</p><p className="mt-1 text-xs text-neutral-500">{claim.lineCount} line(s) · trace {claim.clearinghouseTraceId ?? "not attached"}</p></td>
                     <td className="px-3 py-3 text-xs text-neutral-600">{claim.lastName}, {claim.firstName} · {claim.chartNumber}<br />{claim.payerName}</td>
                     <td className="px-3 py-3 text-xs text-neutral-600">Billed <Money cents={Number(claim.billedCents)} /><br />Paid <Money cents={Number(claim.paidCents)} /><br />Patient due <Money cents={Number(claim.patientDueCents)} /></td>
-                    <td className="px-3 py-3"><StatusFor value={claim.status} /><p className="mt-2 text-xs text-neutral-500">{claim.attachmentStatus.replaceAll("_", " ").toLowerCase()} · {claim.blockedLines} blocked line(s)</p></td>
-                    <td className="px-3 py-3"><Link href="/app/pms/insurance" className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Open PMS claim</Link></td>
+                    <td className="px-3 py-3">
+                      <StatusFor value={claim.status} />
+                      <p className="mt-2 text-xs text-neutral-500">{claim.attachmentStatus.replaceAll("_", " ").toLowerCase()} · {claim.readyLines}/{claim.lineCount} ready · {claim.blockedLines} blocked</p>
+                      <p className="mt-1 text-xs text-neutral-500">{claim.openDenialCount} denial(s) · {claim.eraPostingCount} ERA/EOB · {claim.payerFollowUpCount} follow-up(s)</p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <Link href="/app/pms/insurance" className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Open PMS claim</Link>
+                      <p className="mt-2 text-xs leading-5 text-neutral-600">{fieldText(claim.claimLifecycle, "nextAction")}</p>
+                      <p className="mt-1 text-xs leading-5 text-neutral-500">Lines: {compactLineSummary(claim.claimLineDetails)}</p>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -469,6 +501,7 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
           <form action={denialAction} className="grid gap-3">
             <label className="grid gap-1 text-xs font-semibold text-neutral-700">Claim<select name="claimKey" required className="rounded-md border border-neutral-300 px-3 py-2 text-sm">{claims.map((claim) => <option key={claim.id} value={`${claim.id}|${claim.patientId}|${claim.payerName}|${claim.billedCents}`}>{claim.claimNumber ?? claim.id} - {claim.payerName}</option>)}</select></label>
             <Input name="denialCode" label="Denial code" />
+            <Select name="rootCause" label="Root cause" options={["MISSING_ATTACHMENT", "BENEFIT_LIMITATION", "FREQUENCY_LIMITATION", "COB_OR_ELIGIBILITY", "PAYER_PROCESSING", "CODING_REVIEW", "UNDERPAYMENT"]} />
             <Input name="deniedDollars" label="Denied dollars" />
             <Input name="appealDeadline" label="Appeal deadline" type="datetime-local" />
             <Textarea name="denialReason" label="Denial reason" required />
@@ -487,12 +520,19 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
                 <div className="mt-2 grid gap-2 sm:grid-cols-3">
                   <MiniMetric label="Appeal packet" value={clean(denial.appealPacketStatus)} />
                   <MiniMetric label="Connector" value={clean(denial.connectorStatus)} />
-                  <MiniMetric label="Readiness" value={jsonSummary(denial.submissionReadiness)} />
+                  <MiniMetric label="Deadline" value={denial.appealDaysRemaining === null ? "not recorded" : `${denial.appealDaysRemaining} day(s)`} />
                 </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Root cause" value={clean(denial.rootCause ?? "not classified")} />
+                  <MiniMetric label="Claim" value={clean(denial.claimStatus)} />
+                  <MiniMetric label="Attachment" value={clean(denial.attachmentStatus)} />
+                </div>
+                <Checklist title="Denial appeal package" value={denial.appealPackageChecklist} itemKey="checklist" />
+                <p className="mt-2 text-xs leading-5 text-neutral-600">Submission readiness: {jsonSummary(denial.submissionReadiness)}</p>
                 {denial.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{denial.blockedReason}</p> : null}
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <DenialStatusButton id={denial.id} status="APPEAL_READY" label="Appeal ready" />
-                  <DenialStatusButton id={denial.id} status="APPROVED_STAGED" label="Stage appeal" />
+                  <DenialStatusButton id={denial.id} status="APPROVED_STAGED" label="Stage appeal packet" />
                 </div>
               </WorkCard>
             ))}
@@ -517,7 +557,7 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
                 {followUp.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{followUp.blockedReason}</p> : null}
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <PayerFollowUpStatusButton id={followUp.id} status="WAITING_ON_PAYER" label="Contacted payer" outcome="Payer contacted; waiting on response." />
-                  <PayerFollowUpStatusButton id={followUp.id} status="RESOLVED" label="Resolved" outcome="Payer follow-up resolved." />
+                  <PayerFollowUpStatusButton id={followUp.id} status="MANUAL_PROOF_REQUIRED" label="Attach proof" outcome="Manual proof required before payer status is treated as verified." />
                 </div>
               </WorkCard>
             ))}
@@ -536,6 +576,12 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
                   <MiniMetric label="Patient due" value={<Money cents={Number(era.patientDueCents)} />} />
                   <MiniMetric label="Connector" value={clean(era.connectorStatus)} />
                 </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Adjustment" value={<Money cents={Number(era.adjustmentCents)} />} />
+                  <MiniMetric label="Variance" value={<Money cents={Number(era.postingVarianceCents)} />} />
+                  <MiniMetric label="EOB proof" value={era.eraTraceNumber || era.eobDocumentId ? "Captured" : "Missing"} />
+                </div>
+                <BooleanChecklist title="ERA/EOB posting checklist" value={era.postingChecklist} />
                 <p className="mt-2 text-xs leading-5 text-neutral-600">Readiness: {jsonSummary(era.postingReadiness)}</p>
                 {era.blockedReason ? <p className="mt-1 text-xs leading-5 text-red-700">{era.blockedReason}</p> : null}
                 <form action={eraPostAction} className="mt-3"><input type="hidden" name="id" value={era.id} /><button disabled={era.status === "POSTED"} className="w-full rounded-md border border-neutral-300 px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 disabled:bg-neutral-100 disabled:text-neutral-400">Post to PMS ledger after review</button></form>
@@ -575,9 +621,15 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
                   <MiniMetric label="Connector" value={clean(finding.connectorStatus)} />
                   <MiniMetric label="Proof" value={jsonSummary(finding.proofRequired)} />
                 </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Expected" value={<Money cents={Number(finding.expectedCents)} />} />
+                  <MiniMetric label="Actual" value={<Money cents={Number(finding.actualCents)} />} />
+                  <MiniMetric label="Leakage" value={<Money cents={Math.abs(Number(finding.varianceCents))} />} />
+                </div>
+                <Checklist title="Revenue integrity leakage workflow" value={finding.leakageWorkflow} itemKey="workflow" />
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <RevenueStatusButton id={finding.id} status="IN_REVIEW" label="In review" />
-                  <RevenueStatusButton id={finding.id} status="RECOVERY_STAGED" label="Stage recovery" />
+                  <RevenueStatusButton id={finding.id} status="RECOVERY_STAGED" label="Stage recovery proof" />
                 </div>
               </WorkCard>
             ))}
@@ -609,7 +661,7 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
                 <div className="mt-3 grid grid-cols-3 gap-2">
                   <RcmItemStatusButton id={item.id} status="READY_FOR_REVIEW" label="Review" />
                   <RcmItemStatusButton id={item.id} status="APPROVED_STAGED" label="Stage" />
-                  <RcmItemStatusButton id={item.id} status="COMPLETED" label="Done" />
+                  <RcmItemStatusButton id={item.id} status="MANUAL_PROOF_REQUIRED" label="Proof" />
                 </div>
               </WorkCard>
             ))}
@@ -622,6 +674,43 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
 
 function clean(value: string) {
   return value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function fieldText(value: unknown, key: string) {
+  const record = asRecord(value);
+  const field = record?.[key];
+  if (field === null || field === undefined || field === "") return null;
+  return String(field);
+}
+
+function checklistItems(value: unknown, itemKey: string) {
+  const record = asRecord(value);
+  const rawItems = Array.isArray(value) ? value : record?.[itemKey];
+  if (!Array.isArray(rawItems)) return [];
+  return rawItems
+    .map((item) => asRecord(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .map((item) => ({
+      label: String(item.label ?? item.name ?? "Checklist item"),
+      status: String(item.status ?? "PENDING"),
+      source: item.source ? String(item.source) : null,
+    }));
+}
+
+function compactLineSummary(value: unknown) {
+  const rows = Array.isArray(value) ? value : [];
+  if (!rows.length) return "not recorded";
+  return rows.slice(0, 3).map((row) => {
+    const record = asRecord(row);
+    if (!record) return "line";
+    const code = String(record.code ?? "code");
+    const tooth = record.tooth ? ` tooth ${record.tooth}` : "";
+    return `${code}${tooth} ${clean(String(record.status ?? "READY"))}`;
+  }).join("; ");
 }
 
 function RcmViewNav({ active, roleKey }: { active: string; roleKey: string }) {
@@ -654,7 +743,13 @@ function RcmViewNav({ active, roleKey }: { active: string; roleKey: string }) {
 
 function jsonSummary(value: unknown) {
   if (!value || !Object.keys(value).length) return "not recorded";
-  if (Array.isArray(value)) return value.join(", ");
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      if (!item || typeof item !== "object") return String(item);
+      const record = item as Record<string, unknown>;
+      return [record.code, record.label, record.description, record.status].filter(Boolean).map(String).join(" ");
+    }).filter(Boolean).join(", ");
+  }
   if (typeof value === "object") {
     return Object.entries(value as Record<string, unknown>).map(([key, val]) => `${clean(key)}: ${Array.isArray(val) ? val.join(", ") : typeof val === "object" && val !== null ? JSON.stringify(val) : String(val)}`).join("; ");
   }
@@ -675,6 +770,44 @@ function WorkCard({ title, status, patient, payer, amount, body, evidence, child
       <p className="mt-2 text-xs leading-5 text-neutral-600">{body}</p>
       {evidence?.length ? <p className="mt-2 text-xs leading-5 text-neutral-600"><span className="font-semibold text-neutral-800">Evidence:</span> {evidence.join(", ")}</p> : null}
       {children ? <div className="mt-3">{children}</div> : null}
+    </div>
+  );
+}
+
+function Checklist({ title, value, itemKey }: { title: string; value: unknown; itemKey: string }) {
+  const items = checklistItems(value, itemKey);
+  if (!items.length) return null;
+  return (
+    <div className="mt-3 rounded-md bg-white p-2 ring-1 ring-neutral-200">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">{title}</p>
+      <div className="mt-2 grid gap-1.5">
+        {items.map((item, index) => (
+          <div key={`${item.label}-${index}`} className="flex items-start justify-between gap-3 text-xs">
+            <span className="leading-5 text-neutral-700">{item.label}{item.source ? <span className="text-neutral-400"> · {item.source}</span> : null}</span>
+            <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-neutral-600">{item.status.replaceAll("_", " ")}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BooleanChecklist({ title, value }: { title: string; value: unknown }) {
+  const record = asRecord(value);
+  if (!record) return null;
+  const items = Object.entries(record).filter(([, val]) => typeof val === "boolean");
+  if (!items.length) return null;
+  return (
+    <div className="mt-3 rounded-md bg-white p-2 ring-1 ring-neutral-200">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">{title}</p>
+      <div className="mt-2 grid gap-1.5">
+        {items.map(([key, val]) => (
+          <div key={key} className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-neutral-700">{clean(key)}</span>
+            <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-neutral-600">{val ? "Ready" : "Needs review"}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

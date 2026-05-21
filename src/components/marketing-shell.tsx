@@ -24,7 +24,7 @@ export function PageHero({
   return (
     <section className="mx-auto max-w-5xl px-6 py-20 text-center sm:px-8 lg:py-28">
       <p className="text-sm font-semibold text-cyan-700">{eyebrow}</p>
-      <h1 className="mt-5 text-5xl font-semibold tracking-tight text-neutral-950 sm:text-7xl">
+      <h1 className="mx-auto mt-5 max-w-4xl text-4xl font-semibold tracking-tight text-neutral-950 text-balance sm:text-6xl">
         {title}
       </h1>
       <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-neutral-600 sm:text-xl">
@@ -46,7 +46,7 @@ export function SectionIntro({
   return (
     <div className="mx-auto max-w-4xl text-center">
       <p className="text-sm font-semibold text-cyan-700">{eyebrow}</p>
-      <h2 className="mt-4 text-4xl font-semibold tracking-tight text-neutral-950 sm:text-6xl">
+      <h2 className="mx-auto mt-4 max-w-4xl text-3xl font-semibold tracking-tight text-neutral-950 text-balance sm:text-5xl">
         {title}
       </h2>
       <p className="mx-auto mt-5 max-w-3xl text-lg leading-8 text-neutral-600">

@@ -123,6 +123,14 @@ if (pmsPage.includes("workbenchAreas") || pmsPage.includes("getWorkbenchesForRol
   process.exit(1);
 }
 
+for (const token of ["getPracticeIntelligence", "last30RevenueCents", "last90RevenueCents", "bookedProductionHorizon", "hygieneRecall", "noShowCancelImpact", "roomProviderProduction", "Rooms/provider production chart"]) {
+  const haystack = `${pmsPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+  if (!haystack.includes(token)) {
+    console.error(`PMS practice intelligence token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
 const schedulePage = fs.readFileSync("src/app/app/pms/schedule/page.tsx", "utf8");
 const appointmentPage = fs.readFileSync("src/app/app/pms/appointments/[appointmentId]/page.tsx", "utf8");
 const onlineSchedulingPage = fs.readFileSync("src/app/app/pms/online-scheduling/page.tsx", "utf8");
@@ -214,6 +222,13 @@ for (const token of [
   "Appointment lifecycle",
   "consent",
   "quiet hours",
+  "BOOKING_REQUEST_RESPONSE",
+  "INTAKE_PACKET_REMINDER",
+  "MEDICAL_ALERT_REVIEW",
+  "PRE_MED_ALERT_REVIEW",
+  "BLOCKED_CONSENT",
+  "BLOCKED_QUIET_HOURS",
+  "BLOCKED_PRE_MED_REVIEW",
   "FORMS_REMINDER",
   "RECALL_REACTIVATION",
   "NO_SHOW_RECOVERY",
@@ -250,7 +265,7 @@ for (const token of ["RcmWorkItem", "RcmPriorAuthorization", "RcmDenialCase", "R
   }
 }
 
-for (const token of ["PhoneConversation", "PhoneOutboundMessage", "PhoneRoutingRule", "PhoneCallTask", "PhoneCallAnalytics", "PhoneNumber", "PhoneExtension", "PhoneDevice", "PhoneProviderConnection", "PhoneActiveCall", "PhoneCallControlAction", "PhoneVoicemail", "getPhoneOperatingCenter", "Dental phone system control center", "Desk phones, softphones, and extensions", "Active calls and call controls", "HOLD", "WARM_TRANSFER", "CALL_PARK", "OUTBOUND_DIAL", "Voicemail and missed-call recovery"]) {
+for (const token of ["PhoneConversation", "PhoneOutboundMessage", "PhoneRoutingRule", "PhoneCallTask", "PhoneCallAnalytics", "PhoneNumber", "PhoneExtension", "PhoneDevice", "PhoneProviderConnection", "PhoneActiveCall", "PhoneCallControlAction", "PhoneVoicemail", "getPhoneOperatingCenter", "Patient engagement", "Desk phones, softphones, and extensions", "Active calls and call controls", "HOLD", "WARM_TRANSFER", "CALL_PARK", "OUTBOUND_DIAL", "Voicemail and missed-call recovery"]) {
   if (!`${schema}\n${phonePage}\n${osRepository}`.includes(token)) {
     console.error(`Phone operating-system token missing: ${token}`);
     process.exit(1);
@@ -274,7 +289,7 @@ for (const token of ["MarketingCampaign", "MarketingLandingPage", "AiStudioAsset
 const huddlePage = fs.readFileSync("src/app/app/huddle/page.tsx", "utf8");
 const patientFinderPage = fs.readFileSync("src/app/app/patient-finder/page.tsx", "utf8");
 const patientIntelligenceRepository = fs.readFileSync("src/lib/patient-intelligence-repository.ts", "utf8");
-for (const token of ["MorningHuddleSnapshot", "getMorningHuddle", "Morning huddle", "Perfect Time Slot opening map", "Yesterday, today, and tomorrow operating plan", "Provider goals and clinical hours", "Service-line production", "Huddle work queue", "Suggested patients", "getProviderGoalPacing", "getServiceLineProduction", "getHuddleWorkQueue", "getSuggestedPatients"]) {
+for (const token of ["MorningHuddleSnapshot", "getMorningHuddle", "Morning huddle", "Perfect Time Slot opening map", "Yesterday, today, and tomorrow operating plan", "Provider goals and clinical hours", "Service-line production", "Huddle work queue", "Suggested patients", "getProviderGoalPacing", "getServiceLineProduction", "getHuddleWorkQueue", "getSuggestedPatients", "getHuddleAnalytics", "Room/provider production"]) {
   if (!`${schema}\n${huddlePage}\n${patientIntelligenceRepository}`.includes(token)) {
     console.error(`Morning huddle token missing: ${token}`);
     process.exit(1);

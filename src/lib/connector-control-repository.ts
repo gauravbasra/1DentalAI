@@ -1,6 +1,8 @@
 import { newId, query } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
 
+type ConnectorRow = Record<string, unknown>;
+
 async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string | null, outcome = "ALLOWED", metadata?: unknown) {
   await query(
     `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
@@ -10,7 +12,7 @@ async function addAudit(tenantId: string, actorRole: string, eventType: string, 
 }
 
 export async function getConnectorControlCenter(tenantId = defaultTenantId) {
-  const [definitions, installations, capabilities, routes, healthChecks, costs, metrics] = await Promise.all([
+  const [definitions, installations, capabilities, routes, healthChecks, costs, metrics, costSummary, fallbackSummary] = await Promise.all([
     query(
       `select d.*,
         coalesce(capabilities."capabilityCount", 0)::int as "capabilityCount",
@@ -19,7 +21,8 @@ export async function getConnectorControlCenter(tenantId = defaultTenantId) {
        from "ConnectorDefinition" d
        left join (
         select "definitionId", count(*) as "capabilityCount",
-          count(*) filter (where "status" not in ('READY','APPROVED_STAGED')) as "blockedCapabilityCount"
+          count(*) filter (where "status" not in ('READY','APPROVED_STAGED')) as "blockedCapabilityCount",
+          count(*) filter (where cardinality("missingFields") > 0) as "missingFieldCapabilityCount"
         from "ConnectorCapability"
         where "tenantId" = $1
         group by "definitionId"
@@ -40,7 +43,7 @@ export async function getConnectorControlCenter(tenantId = defaultTenantId) {
        join "ConnectorDefinition" d on d."id" = i."definitionId"
        left join "Location" l on l."id" = i."locationId"
        where i."tenantId" = $1
-       order by case i."status" when 'ACTIVE' then 3 when 'READY_FOR_SMOKE_TEST' then 2 else 0 end, d."category", d."name"`,
+       order by d."category", d."name", coalesce(l."name", 'Enterprise')`,
       [tenantId],
     ),
     query(
@@ -48,20 +51,21 @@ export async function getConnectorControlCenter(tenantId = defaultTenantId) {
        from "ConnectorCapability" c
        join "ConnectorDefinition" d on d."id" = c."definitionId"
        where c."tenantId" = $1
-       order by c."workflowArea", c."capabilityKey"`,
+       order by d."category", c."workflowArea", c."capabilityKey"`,
       [tenantId],
     ),
     query(
-      `select r.*, d."name" as "definitionName"
+      `select r.*, d."name" as "definitionName", d."category", i."fallbackMode"
        from "ConnectorRouteDecision" r
        left join "ConnectorDefinition" d on d."id" = r."definitionId"
+       left join "ConnectorInstallation" i on i."id" = r."installationId"
        where r."tenantId" = $1
        order by r."createdAt" desc
        limit 30`,
       [tenantId],
     ),
     query(
-      `select h.*, d."name" as "definitionName"
+      `select h.*, d."name" as "definitionName", d."category"
        from "ConnectorHealthCheck" h
        join "ConnectorDefinition" d on d."id" = h."definitionId"
        where h."tenantId" = $1
@@ -70,7 +74,7 @@ export async function getConnectorControlCenter(tenantId = defaultTenantId) {
       [tenantId],
     ),
     query(
-      `select c.*, d."name" as "definitionName"
+      `select c.*, d."name" as "definitionName", d."category"
        from "ConnectorCostEvent" c
        left join "ConnectorDefinition" d on d."id" = c."definitionId"
        where c."tenantId" = $1
@@ -87,7 +91,37 @@ export async function getConnectorControlCenter(tenantId = defaultTenantId) {
         (select count(*) from "ConnectorHealthCheck" where "tenantId" = $1 and "status" not in ('PASS','READY'))::text as "healthBlocked"`,
       [tenantId],
     ),
+    query(
+      `select "workflowArea", "capabilityKey",
+        count(*)::int as "eventCount",
+        coalesce(sum("costCents"), 0)::int as "estimatedCents",
+        max("createdAt")::text as "lastEstimatedAt"
+       from "ConnectorCostEvent"
+       where "tenantId" = $1
+       group by "workflowArea", "capabilityKey"
+       order by coalesce(sum("costCents"), 0) desc, "workflowArea", "capabilityKey"`,
+      [tenantId],
+    ),
+    query(
+      `select "workflowArea", "fallbackRoute",
+        count(*)::int as "routeCount",
+        count(*) filter (where "routeStatus" like 'BLOCKED%')::int as "blockedCount",
+        max("createdAt")::text as "lastDecisionAt"
+       from "ConnectorRouteDecision"
+       where "tenantId" = $1
+       group by "workflowArea", "fallbackRoute"
+       order by count(*) filter (where "routeStatus" like 'BLOCKED%') desc, "workflowArea"`,
+      [tenantId],
+    ),
   ]);
+  const domainReadiness = buildDomainReadiness({
+    definitions: definitions.rows,
+    installations: installations.rows,
+    capabilities: capabilities.rows,
+    healthChecks: healthChecks.rows,
+    costs: costs.rows,
+    routes: routes.rows,
+  });
 
   return {
     definitions: definitions.rows,
@@ -97,7 +131,51 @@ export async function getConnectorControlCenter(tenantId = defaultTenantId) {
     healthChecks: healthChecks.rows,
     costs: costs.rows,
     metrics: metrics.rows[0],
+    costSummary: costSummary.rows,
+    fallbackSummary: fallbackSummary.rows,
+    domainReadiness,
   };
+}
+
+function buildDomainReadiness(input: {
+  definitions: ConnectorRow[];
+  installations: ConnectorRow[];
+  capabilities: ConnectorRow[];
+  healthChecks: ConnectorRow[];
+  costs: ConnectorRow[];
+  routes: ConnectorRow[];
+}) {
+  const categories = Array.from(new Set(input.definitions.map((row) => String(row.category)))).sort();
+  return categories.map((category) => {
+    const definitions = input.definitions.filter((row) => row.category === category);
+    const definitionIds = new Set(definitions.map((row) => row.id));
+    const installations = input.installations.filter((row) => definitionIds.has(row.definitionId));
+    const capabilities = input.capabilities.filter((row) => definitionIds.has(row.definitionId));
+    const checks = input.healthChecks.filter((row) => definitionIds.has(row.definitionId));
+    const routes = input.routes.filter((row) => definitionIds.has(row.definitionId));
+    const costs = input.costs.filter((row) => definitionIds.has(row.definitionId));
+    const blockers = [
+      installations.some((row) => row.credentialStatus !== "VALIDATED") ? "Credential vault not validated" : null,
+      installations.some((row) => row.webhookStatus !== "VERIFIED") ? "Webhook callback or signing secret not verified" : null,
+      installations.some((row) => row.approvalStatus !== "APPROVED") ? "Tenant approval policy not approved" : null,
+      installations.some((row) => row.healthStatus !== "PASS") ? "Smoke test or health check not passing" : null,
+      capabilities.some((row) => Array.isArray(row.missingFields) && row.missingFields.length > 0) ? "Capability map has missing fields" : null,
+      capabilities.some((row) => !["READY", "APPROVED_STAGED"].includes(String(row.status))) ? "Capability status is not connector-ready" : null,
+    ].filter(Boolean);
+    const estimatedCents = costs.reduce((sum, row) => sum + Number(row.costCents ?? 0), 0);
+    return {
+      category,
+      definitions: definitions.length,
+      installations: installations.length,
+      capabilities: capabilities.length,
+      blockedCapabilities: capabilities.filter((row) => !["READY", "APPROVED_STAGED"].includes(String(row.status)) || (Array.isArray(row.missingFields) && row.missingFields.length > 0)).length,
+      blockedRoutes: routes.filter((row) => String(row.routeStatus).startsWith("BLOCKED")).length,
+      healthBlocked: checks.filter((row) => !["PASS", "READY"].includes(String(row.status))).length,
+      estimatedCents,
+      readinessStatus: blockers.length ? "SETUP_REQUIRED" : "READY_FOR_CONNECTOR",
+      blockers,
+    };
+  });
 }
 
 export async function updateConnectorInstallation(input: {
@@ -110,12 +188,11 @@ export async function updateConnectorInstallation(input: {
   nextAction: string;
   actorRole?: string;
 }) {
+  const requestedStatus = input.status;
+  const statusDecision = resolveInstallationStatus(input);
   const result = await query<{ tenantId: string }>(
     `update "ConnectorInstallation"
-     set "status" = case
-        when $2 = 'ACTIVE' and ($3 <> 'VALIDATED' or $4 <> 'VERIFIED' or $5 <> 'APPROVED' or $6 <> 'PASS') then 'BLOCKED_READINESS'
-        else $2
-       end,
+     set "status" = $2,
        "credentialStatus" = $3,
        "webhookStatus" = $4,
        "approvalStatus" = $5,
@@ -125,11 +202,81 @@ export async function updateConnectorInstallation(input: {
        "updatedAt" = current_timestamp
      where "id" = $1
      returning "tenantId"`,
-    [input.id, input.status, input.credentialStatus, input.webhookStatus, input.approvalStatus, input.healthStatus, input.nextAction.trim()],
+    [input.id, statusDecision.status, input.credentialStatus, input.webhookStatus, input.approvalStatus, input.healthStatus, input.nextAction.trim()],
   );
   if (result.rows[0]) {
-    await addAudit(result.rows[0].tenantId, input.actorRole ?? "support_admin", "CONNECTOR_INSTALLATION_UPDATED", "ConnectorInstallation", input.id, "ALLOWED", input);
+    await addAudit(result.rows[0].tenantId, input.actorRole ?? "support_admin", "CONNECTOR_INSTALLATION_UPDATED", "ConnectorInstallation", input.id, statusDecision.status === requestedStatus ? "ALLOWED" : "BLOCKED", {
+      ...input,
+      requestedStatus,
+      effectiveStatus: statusDecision.status,
+      readinessBlockers: statusDecision.blockers,
+    });
   }
+}
+
+function resolveInstallationStatus(input: { status: string; credentialStatus: string; webhookStatus: string; approvalStatus: string; healthStatus: string }) {
+  const blockers = [
+    input.credentialStatus === "VALIDATED" ? null : "credentials are not validated",
+    input.webhookStatus === "VERIFIED" ? null : "webhooks are not verified",
+    input.approvalStatus === "APPROVED" ? null : "tenant approval is not approved",
+    input.healthStatus === "PASS" ? null : "health check has not passed",
+  ].filter(Boolean);
+  if (input.status === "ACTIVE" && blockers.length) return { status: "BLOCKED_READINESS", blockers };
+  if (input.status === "READY_FOR_SMOKE_TEST") {
+    const smokeBlockers = blockers.filter((blocker) => blocker !== "health check has not passed");
+    if (smokeBlockers.length) return { status: "SETUP_REQUIRED", blockers: smokeBlockers };
+  }
+  return { status: input.status || "SETUP_REQUIRED", blockers };
+}
+
+export async function recordConnectorHealthCheck(input: {
+  tenantId?: string;
+  definitionId: string;
+  installationId?: string;
+  checkType: string;
+  status: string;
+  resultSummary: string;
+  latencyMs?: number;
+  actorRole?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("chealth");
+  const allowedStatus = ["NOT_RUN", "PASS", "FAIL", "READY", "BLOCKED_CONNECTOR_REQUIRED"].includes(input.status) ? input.status : "FAIL";
+  const result = await query<{ definitionId: string }>(
+    `insert into "ConnectorHealthCheck"
+       ("id", "tenantId", "definitionId", "installationId", "checkType", "status", "resultSummary", "latencyMs")
+     values ($1, $2, $3, $4, $5, $6, $7, $8::int)
+     returning "definitionId"`,
+    [
+      id,
+      tenantId,
+      input.definitionId,
+      input.installationId || null,
+      input.checkType.trim(),
+      allowedStatus,
+      input.resultSummary.trim(),
+      input.latencyMs ?? null,
+    ],
+  );
+  if (input.installationId) {
+    await query(
+      `update "ConnectorInstallation"
+       set "healthStatus" = case when $2 = 'PASS' then 'PASS' when $2 in ('FAIL','BLOCKED_CONNECTOR_REQUIRED') then 'FAIL' else "healthStatus" end,
+         "status" = case when $2 in ('FAIL','BLOCKED_CONNECTOR_REQUIRED') then 'BLOCKED_READINESS' else "status" end,
+         "lastHealthyAt" = case when $2 = 'PASS' then current_timestamp else "lastHealthyAt" end,
+         "updatedAt" = current_timestamp
+       where "id" = $1`,
+      [input.installationId, allowedStatus],
+    );
+  }
+  await addAudit(tenantId, input.actorRole ?? "support_admin", "CONNECTOR_HEALTH_CHECK_RECORDED", "ConnectorHealthCheck", id, allowedStatus === "PASS" ? "ALLOWED" : "BLOCKED", {
+    definitionId: result.rows[0]?.definitionId ?? input.definitionId,
+    installationId: input.installationId ?? null,
+    checkType: input.checkType,
+    status: allowedStatus,
+    noExternalSuccessClaimed: true,
+  });
+  return { id, status: allowedStatus };
 }
 
 export async function createConnectorRouteDecision(input: {
@@ -145,37 +292,122 @@ export async function createConnectorRouteDecision(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("route");
-  const readiness = await query<{ missingFields: string[]; status: string; fallbackPolicy: unknown }>(
-    `select c."missingFields", c."status", c."fallbackPolicy"
+  const readiness = await query<{
+    id: string;
+    definitionId: string;
+    installationId: string | null;
+    missingFields: string[];
+    status: string;
+    fallbackPolicy: unknown;
+    approvalPolicy: unknown;
+    definitionName: string;
+    category: string;
+    installStatus: string | null;
+    credentialStatus: string | null;
+    webhookStatus: string | null;
+    approvalStatus: string | null;
+    healthStatus: string | null;
+    fallbackMode: string | null;
+    costPolicy: unknown;
+  }>(
+    `select c."id", c."definitionId", c."installationId", c."missingFields", c."status", c."fallbackPolicy", c."approvalPolicy",
+       d."name" as "definitionName", d."category",
+       i."status" as "installStatus", i."credentialStatus", i."webhookStatus", i."approvalStatus", i."healthStatus", i."fallbackMode", i."costPolicy"
      from "ConnectorCapability" c
-     where c."tenantId" = $1 and c."capabilityKey" = $2
+     join "ConnectorDefinition" d on d."id" = c."definitionId"
+     left join "ConnectorInstallation" i on i."id" = coalesce($3::text, c."installationId")
+     where c."tenantId" = $1
+       and c."capabilityKey" = $2
+       and ($4::text is null or c."definitionId" = $4)
      order by case c."status" when 'READY' then 0 when 'APPROVED_STAGED' then 1 else 2 end
      limit 1`,
-    [tenantId, input.requestedCapability],
+    [tenantId, input.requestedCapability, input.installationId || null, input.definitionId || null],
   );
   const capability = readiness.rows[0];
-  const missing = capability?.missingFields ?? ["capability map"];
-  const routeStatus = capability?.status === "READY" && missing.length === 0 ? "READY_FOR_CONNECTOR" : "BLOCKED_CONNECTOR_REQUIRED";
-  const blockedReason = routeStatus === "READY_FOR_CONNECTOR" ? null : `Connector route blocked: ${missing.join(", ")}. Manual fallback is required.`;
+  const decision = evaluateRouteReadiness(capability, input.estimatedCostCents ?? 0);
   await query(
     `insert into "ConnectorRouteDecision"
        ("id", "tenantId", "definitionId", "installationId", "workflowArea", "sourceObjectType", "sourceObjectId", "requestedCapability", "routeStatus", "selectedRoute", "fallbackRoute", "estimatedCostCents", "blockedReason", "decisionContext", "actorRole")
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, case when $9 = 'READY_FOR_CONNECTOR' then $3 else null end, 'MANUAL_QUEUE', $10, $11, $12::jsonb, $13)`,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, case when $9 = 'READY_FOR_CONNECTOR' then $3 else null end, $10, $11, $12, $13::jsonb, $14)`,
     [
       id,
       tenantId,
-      input.definitionId || null,
-      input.installationId || null,
+      capability?.definitionId ?? input.definitionId ?? null,
+      input.installationId || capability?.installationId || null,
       input.workflowArea,
       input.sourceObjectType,
       input.sourceObjectId || null,
       input.requestedCapability,
-      routeStatus,
+      decision.routeStatus,
+      decision.fallbackRoute,
       input.estimatedCostCents ?? 0,
-      blockedReason,
-      JSON.stringify({ fallbackPolicy: capability?.fallbackPolicy ?? null, source: "manual route simulation", noExternalExecution: true }),
+      decision.blockedReason,
+      JSON.stringify({
+        capabilityStatus: capability?.status ?? "MISSING",
+        installStatus: capability?.installStatus ?? null,
+        readinessGates: decision.readinessGates,
+        fallbackPolicy: capability?.fallbackPolicy ?? null,
+        approvalPolicy: capability?.approvalPolicy ?? null,
+        source: "connector route decision",
+        noExternalExecution: true,
+      }),
       input.actorRole ?? "support_admin",
     ],
   );
-  await addAudit(tenantId, input.actorRole ?? "support_admin", "CONNECTOR_ROUTE_DECISION_CREATED", "ConnectorRouteDecision", id, routeStatus === "READY_FOR_CONNECTOR" ? "ALLOWED" : "BLOCKED", { requestedCapability: input.requestedCapability, routeStatus, blockedReason });
+  if ((input.estimatedCostCents ?? 0) > 0) {
+    await query(
+      `insert into "ConnectorCostEvent"
+         ("id", "tenantId", "definitionId", "installationId", "workflowArea", "capabilityKey", "sourceObjectType", "sourceObjectId", "costCents", "pricingUnit", "status", "metadata")
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'ROUTE_DECISION', 'ESTIMATED', $10::jsonb)`,
+      [
+        newId("ccost"),
+        tenantId,
+        capability?.definitionId ?? input.definitionId ?? null,
+        input.installationId || capability?.installationId || null,
+        input.workflowArea,
+        input.requestedCapability,
+        input.sourceObjectType,
+        input.sourceObjectId || null,
+        input.estimatedCostCents ?? 0,
+        JSON.stringify({ routeDecisionId: id, routeStatus: decision.routeStatus, noExternalExecution: true }),
+      ],
+    );
+  }
+  await addAudit(tenantId, input.actorRole ?? "support_admin", "CONNECTOR_ROUTE_DECISION_CREATED", "ConnectorRouteDecision", id, decision.routeStatus === "READY_FOR_CONNECTOR" ? "ALLOWED" : "BLOCKED", {
+    requestedCapability: input.requestedCapability,
+    routeStatus: decision.routeStatus,
+    blockedReason: decision.blockedReason,
+    readinessGates: decision.readinessGates,
+  });
+}
+
+function evaluateRouteReadiness(capability: ConnectorRow | undefined, estimatedCostCents: number) {
+  if (!capability) {
+    return {
+      routeStatus: "BLOCKED_CONNECTOR_REQUIRED",
+      blockedReason: "Connector route blocked: capability map is missing. Manual fallback is required.",
+      fallbackRoute: "MANUAL_QUEUE",
+      readinessGates: ["capability map missing"],
+    };
+  }
+  const missing = Array.isArray(capability.missingFields) ? capability.missingFields.map(String) : [];
+  const costPolicy = (capability.costPolicy && typeof capability.costPolicy === "object" ? capability.costPolicy : {}) as Record<string, unknown>;
+  const fallbackPolicy = (capability.fallbackPolicy && typeof capability.fallbackPolicy === "object" ? capability.fallbackPolicy : {}) as Record<string, unknown>;
+  const maxPerTransactionCents = Number(costPolicy.maxPerTransactionCents ?? 0);
+  const gates = [
+    capability.status === "READY" ? null : `capability status is ${String(capability.status)}`,
+    missing.length ? `missing fields: ${missing.join(", ")}` : null,
+    capability.installStatus && ["ACTIVE", "READY_FOR_SMOKE_TEST"].includes(String(capability.installStatus)) ? null : `installation status is ${String(capability.installStatus ?? "missing")}`,
+    capability.credentialStatus === "VALIDATED" ? null : "credentials are not validated",
+    capability.webhookStatus === "VERIFIED" ? null : "webhooks are not verified",
+    capability.approvalStatus === "APPROVED" ? null : "tenant approval is not approved",
+    capability.healthStatus === "PASS" ? null : "health check has not passed",
+    maxPerTransactionCents && estimatedCostCents > maxPerTransactionCents ? `estimated cost exceeds policy max of ${maxPerTransactionCents} cents` : null,
+  ].filter(Boolean);
+  return {
+    routeStatus: gates.length ? "BLOCKED_CONNECTOR_REQUIRED" : "READY_FOR_CONNECTOR",
+    blockedReason: gates.length ? `Connector route blocked: ${gates.join("; ")}. Manual fallback is required.` : null,
+    fallbackRoute: String(fallbackPolicy.fallback ?? capability.fallbackMode ?? "MANUAL_QUEUE").toUpperCase().replaceAll(" ", "_"),
+    readinessGates: gates,
+  };
 }

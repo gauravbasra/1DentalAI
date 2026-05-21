@@ -124,11 +124,15 @@ export type PmsScheduleBoard = {
 
 export type PmsPracticeIntelligence = {
   productionTrend: Array<{ day: string; scheduledCents: number; completedCents: number; appointmentCount: number }>;
-  providerProduction: Array<{ providerId: string | null; providerName: string; providerType: string | null; scheduledCents: number; completedCents: number; appointmentCount: number; bookedMinutes: number; bookedUntil: string | null }>;
-  roomUtilization: Array<{ operatoryId: string | null; roomName: string; roomCode: string | null; scheduledCents: number; bookedMinutes: number; utilizationPercent: number; appointmentCount: number; bookedUntil: string | null }>;
-  serviceMix: Array<{ serviceLine: string; scheduledCents: number; completedCents: number; bookedMinutes: number; appointmentCount: number; bookedUntil: string | null }>;
-  payerMix: Array<{ payerName: string; billedCents: number; paidCents: number; patientDueCents: number; claimCount: number; denialCount: number }>;
+  providerProduction: Array<{ providerId: string | null; providerName: string; providerType: string | null; scheduledCents: number; completedCents: number; last30RevenueCents: number; appointmentCount: number; completedProcedureCount: number; bookedMinutes: number; bookedUntil: string | null }>;
+  roomUtilization: Array<{ operatoryId: string | null; roomName: string; roomCode: string | null; scheduledCents: number; completedCents: number; bookedMinutes: number; utilizationPercent: number; appointmentCount: number; bookedUntil: string | null }>;
+  serviceMix: Array<{ serviceLine: string; scheduledCents: number; completedCents: number; last90RevenueCents: number; bookedMinutes: number; appointmentCount: number; bookedUntil: string | null }>;
+  payerMix: Array<{ payerName: string; billedCents: number; paidCents: number; patientDueCents: number; openCents: number; claimCount: number; denialCount: number; collectionRate: number }>;
   calendarForecast: Array<{ weekStart: string; scheduledCents: number; bookedMinutes: number; appointmentCount: number }>;
+  bookedProductionHorizon: Array<{ horizon: string; scheduledCents: number; bookedMinutes: number; appointmentCount: number; providerCount: number; roomCount: number }>;
+  hygieneRecall: { dueCount: number; overdueCount: number; unscheduledDueCount: number; futureRecallBookedCount: number; recallOpportunityCents: number; hygieneVisits30: number; hygieneReappointed30: number; reappointmentRate: number };
+  noShowCancelImpact: { brokenCount: number; noShowCount: number; cancelCount: number; lostProductionCents: number; unscheduledPatientCount: number; recoveredCount: number; recoveredProductionCents: number };
+  roomProviderProduction: Array<{ operatoryId: string | null; roomName: string; providerId: string | null; providerName: string; scheduledCents: number; completedCents: number; bookedMinutes: number; appointmentCount: number }>;
   insights: Array<{ label: string; value: string; detail: string; tone: "green" | "amber" | "red" | "neutral" }>;
 };
 
@@ -217,61 +221,134 @@ export async function getPracticeIntelligence(tenantId = defaultTenantId): Promi
     serviceMix,
     payerMix,
     calendarForecast,
+    bookedProductionHorizon,
+    hygieneRecall,
+    noShowCancelImpact,
+    roomProviderProduction,
   ] = await Promise.all([
     query<{ day: string; scheduledCents: string; completedCents: string; appointmentCount: string }>(
       `select to_char(days.day, 'Mon DD') as day,
-        coalesce(sum(a."productionCents"), 0)::text as "scheduledCents",
+        coalesce(sum(a."productionCents") filter (where a."status" not in ('CANCELED','BROKEN','NO_SHOW')), 0)::text as "scheduledCents",
         coalesce(sum(a."productionCents") filter (where a."status" in ('COMPLETED','CHECKED_OUT')), 0)::text as "completedCents",
-        count(a."id")::text as "appointmentCount"
+        count(a."id") filter (where a."status" not in ('CANCELED','BROKEN','NO_SHOW'))::text as "appointmentCount"
        from generate_series(current_date - interval '13 days', current_date, interval '1 day') days(day)
        left join "PmsAppointment" a on a."tenantId" = $1 and a."startsAt"::date = days.day::date
        group by days.day
        order by days.day`,
       [tenantId],
     ),
-    query<{ providerId: string | null; providerName: string | null; providerType: string | null; scheduledCents: string; completedCents: string; appointmentCount: string; bookedMinutes: string; bookedUntil: string | null }>(
-      `select a."providerId",
-        coalesce(pr."displayName", 'Unassigned provider') as "providerName",
-        pr."providerType",
-        coalesce(sum(a."productionCents"), 0)::text as "scheduledCents",
-        coalesce(sum(a."productionCents") filter (where a."status" in ('COMPLETED','CHECKED_OUT')), 0)::text as "completedCents",
-        count(a."id")::text as "appointmentCount",
-        coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0)::int::text as "bookedMinutes",
-        max(a."endsAt")::text as "bookedUntil"
-       from "PmsAppointment" a
-       left join "PmsProvider" pr on pr."id" = a."providerId"
-       where a."tenantId" = $1
-         and a."startsAt" >= current_date
-         and a."startsAt" < current_date + interval '30 days'
-         and a."status" not in ('CANCELED','BROKEN')
-       group by a."providerId", pr."displayName", pr."providerType"
-       order by coalesce(sum(a."productionCents"), 0) desc
-       limit 8`,
-      [tenantId],
-    ),
-    query<{ operatoryId: string | null; roomName: string | null; roomCode: string | null; scheduledCents: string; bookedMinutes: string; appointmentCount: string; bookedUntil: string | null }>(
-      `select a."operatoryId",
-        coalesce(op."name", 'Unassigned room') as "roomName",
-        op."code" as "roomCode",
-        coalesce(sum(a."productionCents"), 0)::text as "scheduledCents",
-        coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0)::int::text as "bookedMinutes",
-        count(a."id")::text as "appointmentCount",
-        max(a."endsAt")::text as "bookedUntil"
-       from "PmsAppointment" a
-       left join "PmsOperatory" op on op."id" = a."operatoryId"
-       where a."tenantId" = $1
-         and a."startsAt" >= current_date
-         and a."startsAt" < current_date + interval '14 days'
-         and a."status" not in ('CANCELED','BROKEN')
-       group by a."operatoryId", op."name", op."code"
-       order by coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0) desc
+    query<{ providerId: string | null; providerName: string | null; providerType: string | null; scheduledCents: string; completedCents: string; last30RevenueCents: string; appointmentCount: string; completedProcedureCount: string; bookedMinutes: string; bookedUntil: string | null }>(
+      `with scheduled as (
+        select a."providerId",
+          coalesce(sum(a."productionCents"), 0) as scheduled_cents,
+          count(a."id") as appointment_count,
+          coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0)::int as booked_minutes,
+          max(a."endsAt") as booked_until
+        from "PmsAppointment" a
+        where a."tenantId" = $1
+          and a."startsAt" >= current_date
+          and a."startsAt" < current_date + interval '30 days'
+          and a."status" not in ('CANCELED','BROKEN','NO_SHOW')
+        group by a."providerId"
+       ),
+       revenue as (
+        select pl."providerId",
+          coalesce(sum(le."amountCents"), 0) as revenue_cents,
+          count(distinct pl."id") as completed_procedures
+        from "PmsLedgerEntry" le
+        join "PmsProcedureLog" pl on pl."id" = le."procedureLogId"
+        where le."tenantId" = $1
+          and le."amountCents" > 0
+          and coalesce(le."serviceDate", le."postedAt")::date >= current_date - interval '30 days'
+        group by pl."providerId"
+       ),
+       provider_rows as (
+        select pr."id" as "providerId", pr."displayName" as "providerName", pr."providerType",
+          coalesce(s.scheduled_cents, 0) as scheduled_cents,
+          coalesce(r.revenue_cents, 0) as completed_cents,
+          coalesce(r.completed_procedures, 0) as completed_procedures,
+          coalesce(s.appointment_count, 0) as appointment_count,
+          coalesce(s.booked_minutes, 0) as booked_minutes,
+          s.booked_until
+        from "PmsProvider" pr
+        left join scheduled s on s."providerId" = pr."id"
+        left join revenue r on r."providerId" = pr."id"
+        where pr."tenantId" = $1 and pr."status" = 'ACTIVE'
+        union all
+        select null, 'Unassigned provider', null,
+          coalesce(s.scheduled_cents, 0),
+          coalesce(r.revenue_cents, 0),
+          coalesce(r.completed_procedures, 0),
+          coalesce(s.appointment_count, 0),
+          coalesce(s.booked_minutes, 0),
+          s.booked_until
+        from scheduled s
+        left join revenue r on r."providerId" is null
+        where s."providerId" is null
+       )
+       select "providerId", "providerName", "providerType",
+        scheduled_cents::text as "scheduledCents",
+        completed_cents::text as "completedCents",
+        completed_cents::text as "last30RevenueCents",
+        appointment_count::text as "appointmentCount",
+        completed_procedures::text as "completedProcedureCount",
+        booked_minutes::text as "bookedMinutes",
+        booked_until::text as "bookedUntil"
+       from provider_rows
+       where scheduled_cents > 0 or completed_cents > 0 or appointment_count > 0
+       order by scheduled_cents desc, completed_cents desc, "providerName"
        limit 10`,
       [tenantId],
     ),
-    query<{ serviceLine: string; scheduledCents: string; completedCents: string; bookedMinutes: string; appointmentCount: string; bookedUntil: string | null }>(
+    query<{ operatoryId: string | null; roomName: string | null; roomCode: string | null; scheduledCents: string; completedCents: string; bookedMinutes: string; appointmentCount: string; bookedUntil: string | null }>(
+      `with scheduled as (
+        select a."operatoryId",
+          coalesce(sum(a."productionCents"), 0) as scheduled_cents,
+          coalesce(sum(a."productionCents") filter (where a."status" in ('COMPLETED','CHECKED_OUT')), 0) as completed_cents,
+          coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0)::int as booked_minutes,
+          count(a."id") as appointment_count,
+          max(a."endsAt") as booked_until
+        from "PmsAppointment" a
+        where a."tenantId" = $1
+          and a."startsAt" >= current_date
+          and a."startsAt" < current_date + interval '14 days'
+          and a."status" not in ('CANCELED','BROKEN','NO_SHOW')
+        group by a."operatoryId"
+       )
+       select op."id" as "operatoryId",
+        coalesce(op."name", 'Unassigned room') as "roomName",
+        op."code" as "roomCode",
+        coalesce(s.scheduled_cents, 0)::text as "scheduledCents",
+        coalesce(s.completed_cents, 0)::text as "completedCents",
+        coalesce(s.booked_minutes, 0)::text as "bookedMinutes",
+        coalesce(s.appointment_count, 0)::text as "appointmentCount",
+        s.booked_until::text as "bookedUntil"
+       from "PmsOperatory" op
+       left join scheduled s on s."operatoryId" = op."id"
+       where op."tenantId" = $1 and op."status" = 'READY'
+       union all
+       select null, 'Unassigned room', null,
+        coalesce(s.scheduled_cents, 0)::text,
+        coalesce(s.completed_cents, 0)::text,
+        coalesce(s.booked_minutes, 0)::text,
+        coalesce(s.appointment_count, 0)::text,
+        s.booked_until::text
+       from scheduled s
+       where s."operatoryId" is null
+       order by "bookedMinutes" desc, "roomName"
+       limit 12`,
+      [tenantId],
+    ),
+    query<{ serviceLine: string; scheduledCents: string; completedCents: string; last90RevenueCents: string; bookedMinutes: string; appointmentCount: string; bookedUntil: string | null }>(
       `with appointment_services as (
         select a."id", a."startsAt", a."endsAt", a."status", a."productionCents",
-          coalesce(pc."category", a."appointmentType", 'Uncategorized') as service_line,
+          case
+            when pc."category" in ('RESTORATIVE','IMPLANT','ORAL_SURGERY','ENDODONTIC','PROSTHODONTIC') then 'Restorative/elective'
+            when pc."category" in ('HYGIENE','PERIODONTAL','PREVENTIVE') or a."appointmentType" ilike '%hygiene%' then 'Hygiene/perio'
+            when pc."category" = 'DIAGNOSTIC' or a."appointmentType" ilike '%new%' then 'Diagnostic/new patient'
+            when pc."category" is not null then initcap(replace(lower(pc."category"), '_', ' '))
+            else 'Other'
+          end as service_line,
           row_number() over (partition by a."id" order by ap."feeCents" desc nulls last) as rn
         from "PmsAppointment" a
         left join "PmsAppointmentProcedure" ap on ap."appointmentId" = a."id"
@@ -279,28 +356,61 @@ export async function getPracticeIntelligence(tenantId = defaultTenantId): Promi
         where a."tenantId" = $1
           and a."startsAt" >= current_date - interval '30 days'
           and a."startsAt" < current_date + interval '30 days'
-          and a."status" not in ('CANCELED','BROKEN')
-      )
-      select service_line as "serviceLine",
-        coalesce(sum("productionCents"), 0)::text as "scheduledCents",
-        coalesce(sum("productionCents") filter (where "status" in ('COMPLETED','CHECKED_OUT')), 0)::text as "completedCents",
-        coalesce(sum(extract(epoch from ("endsAt" - "startsAt")) / 60), 0)::int::text as "bookedMinutes",
-        count("id")::text as "appointmentCount",
-        max("endsAt")::text as "bookedUntil"
-      from appointment_services
-      where rn = 1
-      group by service_line
-      order by coalesce(sum("productionCents"), 0) desc
-      limit 10`,
+          and a."status" not in ('CANCELED','BROKEN','NO_SHOW')
+       ),
+       scheduled as (
+        select service_line,
+          coalesce(sum("productionCents") filter (where "startsAt" >= current_date), 0) as scheduled_cents,
+          coalesce(sum("productionCents") filter (where "status" in ('COMPLETED','CHECKED_OUT')), 0) as completed_cents,
+          coalesce(sum(extract(epoch from ("endsAt" - "startsAt")) / 60) filter (where "startsAt" >= current_date), 0)::int as booked_minutes,
+          count("id") filter (where "startsAt" >= current_date) as appointment_count,
+          max("endsAt") filter (where "startsAt" >= current_date) as booked_until
+        from appointment_services
+        where rn = 1
+        group by service_line
+       ),
+       revenue as (
+        select
+          case
+            when pc."category" in ('RESTORATIVE','IMPLANT','ORAL_SURGERY','ENDODONTIC','PROSTHODONTIC') then 'Restorative/elective'
+            when pc."category" in ('HYGIENE','PERIODONTAL','PREVENTIVE') then 'Hygiene/perio'
+            when pc."category" = 'DIAGNOSTIC' then 'Diagnostic/new patient'
+            when pc."category" is not null then initcap(replace(lower(pc."category"), '_', ' '))
+            else 'Other'
+          end as service_line,
+          coalesce(sum(le."amountCents"), 0) as revenue_cents
+        from "PmsLedgerEntry" le
+        left join "PmsProcedureLog" pl on pl."id" = le."procedureLogId"
+        left join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
+        where le."tenantId" = $1
+          and le."amountCents" > 0
+          and coalesce(le."serviceDate", le."postedAt")::date >= current_date - interval '90 days'
+        group by 1
+       )
+       select coalesce(s.service_line, r.service_line) as "serviceLine",
+        coalesce(s.scheduled_cents, 0)::text as "scheduledCents",
+        coalesce(s.completed_cents, 0)::text as "completedCents",
+        coalesce(r.revenue_cents, 0)::text as "last90RevenueCents",
+        coalesce(s.booked_minutes, 0)::text as "bookedMinutes",
+        coalesce(s.appointment_count, 0)::text as "appointmentCount",
+        s.booked_until::text as "bookedUntil"
+       from scheduled s
+       full join revenue r on r.service_line = s.service_line
+       order by coalesce(r.revenue_cents, 0) desc, coalesce(s.scheduled_cents, 0) desc
+       limit 10`,
       [tenantId],
     ),
-    query<{ payerName: string; billedCents: string; paidCents: string; patientDueCents: string; claimCount: string; denialCount: string }>(
+    query<{ payerName: string; billedCents: string; paidCents: string; patientDueCents: string; openCents: string; claimCount: string; denialCount: string; collectionRate: string }>(
       `select coalesce("payerName", 'Patient / no payer') as "payerName",
         coalesce(sum("billedCents"), 0)::text as "billedCents",
         coalesce(sum("paidCents"), 0)::text as "paidCents",
         coalesce(sum("patientDueCents"), 0)::text as "patientDueCents",
+        coalesce(sum(greatest("billedCents" - "paidCents", 0)), 0)::text as "openCents",
         count(*)::text as "claimCount",
-        count(*) filter (where "status" in ('DENIED','REJECTED'))::text as "denialCount"
+        count(*) filter (where "status" in ('DENIED','REJECTED'))::text as "denialCount",
+        case when coalesce(sum("billedCents"), 0) = 0 then '0'
+          else round((coalesce(sum("paidCents"), 0)::numeric / nullif(sum("billedCents"), 0)) * 100)::text
+        end as "collectionRate"
        from "PmsClaim"
        where "tenantId" = $1
          and "createdAt" >= current_date - interval '90 days'
@@ -318,9 +428,128 @@ export async function getPracticeIntelligence(tenantId = defaultTenantId): Promi
        left join "PmsAppointment" a on a."tenantId" = $1
         and a."startsAt" >= weeks.week_start
         and a."startsAt" < weeks.week_start + interval '1 week'
-        and a."status" not in ('CANCELED','BROKEN')
+        and a."status" not in ('CANCELED','BROKEN','NO_SHOW')
        group by weeks.week_start
        order by weeks.week_start`,
+      [tenantId],
+    ),
+    query<{ horizon: string; scheduledCents: string; bookedMinutes: string; appointmentCount: string; providerCount: string; roomCount: string }>(
+      `with horizons as (
+        select * from (values ('7 days', 7), ('30 days', 30), ('60 days', 60), ('90 days', 90)) as h(horizon, days)
+       )
+       select h.horizon,
+        coalesce(sum(a."productionCents"), 0)::text as "scheduledCents",
+        coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0)::int::text as "bookedMinutes",
+        count(a."id")::text as "appointmentCount",
+        count(distinct a."providerId") filter (where a."providerId" is not null)::text as "providerCount",
+        count(distinct a."operatoryId") filter (where a."operatoryId" is not null)::text as "roomCount"
+       from horizons h
+       left join "PmsAppointment" a on a."tenantId" = $1
+        and a."startsAt" >= current_date
+        and a."startsAt" < current_date + (h.days::text || ' days')::interval
+        and a."status" not in ('CANCELED','BROKEN','NO_SHOW')
+       group by h.horizon, h.days
+       order by h.days`,
+      [tenantId],
+    ),
+    query<{ dueCount: string; overdueCount: string; unscheduledDueCount: string; futureRecallBookedCount: string; recallOpportunityCents: string; hygieneVisits30: string; hygieneReappointed30: string; reappointmentRate: string }>(
+      `with hygiene_fee as (
+        select greatest(coalesce(avg(pl."feeCents"), 0)::int, 15500) as cents
+        from "PmsProcedureLog" pl
+        join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
+        join "PmsPatient" p on p."id" = pl."patientId"
+        where p."tenantId" = $1 and pl."status" = 'COMPLETED' and pc."category" in ('HYGIENE','PERIODONTAL','PREVENTIVE')
+       ),
+       recall_base as (
+        select r."id", r."patientId", r."status",
+          exists (
+            select 1 from "PmsAppointment" a
+            where a."patientId" = r."patientId"
+              and a."startsAt" >= current_date
+              and a."status" not in ('CANCELED','BROKEN','NO_SHOW')
+          ) as has_future
+        from "PmsRecall" r
+        join "PmsPatient" p on p."id" = r."patientId"
+        where r."tenantId" = $1 and p."status" = 'ACTIVE' and r."status" in ('DUE','OVERDUE')
+       ),
+       hygiene_visits as (
+        select distinct pl."patientId", pl."serviceDate"::date as service_date
+        from "PmsProcedureLog" pl
+        join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
+        join "PmsPatient" p on p."id" = pl."patientId"
+        where p."tenantId" = $1
+          and pl."status" = 'COMPLETED'
+          and pc."category" in ('HYGIENE','PERIODONTAL','PREVENTIVE')
+          and pl."serviceDate" >= current_date - interval '30 days'
+       ),
+       reappointed as (
+        select hv."patientId"
+        from hygiene_visits hv
+        where exists (
+          select 1 from "PmsAppointment" a
+          where a."patientId" = hv."patientId"
+            and a."startsAt"::date > hv.service_date
+            and a."status" not in ('CANCELED','BROKEN','NO_SHOW')
+        )
+       )
+       select
+        count(*) filter (where rb."status" = 'DUE')::text as "dueCount",
+        count(*) filter (where rb."status" = 'OVERDUE')::text as "overdueCount",
+        count(*) filter (where not rb.has_future)::text as "unscheduledDueCount",
+        count(*) filter (where rb.has_future)::text as "futureRecallBookedCount",
+        (count(*) filter (where not rb.has_future) * (select cents from hygiene_fee))::text as "recallOpportunityCents",
+        (select count(*) from hygiene_visits)::text as "hygieneVisits30",
+        (select count(*) from reappointed)::text as "hygieneReappointed30",
+        case when (select count(*) from hygiene_visits) = 0 then '0'
+          else round(((select count(*) from reappointed)::numeric / nullif((select count(*) from hygiene_visits), 0)) * 100)::text
+        end as "reappointmentRate"
+       from recall_base rb`,
+      [tenantId],
+    ),
+    query<{ brokenCount: string; noShowCount: string; cancelCount: string; lostProductionCents: string; unscheduledPatientCount: string; recoveredCount: string; recoveredProductionCents: string }>(
+      `with broken as (
+        select a."id", a."patientId", a."startsAt", a."status", a."productionCents",
+          exists (
+            select 1 from "PmsAppointment" future
+            where future."patientId" = a."patientId"
+              and future."startsAt" > a."startsAt"
+              and future."status" not in ('CANCELED','BROKEN','NO_SHOW')
+          ) as recovered
+        from "PmsAppointment" a
+        where a."tenantId" = $1
+          and a."startsAt" >= current_date - interval '30 days'
+          and a."status" in ('CANCELED','BROKEN','NO_SHOW')
+       )
+       select
+        count(*)::text as "brokenCount",
+        count(*) filter (where "status" = 'NO_SHOW')::text as "noShowCount",
+        count(*) filter (where "status" in ('CANCELED','BROKEN'))::text as "cancelCount",
+        coalesce(sum("productionCents"), 0)::text as "lostProductionCents",
+        count(distinct "patientId") filter (where not recovered)::text as "unscheduledPatientCount",
+        count(*) filter (where recovered)::text as "recoveredCount",
+        coalesce(sum("productionCents") filter (where recovered), 0)::text as "recoveredProductionCents"
+       from broken`,
+      [tenantId],
+    ),
+    query<{ operatoryId: string | null; roomName: string; providerId: string | null; providerName: string; scheduledCents: string; completedCents: string; bookedMinutes: string; appointmentCount: string }>(
+      `select a."operatoryId",
+        coalesce(op."name", 'Unassigned room') as "roomName",
+        a."providerId",
+        coalesce(pr."displayName", 'Unassigned provider') as "providerName",
+        coalesce(sum(a."productionCents"), 0)::text as "scheduledCents",
+        coalesce(sum(a."productionCents") filter (where a."status" in ('COMPLETED','CHECKED_OUT')), 0)::text as "completedCents",
+        coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0)::int::text as "bookedMinutes",
+        count(a."id")::text as "appointmentCount"
+       from "PmsAppointment" a
+       left join "PmsOperatory" op on op."id" = a."operatoryId"
+       left join "PmsProvider" pr on pr."id" = a."providerId"
+       where a."tenantId" = $1
+        and a."startsAt" >= current_date
+        and a."startsAt" < current_date + interval '30 days'
+        and a."status" not in ('CANCELED','BROKEN','NO_SHOW')
+       group by a."operatoryId", op."name", a."providerId", pr."displayName"
+       order by coalesce(sum(a."productionCents"), 0) desc, coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0) desc
+       limit 12`,
       [tenantId],
     ),
   ]);
@@ -332,6 +561,7 @@ export async function getPracticeIntelligence(tenantId = defaultTenantId): Promi
       roomName: room.roomName ?? "Unassigned room",
       roomCode: room.roomCode,
       scheduledCents: Number(room.scheduledCents ?? 0),
+      completedCents: Number(room.completedCents ?? 0),
       bookedMinutes,
       utilizationPercent: Math.min(100, Math.round((bookedMinutes / (14 * 8 * 60)) * 100)),
       appointmentCount: Number(room.appointmentCount ?? 0),
@@ -342,19 +572,24 @@ export async function getPracticeIntelligence(tenantId = defaultTenantId): Promi
     serviceLine: service.serviceLine,
     scheduledCents: Number(service.scheduledCents ?? 0),
     completedCents: Number(service.completedCents ?? 0),
+    last90RevenueCents: Number(service.last90RevenueCents ?? 0),
     bookedMinutes: Number(service.bookedMinutes ?? 0),
     appointmentCount: Number(service.appointmentCount ?? 0),
     bookedUntil: service.bookedUntil,
   }));
   const topService = services[0];
   const topRoom = rooms[0];
+  const brokenImpact = noShowCancelImpact.rows[0];
+  const recall = hygieneRecall.rows[0];
   const payerRows = payerMix.rows.map((payer) => ({
     payerName: payer.payerName,
     billedCents: Number(payer.billedCents ?? 0),
     paidCents: Number(payer.paidCents ?? 0),
     patientDueCents: Number(payer.patientDueCents ?? 0),
+    openCents: Number(payer.openCents ?? 0),
     claimCount: Number(payer.claimCount ?? 0),
     denialCount: Number(payer.denialCount ?? 0),
+    collectionRate: Number(payer.collectionRate ?? 0),
   }));
   const topPayerRisk = payerRows.slice().sort((a, b) => b.denialCount - a.denialCount)[0];
 
@@ -371,7 +606,9 @@ export async function getPracticeIntelligence(tenantId = defaultTenantId): Promi
       providerType: provider.providerType,
       scheduledCents: Number(provider.scheduledCents ?? 0),
       completedCents: Number(provider.completedCents ?? 0),
+      last30RevenueCents: Number(provider.last30RevenueCents ?? 0),
       appointmentCount: Number(provider.appointmentCount ?? 0),
+      completedProcedureCount: Number(provider.completedProcedureCount ?? 0),
       bookedMinutes: Number(provider.bookedMinutes ?? 0),
       bookedUntil: provider.bookedUntil,
     })),
@@ -384,18 +621,55 @@ export async function getPracticeIntelligence(tenantId = defaultTenantId): Promi
       bookedMinutes: Number(week.bookedMinutes ?? 0),
       appointmentCount: Number(week.appointmentCount ?? 0),
     })),
+    bookedProductionHorizon: bookedProductionHorizon.rows.map((horizon) => ({
+      horizon: horizon.horizon,
+      scheduledCents: Number(horizon.scheduledCents ?? 0),
+      bookedMinutes: Number(horizon.bookedMinutes ?? 0),
+      appointmentCount: Number(horizon.appointmentCount ?? 0),
+      providerCount: Number(horizon.providerCount ?? 0),
+      roomCount: Number(horizon.roomCount ?? 0),
+    })),
+    hygieneRecall: {
+      dueCount: Number(recall?.dueCount ?? 0),
+      overdueCount: Number(recall?.overdueCount ?? 0),
+      unscheduledDueCount: Number(recall?.unscheduledDueCount ?? 0),
+      futureRecallBookedCount: Number(recall?.futureRecallBookedCount ?? 0),
+      recallOpportunityCents: Number(recall?.recallOpportunityCents ?? 0),
+      hygieneVisits30: Number(recall?.hygieneVisits30 ?? 0),
+      hygieneReappointed30: Number(recall?.hygieneReappointed30 ?? 0),
+      reappointmentRate: Number(recall?.reappointmentRate ?? 0),
+    },
+    noShowCancelImpact: {
+      brokenCount: Number(brokenImpact?.brokenCount ?? 0),
+      noShowCount: Number(brokenImpact?.noShowCount ?? 0),
+      cancelCount: Number(brokenImpact?.cancelCount ?? 0),
+      lostProductionCents: Number(brokenImpact?.lostProductionCents ?? 0),
+      unscheduledPatientCount: Number(brokenImpact?.unscheduledPatientCount ?? 0),
+      recoveredCount: Number(brokenImpact?.recoveredCount ?? 0),
+      recoveredProductionCents: Number(brokenImpact?.recoveredProductionCents ?? 0),
+    },
+    roomProviderProduction: roomProviderProduction.rows.map((row) => ({
+      operatoryId: row.operatoryId,
+      roomName: row.roomName,
+      providerId: row.providerId,
+      providerName: row.providerName,
+      scheduledCents: Number(row.scheduledCents ?? 0),
+      completedCents: Number(row.completedCents ?? 0),
+      bookedMinutes: Number(row.bookedMinutes ?? 0),
+      appointmentCount: Number(row.appointmentCount ?? 0),
+    })),
     insights: [
       {
-        label: "Top revenue service",
+        label: "Top service-line revenue",
         value: topService?.serviceLine ?? "No scheduled service",
-        detail: topService ? `${cents(topService.scheduledCents)} scheduled across ${topService.appointmentCount} visits` : "No production data available.",
+        detail: topService ? `${cents(topService.last90RevenueCents)} actual in 90 days; ${cents(topService.scheduledCents)} booked ahead` : "No production data available.",
         tone: "green",
       },
       {
-        label: "Most calendar time",
-        value: topService?.serviceLine ?? "No service time",
-        detail: topService ? `${Math.round(topService.bookedMinutes / 60)} hours booked; latest ${formatShortDate(topService.bookedUntil)}` : "No booked minutes available.",
-        tone: "neutral",
+        label: "Recall opportunity",
+        value: cents(Number(recall?.recallOpportunityCents ?? 0)),
+        detail: `${Number(recall?.unscheduledDueCount ?? 0)} due/overdue hygiene patients without a future visit`,
+        tone: Number(recall?.unscheduledDueCount ?? 0) > 0 ? "amber" : "green",
       },
       {
         label: "Busiest room",
@@ -404,9 +678,15 @@ export async function getPracticeIntelligence(tenantId = defaultTenantId): Promi
         tone: topRoom && topRoom.utilizationPercent > 85 ? "amber" : "neutral",
       },
       {
+        label: "No-show/cancel drag",
+        value: cents(Number(brokenImpact?.lostProductionCents ?? 0)),
+        detail: `${Number(brokenImpact?.brokenCount ?? 0)} broken visits; ${Number(brokenImpact?.unscheduledPatientCount ?? 0)} patients still unscheduled`,
+        tone: Number(brokenImpact?.unscheduledPatientCount ?? 0) > 0 ? "red" : "green",
+      },
+      {
         label: "Payer risk",
         value: topPayerRisk?.payerName ?? "No payer claims",
-        detail: topPayerRisk ? `${topPayerRisk.denialCount} denied/rejected claims, ${cents(topPayerRisk.billedCents)} billed` : "No payer risk found.",
+        detail: topPayerRisk ? `${topPayerRisk.denialCount} denied/rejected claims, ${topPayerRisk.collectionRate}% collected` : "No payer risk found.",
         tone: topPayerRisk && topPayerRisk.denialCount > 0 ? "red" : "green",
       },
     ],
@@ -3194,11 +3474,13 @@ export async function createTask(input: { tenantId?: string; patientId?: string;
 }
 
 export function classifyEngagementWork(eventType: string) {
+  if (eventType.includes("BOOKING_REQUEST")) return { ownerRoleKey: "front_desk", taskType: "BOOKING_REQUEST_FOLLOW_UP", priority: "HIGH" };
+  if (eventType.includes("PRE_MED") || eventType.includes("MEDICAL_ALERT")) return { ownerRoleKey: "clinical_assistant", taskType: "MEDICAL_PREMED_REVIEW", priority: "HIGH" };
   if (eventType.includes("POST_OP")) return { ownerRoleKey: "clinical_assistant", taskType: "POST_OP_FOLLOW_UP", priority: "HIGH" };
-  if (eventType.includes("RECALL") || eventType.includes("WAITLIST")) return { ownerRoleKey: "front_desk", taskType: "SCHEDULE_RECOVERY", priority: "NORMAL" };
+  if (eventType.includes("RECALL") || eventType.includes("REACTIVATION") || eventType.includes("WAITLIST")) return { ownerRoleKey: "front_desk", taskType: "SCHEDULE_RECOVERY", priority: "NORMAL" };
   if (eventType.includes("NO_SHOW") || eventType.includes("CANCEL")) return { ownerRoleKey: "front_desk", taskType: "BROKEN_APPOINTMENT_RECOVERY", priority: "HIGH" };
   if (eventType.includes("PAYMENT") || eventType.includes("INSURANCE")) return { ownerRoleKey: "billing_rcm", taskType: "PATIENT_FINANCIAL_FOLLOW_UP", priority: "NORMAL" };
-  if (eventType.includes("FORM") || eventType.includes("CONSENT")) return { ownerRoleKey: "front_desk", taskType: "FORMS_CONSENT_REVIEW", priority: "NORMAL" };
+  if (eventType.includes("FORM") || eventType.includes("INTAKE") || eventType.includes("CONSENT")) return { ownerRoleKey: "front_desk", taskType: "FORMS_CONSENT_REVIEW", priority: "NORMAL" };
   if (eventType.includes("REVIEW") || eventType.includes("RECOVERY")) return { ownerRoleKey: "marketing_growth", taskType: "REPUTATION_OUTREACH_REVIEW", priority: "NORMAL" };
   return { ownerRoleKey: "marketing_growth", taskType: "PATIENT_ENGAGEMENT_REVIEW", priority: "NORMAL" };
 }
@@ -3219,13 +3501,15 @@ async function safeEngagementRows<T>(label: string, promise: Promise<{ rows: T[]
 }
 
 export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
-  const [events, recoveryCases, sourceSignals, patients, lifecycle, recallQueue, brokenAppointments, waitlist, postOpQueue, crossModuleTasks, governance] = await Promise.all([
+  const [events, recoveryCases, sourceSignals, patients, lifecycle, bookingRequests, formPackets, recallQueue, brokenAppointments, waitlist, postOpQueue, medicalAlerts, crossModuleTasks, governance] = await Promise.all([
     query(
       `select e.*, p."firstName", p."lastName", p."chartNumber", p."phone", p."email",
         a."appointmentType", a."startsAt", a."status" as "appointmentStatus", a."readinessStatus",
         cp."consentStatus", cp."quietHoursStart", cp."quietHoursEnd",
         coalesce(forms."openForms", 0)::int as "openForms",
         coalesce(tasks."openTasks", 0)::int as "openTasks",
+        coalesce(medical."medicalAlertCount", 0)::int as "medicalAlertCount",
+        coalesce(medical."preMedAlertCount", 0)::int as "preMedAlertCount",
         pc."code" as "procedureCode", pc."description" as "procedureDescription"
        from "PatientEngagementEvent" e
        join "PmsPatient" p on p."id" = e."patientId"
@@ -3251,6 +3535,13 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
         where "tenantId" = $1 and "status" = 'OPEN'
         group by "patientId"
        ) tasks on tasks."patientId" = p."id"
+       left join lateral (
+        select
+          count(*) filter (where ma."active" = true)::int as "medicalAlertCount",
+          count(*) filter (where ma."active" = true and (ma."title" ilike '%pre%med%' or ma."details" ilike '%pre%med%' or ma."title" ilike '%antibiotic%' or ma."details" ilike '%antibiotic%'))::int as "preMedAlertCount"
+        from "PmsMedicalAlert" ma
+        where ma."patientId" = p."id"
+       ) medical on true
        where e."tenantId" = $1
        order by
         case e."status"
@@ -3294,8 +3585,18 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
        select 'waitlist_requests' as key, count(*)::int as value
        from "PmsAppointmentRequest" where "tenantId" = $1 and "status" = 'OPEN'
        union all
+       select 'booking_requests' as key, count(*)::int as value
+       from "PmsAppointmentRequest" where "tenantId" = $1 and "status" = 'OPEN' and "requestType" in ('NEW_PATIENT','ONLINE_BOOKING','BOOKING_REQUEST','RECARE_BOOKING')
+       union all
        select 'broken_appointments' as key, count(*)::int as value
        from "PmsAppointment" where "tenantId" = $1 and "status" in ('CANCELED','BROKEN','NO_SHOW')
+       union all
+       select 'medical_alerts' as key, count(*)::int as value
+       from "PmsMedicalAlert" ma join "PmsPatient" p on p."id" = ma."patientId" where p."tenantId" = $1 and ma."active" = true
+       union all
+       select 'pre_med_alerts' as key, count(*)::int as value
+       from "PmsMedicalAlert" ma join "PmsPatient" p on p."id" = ma."patientId"
+       where p."tenantId" = $1 and ma."active" = true and (ma."title" ilike '%pre%med%' or ma."details" ilike '%pre%med%' or ma."title" ilike '%antibiotic%' or ma."details" ilike '%antibiotic%')
        union all
        select 'approved_no_send' as key, count(*)::int as value
        from "PatientEngagementEvent" where "tenantId" = $1 and "status" = 'APPROVED_TO_SEND'`,
@@ -3306,7 +3607,11 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
       `select a."id", a."patientId", a."appointmentType", a."startsAt", a."status", a."readinessStatus", p."firstName", p."lastName", p."chartNumber",
         cp."consentStatus", cp."quietHoursStart", cp."quietHoursEnd",
         coalesce(forms."openForms", 0)::int as "openForms",
-        coalesce(reminders."reminderCount", 0)::int as "reminderCount"
+        coalesce(reminders."reminderCount", 0)::int as "reminderCount",
+        coalesce(medical."medicalAlertCount", 0)::int as "medicalAlertCount",
+        coalesce(medical."preMedAlertCount", 0)::int as "preMedAlertCount",
+        coalesce(medical."allergyCount", 0)::int as "allergyCount",
+        coalesce(medical."medicationCount", 0)::int as "medicationCount"
        from "PmsAppointment" a
        join "PmsPatient" p on p."id" = a."patientId"
        left join lateral (
@@ -3328,8 +3633,66 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
         where "tenantId" = $1 and "eventType" in ('APPOINTMENT_CONFIRMATION','APPOINTMENT_REMINDER','FORMS_REMINDER')
         group by "appointmentId"
        ) reminders on reminders."appointmentId" = a."id"
+       left join lateral (
+        select
+          (select count(*) from "PmsMedicalAlert" ma where ma."patientId" = p."id" and ma."active" = true)::int as "medicalAlertCount",
+          (select count(*) from "PmsMedicalAlert" ma where ma."patientId" = p."id" and ma."active" = true and (ma."title" ilike '%pre%med%' or ma."details" ilike '%pre%med%' or ma."title" ilike '%antibiotic%' or ma."details" ilike '%antibiotic%'))::int as "preMedAlertCount",
+          (select count(*) from "PmsAllergy" al where al."patientId" = p."id" and al."active" = true)::int as "allergyCount",
+          (select count(*) from "PmsMedication" med where med."patientId" = p."id" and med."status" = 'ACTIVE')::int as "medicationCount"
+       ) medical on true
        where a."tenantId" = $1 and a."startsAt" >= current_date - interval '1 day' and a."startsAt" < current_date + interval '14 days'
        order by a."startsAt" asc
+       limit 12`,
+      [tenantId],
+    )),
+    safeEngagementRows("Booking request lifecycle", query(
+      `select ar.*, p."firstName", p."lastName", p."chartNumber",
+        cp."consentStatus", cp."quietHoursStart", cp."quietHoursEnd",
+        coalesce(existing."stagedCount", 0)::int as "stagedCount"
+       from "PmsAppointmentRequest" ar
+       left join "PmsPatient" p on p."id" = ar."patientId"
+       left join lateral (
+        select pref."consentStatus", pref."quietHoursStart", pref."quietHoursEnd"
+        from "PmsPatientCommunicationPreference" pref
+        where pref."patientId" = p."id" and pref."channel" in ('SMS','EMAIL','PHONE')
+        order by case pref."consentStatus" when 'OPTED_IN' then 0 when 'VERIFIED' then 0 when 'UNKNOWN' then 1 else 2 end, pref."priority"
+        limit 1
+       ) cp on true
+       left join (
+        select "patientId", count(*) as "stagedCount"
+        from "PatientEngagementEvent"
+        where "tenantId" = $1 and "eventType" in ('BOOKING_REQUEST_RESPONSE','APPOINTMENT_CONFIRMATION')
+        group by "patientId"
+       ) existing on existing."patientId" = ar."patientId"
+       where ar."tenantId" = $1 and ar."status" = 'OPEN'
+       order by case ar."urgency" when 'HIGH' then 0 when 'NORMAL' then 1 else 2 end, ar."createdAt" asc
+       limit 10`,
+      [tenantId],
+    )),
+    safeEngagementRows("Forms and intake packets", query(
+      `select fa."id", fa."patientId", fa."appointmentId", fa."status", fa."dueAt", ft."name" as "templateName", ft."formType",
+        p."firstName", p."lastName", p."chartNumber", a."appointmentType", a."startsAt",
+        cp."consentStatus", cp."quietHoursStart", cp."quietHoursEnd",
+        coalesce(events."stagedCount", 0)::int as "stagedCount"
+       from "PmsFormAssignment" fa
+       join "PmsPatient" p on p."id" = fa."patientId"
+       left join "PmsFormTemplate" ft on ft."id" = fa."templateId"
+       left join "PmsAppointment" a on a."id" = fa."appointmentId"
+       left join lateral (
+        select pref."consentStatus", pref."quietHoursStart", pref."quietHoursEnd"
+        from "PmsPatientCommunicationPreference" pref
+        where pref."patientId" = p."id" and pref."channel" in ('SMS','EMAIL','PORTAL')
+        order by case pref."consentStatus" when 'OPTED_IN' then 0 when 'VERIFIED' then 0 when 'UNKNOWN' then 1 else 2 end, pref."priority"
+        limit 1
+       ) cp on true
+       left join (
+        select "patientId", "appointmentId", count(*) as "stagedCount"
+        from "PatientEngagementEvent"
+        where "tenantId" = $1 and "eventType" in ('FORMS_REMINDER','INTAKE_PACKET_REMINDER','CONSENT_REVIEW')
+        group by "patientId", "appointmentId"
+       ) events on events."patientId" = fa."patientId" and coalesce(events."appointmentId", '') = coalesce(fa."appointmentId", '')
+       where fa."tenantId" = $1 and fa."status" in ('ASSIGNED','IN_PROGRESS','NEEDS_REVIEW')
+       order by fa."dueAt" asc nulls first, fa."updatedAt" desc
        limit 12`,
       [tenantId],
     )),
@@ -3389,20 +3752,46 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
        limit 10`,
       [tenantId],
     )),
+    safeEngagementRows("Medical and pre-med safety", query(
+      `select ma."id", ma."patientId", ma."severity", ma."title", ma."details", p."firstName", p."lastName", p."chartNumber",
+        next_appt."id" as "appointmentId", next_appt."appointmentType", next_appt."startsAt",
+        coalesce(events."stagedCount", 0)::int as "stagedCount"
+       from "PmsMedicalAlert" ma
+       join "PmsPatient" p on p."id" = ma."patientId"
+       left join lateral (
+        select a."id", a."appointmentType", a."startsAt"
+        from "PmsAppointment" a
+        where a."tenantId" = $1 and a."patientId" = p."id" and a."startsAt" >= current_timestamp and a."startsAt" < current_timestamp + interval '30 days'
+        order by a."startsAt" asc
+        limit 1
+       ) next_appt on true
+       left join (
+        select "patientId", count(*) as "stagedCount"
+        from "PatientEngagementEvent"
+        where "tenantId" = $1 and "eventType" in ('MEDICAL_ALERT_REVIEW','PRE_MED_ALERT_REVIEW')
+        group by "patientId"
+       ) events on events."patientId" = p."id"
+       where p."tenantId" = $1 and ma."active" = true
+       order by case ma."severity" when 'HIGH' then 0 when 'CRITICAL' then 0 when 'NORMAL' then 1 else 2 end, next_appt."startsAt" asc nulls last
+       limit 10`,
+      [tenantId],
+    )),
     safeEngagementRows("Cross-module PMS tasks", query(
       `select t.*, p."firstName", p."lastName", p."chartNumber"
        from "PmsTask" t
        left join "PmsPatient" p on p."id" = t."patientId"
        where t."tenantId" = $1 and t."status" = 'OPEN'
-        and t."taskType" in ('PATIENT_ENGAGEMENT_REVIEW','POST_OP_FOLLOW_UP','SCHEDULE_RECOVERY','BROKEN_APPOINTMENT_RECOVERY','FORMS_CONSENT_REVIEW','REPUTATION_RECOVERY','PATIENT_FINANCIAL_FOLLOW_UP')
+        and t."taskType" in ('PATIENT_ENGAGEMENT_REVIEW','POST_OP_FOLLOW_UP','SCHEDULE_RECOVERY','BROKEN_APPOINTMENT_RECOVERY','BOOKING_REQUEST_FOLLOW_UP','MEDICAL_PREMED_REVIEW','FORMS_CONSENT_REVIEW','REPUTATION_RECOVERY','PATIENT_FINANCIAL_FOLLOW_UP')
        order by case t."priority" when 'HIGH' then 0 when 'NORMAL' then 1 else 2 end, t."dueAt" asc nulls last, t."createdAt" desc
        limit 12`,
       [tenantId],
     )),
     Promise.resolve([
+      { area: "Booking request", control: "Booking requests stage internal front-desk follow-up from PMS appointment-request records; no appointment writeback is claimed here.", status: "LIVE_PMS" },
       { area: "Consent", control: "SMS/email/portal outreach checks patient communication preferences and status before approval.", status: "LIVE_GATED" },
-      { area: "Quiet hours", control: "Quiet-hour windows are surfaced with every staged item; approval is queue-only and does not send.", status: "LIVE_GATED" },
-      { area: "Forms", control: "Open form assignments and consent review are linked before appointment reminders or check-in nudges.", status: "LIVE_PMS" },
+      { area: "Quiet hours", control: "Quiet-hour windows are checked before queue approval; approval is still queue-only and does not send.", status: "LIVE_GATED" },
+      { area: "Forms and intake packets", control: "Open form assignments, consent packets, and intake due dates are linked before appointment reminders or check-in nudges.", status: "LIVE_PMS" },
+      { area: "Medical and pre-med alerts", control: "Active medical alerts, allergies, medications, and pre-med flags create clinical review work before patient-facing reminders or post-op instructions.", status: "LIVE_GATED" },
       { area: "Recall and waitlist", control: "Due recalls, ASAP requests, and broken visits become front-desk scheduling tasks.", status: "LIVE_PMS" },
       { area: "Post-op and reputation", control: "Completed procedures can create clinical post-op work; poor experience blocks public review asks.", status: "LIVE_PMS" },
     ]),
@@ -3414,14 +3803,17 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
     sourceSignals: sourceSignals.rows,
     patients,
     lifecycle: lifecycle.rows,
+    bookingRequests: bookingRequests.rows,
+    formPackets: formPackets.rows,
     recallQueue: recallQueue.rows,
     brokenAppointments: brokenAppointments.rows,
     waitlist: waitlist.rows,
     postOpQueue: postOpQueue.rows,
+    medicalAlerts: medicalAlerts.rows,
     crossModuleTasks: crossModuleTasks.rows,
     governance: [
       ...governance,
-      ...[lifecycle, recallQueue, brokenAppointments, waitlist, postOpQueue, crossModuleTasks]
+      ...[lifecycle, bookingRequests, formPackets, recallQueue, brokenAppointments, waitlist, postOpQueue, medicalAlerts, crossModuleTasks]
         .map((lane) => "readinessError" in lane ? lane.readinessError : null)
         .filter(Boolean),
     ],
@@ -3467,6 +3859,7 @@ export async function stageEngagementEvent(input: {
   await createTask({
     tenantId,
     patientId: input.patientId,
+    appointmentId: input.appointmentId,
     ownerRoleKey: workflow.ownerRoleKey,
     title: `${input.eventType.trim().replaceAll("_", " ")} approval and PMS handoff`,
     taskType: workflow.taskType,
@@ -3483,19 +3876,96 @@ export async function updateEngagementEventStatus(input: {
   actorRole?: string;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
-  const approvalStatus = input.status === "APPROVED_TO_SEND" ? "APPROVED" : input.status === "BLOCKED_SERVICE_RECOVERY" ? "BLOCKED" : "NEEDS_REVIEW";
+  const gate = input.status === "APPROVED_TO_SEND" ? await evaluateEngagementApprovalGate(tenantId, input.eventId) : { status: input.status, blockedReason: null };
+  const appliedStatus = gate.status;
+  const approvalStatus = appliedStatus === "APPROVED_TO_SEND" ? "APPROVED" : appliedStatus.startsWith("BLOCKED") ? "BLOCKED" : "NEEDS_REVIEW";
   const result = await query(
     `update "PatientEngagementEvent"
      set "status" = $1,
        "approvalStatus" = $2,
+       "triggerReason" = case when $5::text is null then "triggerReason" else "triggerReason" || ' Gate: ' || $5::text end,
        "completedAt" = case when $1 = 'COMPLETED' then current_timestamp else "completedAt" end,
        "updatedAt" = current_timestamp
      where "tenantId" = $3 and "id" = $4
      returning *`,
-    [input.status, approvalStatus, tenantId, input.eventId],
+    [appliedStatus, approvalStatus, tenantId, input.eventId, gate.blockedReason],
   );
-  await addAudit(tenantId, input.actorRole ?? "marketing_growth", "ENGAGEMENT_EVENT_STATUS_UPDATED", "PatientEngagementEvent", input.eventId, result.rowCount ? "ALLOWED" : "BLOCKED");
+  await addAudit(tenantId, input.actorRole ?? "marketing_growth", "ENGAGEMENT_EVENT_STATUS_UPDATED", "PatientEngagementEvent", input.eventId, result.rowCount && !appliedStatus.startsWith("BLOCKED") ? "ALLOWED" : "BLOCKED");
   return result.rows[0] ?? null;
+}
+
+async function evaluateEngagementApprovalGate(tenantId: string, eventId: string) {
+  const row = (await query<{
+    id: string;
+    patientId: string;
+    appointmentId: string | null;
+    eventType: string;
+    channel: string;
+    scheduledFor: string | null;
+    consentStatus: string | null;
+    quietHoursStart: string | null;
+    quietHoursEnd: string | null;
+    openForms: string;
+    openRecovery: string;
+    medicalAlertCount: string;
+    preMedAlertCount: string;
+  }>(
+    `select e."id", e."patientId", e."appointmentId", e."eventType", e."channel", e."scheduledFor",
+      pref."consentStatus", pref."quietHoursStart", pref."quietHoursEnd",
+      (select count(*)::text from "PmsFormAssignment" fa where fa."tenantId" = $1 and fa."patientId" = e."patientId" and (e."appointmentId" is null or fa."appointmentId" = e."appointmentId") and fa."status" in ('ASSIGNED','IN_PROGRESS','NEEDS_REVIEW')) as "openForms",
+      (select count(*)::text from "ReputationRecoveryCase" rc where rc."tenantId" = $1 and rc."patientId" = e."patientId" and rc."status" not in ('RESOLVED','COMPLETED','CLOSED')) as "openRecovery",
+      (select count(*)::text from "PmsMedicalAlert" ma where ma."patientId" = e."patientId" and ma."active" = true) as "medicalAlertCount",
+      (select count(*)::text from "PmsMedicalAlert" ma where ma."patientId" = e."patientId" and ma."active" = true and (ma."title" ilike '%pre%med%' or ma."details" ilike '%pre%med%' or ma."title" ilike '%antibiotic%' or ma."details" ilike '%antibiotic%')) as "preMedAlertCount"
+     from "PatientEngagementEvent" e
+     left join lateral (
+      select pcp."consentStatus", pcp."quietHoursStart", pcp."quietHoursEnd"
+      from "PmsPatientCommunicationPreference" pcp
+      where pcp."patientId" = e."patientId" and pcp."channel" = e."channel"
+      order by pcp."priority", pcp."updatedAt" desc
+      limit 1
+     ) pref on true
+     where e."tenantId" = $1 and e."id" = $2`,
+    [tenantId, eventId],
+  )).rows[0];
+  if (!row) return { status: "BLOCKED_NOT_FOUND", blockedReason: "Engagement event was not found for this tenant." };
+
+  const eventType = row.eventType.toUpperCase();
+  if (!isVerifiedEngagementConsent(row.consentStatus)) {
+    return { status: "BLOCKED_CONSENT", blockedReason: "Patient channel consent is not verified for this engagement item." };
+  }
+  if (isWithinQuietHours(row.scheduledFor, row.quietHoursStart, row.quietHoursEnd)) {
+    return { status: "BLOCKED_QUIET_HOURS", blockedReason: "Scheduled time falls inside the patient's quiet-hour window." };
+  }
+  if ((eventType.includes("REVIEW") || eventType.includes("REPUTATION")) && Number(row.openRecovery) > 0) {
+    return { status: "BLOCKED_SERVICE_RECOVERY", blockedReason: "Open service recovery must close before any review or reputation ask is approved." };
+  }
+  if (["APPOINTMENT_CONFIRMATION", "APPOINTMENT_REMINDER", "POST_OP_INSTRUCTIONS"].includes(eventType) && Number(row.preMedAlertCount) > 0) {
+    return { status: "BLOCKED_PRE_MED_REVIEW", blockedReason: "Pre-medication alert requires clinical review before patient-facing appointment or post-op communication." };
+  }
+  if (["APPOINTMENT_CONFIRMATION", "APPOINTMENT_REMINDER", "POST_OP_INSTRUCTIONS"].includes(eventType) && Number(row.medicalAlertCount) > 0) {
+    return { status: "BLOCKED_MEDICAL_REVIEW", blockedReason: "Active medical alert requires staff review before this patient-facing communication is queued." };
+  }
+  if (eventType === "APPOINTMENT_CONFIRMATION" && Number(row.openForms) > 0) {
+    return { status: "BLOCKED_FORMS_INTAKE", blockedReason: "Open intake forms should be resolved or paired with a forms reminder before confirmation is queued." };
+  }
+  return { status: "APPROVED_TO_SEND", blockedReason: null };
+}
+
+function isVerifiedEngagementConsent(status: string | null) {
+  return ["VERIFIED", "CONSENTED", "OPTED_IN", "ACTIVE"].includes(String(status ?? "").toUpperCase());
+}
+
+function isWithinQuietHours(scheduledFor: string | null, quietStart: string | null, quietEnd: string | null) {
+  if (!scheduledFor || !quietStart || !quietEnd) return false;
+  const date = new Date(scheduledFor);
+  if (Number.isNaN(date.getTime())) return false;
+  const current = date.getHours() * 60 + date.getMinutes();
+  const [startHour, startMinute] = quietStart.split(":").map((part) => Number(part));
+  const [endHour, endMinute] = quietEnd.split(":").map((part) => Number(part));
+  if ([startHour, startMinute, endHour, endMinute].some((part) => Number.isNaN(part))) return false;
+  const start = startHour * 60 + startMinute;
+  const end = endHour * 60 + endMinute;
+  return start <= end ? current >= start && current < end : current >= start || current < end;
 }
 
 export async function createReputationRecoveryCase(input: {

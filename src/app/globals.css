@@ -23,10 +23,63 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
+  overflow-x: hidden;
 }
 
 a {
   text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+[role="button"],
+a {
+  touch-action: manipulation;
+}
+
+button,
+input[type="button"],
+input[type="reset"],
+input[type="submit"],
+select {
+  min-height: 2.25rem;
+}
+
+:focus-visible {
+  outline: 2px solid #0891b2;
+  outline-offset: 2px;
+}
+
+.app-shell :where(section, article, div, p, h1, h2, h3, h4, h5, h6, td, th) {
+  min-width: 0;
+}
+
+.app-shell :where(p, h1, h2, h3, h4, h5, h6, td, th, span) {
+  overflow-wrap: anywhere;
+}
+
+.app-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.app-scrollbar::-webkit-scrollbar {
+  height: 8px;
+}
+
+.app-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
 }
 
 .product-visual {

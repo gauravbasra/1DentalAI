@@ -20,6 +20,17 @@ export async function POST(request: Request) {
     conversationId,
     body: messageBody,
     senderName: typeof body.senderName === "string" ? body.senderName : undefined,
+    leadCapture: {
+      visitorName: typeof body.visitorName === "string" ? body.visitorName : undefined,
+      visitorPhone: typeof body.visitorPhone === "string" ? body.visitorPhone : undefined,
+      visitorEmail: typeof body.visitorEmail === "string" ? body.visitorEmail : undefined,
+      serviceLine: typeof body.serviceLine === "string" ? body.serviceLine : undefined,
+      preferredTime: typeof body.preferredTime === "string" ? body.preferredTime : undefined,
+      patientStatus: typeof body.patientStatus === "string" ? body.patientStatus : undefined,
+      urgency: typeof body.urgency === "string" ? body.urgency : undefined,
+      consentAccepted: body.consentAccepted === true,
+      privacyNoticeVersion: typeof body.privacyNoticeVersion === "string" ? body.privacyNoticeVersion : undefined,
+    },
   });
   return jsonResponse(result);
 }

@@ -26,6 +26,36 @@ type Metrics = {
   referralReady: string;
   reviewVolume: string;
   averageRating: string;
+  surveyRouting: string;
+  publicAskReady: string;
+  responseConnectorBlocked: string;
+};
+type CompletedVisitEligibilityRow = {
+  appointmentId: string;
+  patientId: string;
+  firstName: string | null;
+  lastName: string | null;
+  chartNumber: string | null;
+  providerName: string | null;
+  locationName: string | null;
+  startsAt: string;
+  appointmentType: string;
+  readinessStatus: string;
+  openRecovery: number;
+  optedOut: number;
+  verifiedConsent: number;
+  billingDispute: number;
+  unsignedClinicalNotes: number;
+  surveyId: string | null;
+  surveyStatus: string | null;
+  surveyScore: number | null;
+  surveyNps: number | null;
+  surveyRecoveryRequired: boolean | null;
+  reviewWorkflowId: string | null;
+  reviewRequestStatus: string | null;
+  reviewSite: string | null;
+  route: string;
+  routeReason: string;
 };
 type ReviewRow = {
   id: string;
@@ -106,6 +136,7 @@ type ListingIssueRow = {
   locationName: string | null;
   listingSyncStatus: string | null;
   napConsistencyStatus: string | null;
+  listingDataQualityScore: number | null;
 };
 type ResponseRow = {
   id: string;
@@ -121,6 +152,7 @@ type ResponseRow = {
   blockedReason: string | null;
   hipaaGuardrails: unknown;
   sourceSiteStatus: string;
+  guardrailStatus: string;
 };
 type RuleRow = {
   id: string;
@@ -155,6 +187,11 @@ type ReferralRow = {
   connectorStatus: string;
   blockedReason: string | null;
   dueAt: string | null;
+  sourceReviewSite: string | null;
+  sourceReviewRating: number | null;
+  sourceReviewSentiment: string | null;
+  positiveSurveyCount: number;
+  completedTreatmentCount: number;
 };
 
 async function createReviewAction(formData: FormData) {
@@ -229,6 +266,7 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
   const view = ["today", "reviews", "responses", "surveys", "listings", "rules", "referrals"].includes(params.view ?? "") ? String(params.view) : "today";
   const center = await getReputationOperatingCenter();
   const metrics = center.metrics as Metrics;
+  const completedVisitEligibility = center.completedVisitEligibility as CompletedVisitEligibilityRow[];
   const reviews = center.reviews as ReviewRow[];
   const surveys = center.surveys as SurveyRow[];
   const recoveryCases = center.recoveryCases as RecoveryRow[];
@@ -253,11 +291,42 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
         <Metric label="Average rating" value={metrics.averageRating} />
         <Metric label="Review volume" value={metrics.reviewVolume} />
         <Metric label="Ready requests" value={metrics.readyRequests} />
+        <Metric label="Survey routes" value={metrics.surveyRouting} />
         <Metric label="Response drafts" value={metrics.responseDrafts} />
         <Metric label="Listing issues" value={metrics.listingIssues} />
         <Metric label="Recovery holds" value={metrics.openRecovery} />
         <Metric label="Blocked asks" value={metrics.blockedRequests} />
       </section>
+
+      {(view === "today" || view === "reviews") ? <section className="mt-4">
+        <PmsCard title="Completed-visit eligibility routing" eyebrow="PMS visit, consent, survey-before-review, and suppression checks">
+          <div className="grid gap-3 lg:grid-cols-3">
+            {completedVisitEligibility.map((item) => (
+              <div key={item.appointmentId} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-neutral-950">{person(item)} · {item.appointmentType}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{item.providerName ?? "No provider"} · {item.locationName ?? "No location"} · {formatDate(item.startsAt)}</p>
+                  </div>
+                  <StatusFor value={item.route} />
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <Mini label="Consent" value={item.verifiedConsent > 0 ? "Verified" : item.optedOut > 0 ? "Opted out" : "Needed"} />
+                  <Mini label="Private survey" value={item.surveyId ? `${clean(item.surveyStatus ?? "pending")} · ${item.surveyScore ?? "no score"}` : "Not sent"} />
+                  <Mini label="Review work" value={item.reviewRequestStatus ? clean(item.reviewRequestStatus) : "Not created"} />
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <Mini label="Recovery" value={item.openRecovery > 0 || item.surveyRecoveryRequired ? "Suppressed" : "Clear"} />
+                  <Mini label="Billing" value={item.billingDispute > 0 ? "Suppressed" : "Clear"} />
+                  <Mini label="Clinical note" value={item.unsignedClinicalNotes > 0 ? "Signoff needed" : clean(item.readinessStatus)} />
+                </div>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{item.routeReason}</p>
+              </div>
+            ))}
+            {!completedVisitEligibility.length ? <p className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">No completed visits currently need reputation routing.</p> : null}
+          </div>
+        </PmsCard>
+      </section> : null}
 
       {(view === "today" || view === "reviews") ? <section className="mt-4 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <PmsCard title="PMS-triggered review queue" eyebrow="Eligibility, suppression, response context">
@@ -330,8 +399,9 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
                 <p className="mt-3 rounded-md border border-neutral-200 bg-white p-2 text-sm leading-6 text-neutral-700">{response.draftBody}</p>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   <Mini label="Source connector" value={clean(response.sourceSiteStatus)} />
-                  <Mini label="HIPAA guardrails" value={jsonSummary(response.hipaaGuardrails)} />
+                  <Mini label="HIPAA route" value={clean(response.guardrailStatus)} />
                 </div>
+                <p className="mt-1 text-xs leading-5 text-neutral-500">Guardrails: {jsonSummary(response.hipaaGuardrails)}</p>
                 {response.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{response.blockedReason}</p> : null}
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   <ResponseButton id={response.id} approvalStatus="NEEDS_REVIEW" label="Needs review" />
@@ -432,6 +502,7 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
                   <Mini label="Connector" value={clean(task.connectorStatus)} />
                   <Mini label="Listing state" value={clean(task.listingSyncStatus ?? task.napConsistencyStatus ?? "not linked")} />
                 </div>
+                {typeof task.listingDataQualityScore === "number" ? <p className="mt-1 text-xs text-neutral-500">Listing quality score: {task.listingDataQualityScore}%</p> : null}
                 <p className="mt-2 text-sm leading-6 text-neutral-700">{task.issueSummary}</p>
                 <p className="mt-2 text-xs leading-5 text-neutral-600">{task.nextAction}</p>
                 <p className="mt-1 text-xs text-neutral-500">Due {formatDate(task.dueAt)}</p>
@@ -511,6 +582,11 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   <Mini label="Connector" value={clean(item.connectorStatus)} />
                   <Mini label="Attribution" value={clean(item.bookingAttributionStatus)} />
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <Mini label="Source review" value={item.sourceReviewSite ? `${clean(item.sourceReviewSite)} · ${item.sourceReviewRating ?? clean(item.sourceReviewSentiment ?? "signal")}` : "No review source"} />
+                  <Mini label="Positive surveys" value={item.positiveSurveyCount} />
+                  <Mini label="Treatment milestones" value={item.completedTreatmentCount} />
                 </div>
                 {item.offerSummary ? <p className="mt-2 text-xs leading-5 text-neutral-600">{item.offerSummary}</p> : null}
                 {item.complianceText ? <p className="mt-1 text-xs leading-5 text-neutral-500">{item.complianceText}</p> : null}
@@ -607,13 +683,15 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleString();
 }
 
-function jsonSummary(value: unknown) {
+function jsonSummary(value: unknown): string {
   if (!value) return "none";
   if (Array.isArray(value)) return value.join(", ");
   if (typeof value === "object") {
     const objectValue = value as Record<string, unknown>;
     if (Array.isArray(objectValue.rules)) return objectValue.rules.join(", ");
-    return Object.entries(objectValue).map(([key, item]) => `${clean(key)}: ${String(item)}`).join("; ");
+    return Object.entries(objectValue)
+      .map(([key, item]) => `${clean(key)}: ${typeof item === "object" && item ? jsonSummary(item) : String(item)}`)
+      .join("; ");
   }
   return String(value);
 }

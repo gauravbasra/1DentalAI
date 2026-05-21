@@ -19,12 +19,12 @@ export const pmsNav = [
 
 export function PmsSectionNav({ active, roleKey }: { active: string; roleKey: string }) {
   return (
-    <div className="sticky top-[92px] z-30 mb-4 flex gap-1 overflow-x-auto rounded-lg border border-neutral-200 bg-white p-1 shadow-sm">
+    <nav aria-label="PMS section navigation" className="app-scrollbar sticky top-[124px] z-30 mb-4 flex gap-1 overflow-x-auto rounded-lg border border-neutral-200 bg-white p-1 shadow-sm md:top-[112px] xl:top-[96px]">
       {pmsNav.map((item) => (
         <Link
           key={item.href}
           href={`${item.href}?role=${roleKey}`}
-          className={`shrink-0 rounded-md px-3 py-2 text-xs font-semibold transition ${
+          className={`min-h-9 shrink-0 rounded-md px-3 py-2 text-xs font-semibold leading-5 transition ${
             active === item.href
               ? "bg-neutral-950 text-white"
               : "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950"
@@ -33,7 +33,7 @@ export function PmsSectionNav({ active, roleKey }: { active: string; roleKey: st
           {item.label}
         </Link>
       ))}
-    </div>
+    </nav>
   );
 }
 
@@ -50,12 +50,12 @@ export function PmsCard({
 }) {
   return (
     <section className="min-w-0 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
-      <div className="flex items-start justify-between gap-3 border-b border-neutral-100 px-4 py-3">
-        <div>
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 border-b border-neutral-100 px-4 py-3">
+        <div className="min-w-0">
           {eyebrow ? <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cyan-700">{eyebrow}</p> : null}
-          <h2 className="mt-0.5 text-base font-semibold tracking-tight text-neutral-950">{title}</h2>
+          <h2 className="mt-0.5 text-base font-semibold tracking-tight text-neutral-950 text-balance">{title}</h2>
         </div>
-        {action}
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
       <div className="min-w-0 p-4">{children}</div>
     </section>
@@ -68,7 +68,7 @@ export function EmptyPmsState({ title, body, href, action }: { title: string; bo
       <p className="text-sm font-semibold text-neutral-950">{title}</p>
       <p className="mt-1 max-w-2xl text-sm leading-6 text-neutral-600">{body}</p>
       {href && action ? (
-        <Link href={href} className="mt-3 inline-flex rounded-md bg-neutral-950 px-3 py-2 text-sm font-semibold text-white">
+        <Link href={href} className="mt-3 inline-flex min-h-10 items-center rounded-md bg-neutral-950 px-3 py-2 text-sm font-semibold text-white">
           {action}
         </Link>
       ) : null}

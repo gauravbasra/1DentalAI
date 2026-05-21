@@ -24,6 +24,19 @@ type CampaignRow = {
   complianceStatus: string;
 };
 
+type MarketingMetrics = {
+  campaigns: string;
+  landingPages: string;
+  aiDrafts: string;
+  attributedProduction: string;
+  localSeoOpen: string;
+  stagedChannels: string;
+  approvalQueue: string;
+  bookedAppointments: string;
+  acceptedTreatment: string;
+  aiSeoOpen: string;
+};
+
 type LandingPageRow = {
   id: string;
   slug: string;
@@ -44,6 +57,7 @@ type AssetRow = {
   title: string;
   sourceModule: string;
   assetType: string;
+  promptInput: string;
   generatedDraft: string;
   approvalStatus: string;
   complianceNotes: string | null;
@@ -100,7 +114,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
   const params = await searchParams;
   const role = getRole(params.role);
   const center = await getMarketingOperatingCenter();
-  const metrics = center.metrics;
+  const metrics = center.metrics as MarketingMetrics;
   const campaigns = center.campaigns as CampaignRow[];
   const landingPages = center.landingPages as LandingPageRow[];
   const assets = center.assets as AssetRow[];
@@ -115,13 +129,39 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/marketing" />
 
-      <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
         <Metric label="Campaigns" value={metrics.campaigns} />
         <Metric label="Landing pages" value={metrics.landingPages} />
         <Metric label="AI drafts" value={metrics.aiDrafts} />
         <Metric label="Attributed production" value={<Money cents={Number(metrics.attributedProduction)} />} />
         <Metric label="Local SEO open" value={metrics.localSeoOpen} />
         <Metric label="Staged plans" value={metrics.stagedChannels} />
+        <Metric label="Approval queue" value={metrics.approvalQueue} />
+        <Metric label="AI SEO open" value={metrics.aiSeoOpen} />
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-3">
+        <PmsCard title="Audience builder" eyebrow="PMS, RCM, reputation graph">
+          <div className="grid gap-2 text-sm leading-6 text-neutral-700">
+            <Small label="Booked appointments" value={metrics.bookedAppointments} />
+            <Small label="Accepted treatment" value={<Money cents={Number(metrics.acceptedTreatment ?? 0)} />} />
+            <Small label="Audience gates" value="Consent, channel preference, quiet hours, service recovery, billing dispute, duplicate outreach" />
+          </div>
+        </PmsCard>
+        <PmsCard title="Approval workflow" eyebrow="Internal only until proof is present">
+          <div className="grid gap-2 text-sm leading-6 text-neutral-700">
+            <Small label="Policy" value="Marketing plus manager review; provider review for clinical, local, and AI SEO claims" />
+            <Small label="Evidence" value="Audience snapshot, suppressions, AI draft, route test, connector readiness, attribution plan" />
+            <Small label="External action" value="Blocked without connector acknowledgement or manual owner proof" />
+          </div>
+        </PmsCard>
+        <PmsCard title="Attribution spine" eyebrow="Booked appointment to revenue">
+          <div className="grid gap-2 text-sm leading-6 text-neutral-700">
+            <Small label="First touch" value="UTM, listing source, call tracking, form route, or booking link" />
+            <Small label="Conversion" value="PMS appointment, completed visit, treatment acceptance, ledger production, collection" />
+            <Small label="Feedback loop" value="Review, referral, and service recovery outcomes feed the next audience build" />
+          </div>
+        </PmsCard>
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-[0.7fr_1.3fr]">
@@ -142,13 +182,17 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
 
         <PmsCard title="Campaign workbench" eyebrow="No external send until channel connector is live">
           <div className="grid gap-3">
-            {campaigns.map((campaign) => (
+            {campaigns.map((campaign) => {
+              const channelPlan = asRecord(campaign.channelPlan);
+              const audienceBuilder = asRecord(channelPlan?.pmsRcmReputationAudienceBuilder) ?? asRecord(channelPlan?.audienceBlueprint);
+              const approvalWorkflow = asRecord(channelPlan?.approvalWorkflow);
+              return (
               <div key={campaign.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-neutral-950">{campaign.name}</p>
                     <p className="mt-1 text-xs text-neutral-600">{String(campaign.campaignType).replaceAll("_", " ")} · {campaign.channelMix?.join(", ")}</p>
-                <p className="mt-1 text-xs text-neutral-600">Audience: {campaign.sourceAudience} · {campaign.audienceDefinition}</p>
+                    <p className="mt-1 text-xs text-neutral-600">Audience: {campaign.sourceAudience} · {campaign.audienceDefinition}</p>
                   </div>
                   <StatusFor value={campaign.status} />
                 </div>
@@ -159,7 +203,11 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
                   <Small label="Compliance" value={String(campaign.complianceStatus).replaceAll("_", " ")} />
                 </div>
                 <div className="mt-2 grid gap-2 md:grid-cols-3">
-                  <Small label="Channel plan" value={jsonSummary(campaign.channelPlan)} />
+                  <Small label="PMS cohort" value={String(audienceBuilder?.pms ?? "Appointment, recall, treatment, and patient status")} />
+                  <Small label="RCM filter" value={String(audienceBuilder?.rcm ?? "Balance, benefits, financing, and claim sensitivity")} />
+                  <Small label="Reputation filter" value={String(audienceBuilder?.reputation ?? "Survey, review, referral, and recovery context")} />
+                  <Small label="Suppressions" value={listSummary(audienceBuilder?.suppressions)} />
+                  <Small label="Approval" value={listSummary(approvalWorkflow?.requiredRoles)} />
                   <Small label="Connectors" value={jsonSummary(campaign.connectorReadiness)} />
                   <Small label="Attribution" value={jsonSummary(campaign.attribution)} />
                 </div>
@@ -167,10 +215,11 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
                 <div className="mt-3 grid gap-2 md:grid-cols-3">
                   <StatusButton target="campaign" id={campaign.id} status="READY_FOR_APPROVAL" label="Ready review" />
                   <StatusButton target="campaign" id={campaign.id} status="APPROVED_STAGED" label="Approve staged" />
-                  <StatusButton target="campaign" id={campaign.id} status="ACTIVE_INTERNAL" label="Activate internal" />
+                  <StatusButton target="campaign" id={campaign.id} status="ACTIVE_INTERNAL" label="Internal live" />
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
         </PmsCard>
       </section>
@@ -189,6 +238,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
                   <Small label="Form mapping" value={jsonSummary(page.formMapping)} />
                   <Small label="Attribution" value={jsonSummary(page.attribution)} />
                   <Small label="Routing" value={page.bookingRouting ?? "PMS booking route required"} />
+                  <Small label="Local/AI SEO" value={`${page.serviceLine} page, schema, listing source, and AI search answer grounding`} />
                 </div>
                 {page.bookingRouting ? <p className="mt-2 text-xs leading-5 text-neutral-600">{page.bookingRouting}</p> : null}
                 <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -212,8 +262,9 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
                   <Small label="Use target" value={asset.useTarget ?? asset.assetType} />
                 </div>
                 {asset.brief ? <p className="mt-2 text-xs leading-5 text-neutral-600">Brief: {asset.brief}</p> : null}
+                <p className="mt-2 text-xs leading-5 text-neutral-600">Prompt: {asset.promptInput}</p>
                 <p className="mt-2 rounded-md border border-cyan-100 bg-white p-2 text-sm leading-6 text-neutral-700">{asset.generatedDraft}</p>
-                <p className="mt-2 text-xs text-neutral-500">Source data: {jsonSummary(asset.sourceData)}</p>
+                <p className="mt-2 text-xs text-neutral-500">Grounding data: {jsonSummary(asset.sourceData)}</p>
                 {asset.approvalNotes ?? asset.complianceNotes ? <p className="mt-2 text-xs text-neutral-500">{asset.approvalNotes ?? asset.complianceNotes}</p> : null}
                 <div className="mt-3 grid gap-2 md:grid-cols-2">
                   <StatusButton target="asset" id={asset.id} status="APPROVED" label="Approve draft" />
@@ -240,6 +291,8 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   <Small label="Priority" value={clean(task.priority)} />
                   <Small label="Connector" value={clean(task.connectorStatus)} />
+                  <Small label="Service" value={task.serviceLine ?? "Practice"} />
+                  <Small label="AI SEO signal" value={["AI_SEO", "SCHEMA", "LOCATION_PAGE", "GBP_POST"].includes(task.taskType) ? "Feeds AI/local search readiness" : "Listing hygiene"} />
                 </div>
                 <p className="mt-2 text-sm leading-6 text-neutral-700">{task.issueSummary}</p>
                 <p className="mt-2 text-xs leading-5 text-neutral-600">{task.nextAction}</p>
@@ -293,6 +346,16 @@ function clean(value: string) {
 function formatDate(value: string | null) {
   if (!value) return "not scheduled";
   return new Date(value).toLocaleString();
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function listSummary(value: unknown) {
+  if (Array.isArray(value)) return value.join(", ");
+  if (value) return String(value);
+  return "not set";
 }
 
 function jsonSummary(value: unknown) {

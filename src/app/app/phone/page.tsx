@@ -5,6 +5,7 @@ import { getRole, type RoleKey } from "@/lib/foundation-data";
 import {
   createPhoneCallControlAction,
   createPhoneConversation,
+  createPhoneDispositionTask,
   createPhoneOutboundMessage,
   createPhoneRoutingRule,
   getPhoneOperatingCenter,
@@ -17,6 +18,7 @@ import {
   updatePhoneProviderStatus,
   updatePhoneVoicemailStatus,
 } from "@/lib/operating-system-repository";
+import { crawlKnowledgePage, postStaffWebchatEntry, updateKnowledgeSourceReview } from "@/lib/webchat/repository";
 
 export const dynamic = "force-dynamic";
 
@@ -60,15 +62,15 @@ type TaskRow = { id: string; firstName: string | null; lastName: string | null; 
 type AnalyticsRow = { id: string; callerName: string | null; callerNumber: string | null; aiIntent: string | null; firstName: string | null; lastName: string | null; chartNumber: string | null; bookingIntentScore: number; serviceRecoveryScore: number; revenueOpportunityCents: number; keywords: string[] | null; riskFlags: string[] | null; summaryQuality: string };
 type NumberRow = { id: string; phoneNumber: string; label: string; numberType: string; provider: string | null; portStatus: string; e911Status: string; smsStatus: string; voiceStatus: string; recordingPolicy: string; status: string; locationName: string | null; routeName: string | null; defaultRouteId: string | null; emergencyRoute: string | null };
 type ExtensionRow = { id: string; extensionNumber: string; displayName: string; ownerRoleKey: string; extensionType: string; voicemailEnabled: boolean; status: string; locationName: string | null };
-type DeviceRow = { id: string; label: string; deviceType: string; manufacturer: string | null; model: string | null; macAddress: string | null; provisioningStatus: string; registrationStatus: string; assignedTo: string | null; deskLocation: string | null; extensionNumber: string | null; extensionName: string | null };
+type DeviceRow = { id: string; label: string; deviceType: string; manufacturer: string | null; model: string | null; macAddress: string | null; sipUsername: string | null; provisioningStatus: string; registrationStatus: string; assignedTo: string | null; deskLocation: string | null; extensionNumber: string | null; extensionName: string | null };
 type ProviderRow = { id: string; providerType: string; name: string; trunkDomain: string | null; outboundCallerId: string | null; credentialStatus: string; webhookStatus: string; e911Status: string; status: string; capabilityMap: unknown; nextAction: string; lastSmokeTestAt: string | null };
 type ActiveCallRow = { id: string; conversationId: string | null; fromNumber: string; toNumber: string; direction: string; callState: string; extensionNumber: string | null; extensionName: string | null; callerName: string | null; aiIntent: string | null; parkedSlot: string | null; holdStartedAt: string | null; startedAt: string };
 type ControlRow = { id: string; actionType: string; requestedByRole: string; targetNumber: string | null; targetParkSlot: string | null; providerStatus: string; blockedReason: string | null; resultSummary: string | null; targetExtensionName: string | null; extensionNumber: string | null; createdAt: string };
 type VoicemailRow = { id: string; callerNumber: string | null; callerName: string | null; status: string; durationSeconds: number | null; transcription: string | null; ownerRoleKey: string; dueAt: string | null; extensionNumber: string | null; extensionName: string | null };
 type ChannelSettingRow = { id: string; channel: string; displayName: string; status: string; theme: unknown; nlpMode: string; knowledgeBaseStatus: string; schedulingStatus: string; formsStatus: string; connectorStatus: string; approvalPolicy: unknown; nextAction: string };
-type KnowledgeSourceRow = { id: string; title: string; sourceType: string; sourceModule: string; serviceLine: string | null; status: string; ownerRoleKey: string; contentSummary: string; sourceUrl: string | null; nextAction: string };
-type WebChatRow = { id: string; visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null; sourcePage: string | null; nlpIntent: string | null; nlpConfidence: number; status: string; transcriptSummary: string | null; schedulingOutcome: string; pmsWritebackStatus: string; leadFormName: string | null; serviceLine: string | null; ownerRoleKey: string; blockedReason: string | null };
-type WebChatMessageRow = { id: string; conversationId: string; senderType: string; senderName: string | null; body: string; intent: string | null; sentiment: string | null; confidence: number; actionType: string | null; actionStatus: string; sourcePage: string | null; visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null; conversationStatus: string; createdAt: string };
+type KnowledgeSourceRow = { id: string; title: string; sourceType: string; sourceModule: string; serviceLine: string | null; status: string; ownerRoleKey: string; contentSummary: string; sourceUrl: string | null; lastReviewedAt: string | null; nextAction: string };
+type WebChatRow = { id: string; visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null; sourcePage: string | null; nlpIntent: string | null; nlpConfidence: number; status: string; transcriptSummary: string | null; schedulingOutcome: string; pmsWritebackStatus: string; leadFormName: string | null; serviceLine: string | null; ownerRoleKey: string; blockedReason: string | null; createdAt: string; updatedAt: string };
+type WebChatMessageRow = { id: string; conversationId: string; senderType: string; senderName: string | null; body: string; intent: string | null; sentiment: string | null; confidence: number; actionType: string | null; actionStatus: string; metadata: unknown; sourcePage: string | null; visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null; conversationStatus: string; createdAt: string };
 type LeadFormRow = { id: string; name: string; serviceLine: string; sourceChannel: string; status: string; fieldSchema: unknown; pmsMapping: unknown; routingRule: string | null; connectorStatus: string; conversionStatus: string; nextAction: string };
 type FormPacketRow = { id: string; packetType: string; status: string; deliveryChannel: string; pmsWritebackStatus: string; consentStatus: string; dueAt: string | null; nextAction: string; firstName: string | null; lastName: string | null; chartNumber: string | null; appointmentType: string | null; startsAt: string | null };
 type SchedulingRuleRow = { id: string; name: string; sourceChannel: string; appointmentCategoryName: string | null; providerName: string | null; locationName: string | null; status: string; bookingWindowDays: number; allowReschedule: boolean; requireHumanApproval: boolean; pmsWritebackStatus: string; conflictPolicy: unknown; nextAction: string };
@@ -78,6 +80,7 @@ type ScreenPopRecall = { id: string; recallType: string; dueDate: string; status
 type ScreenPopForm = { id: string; templateName: string | null; status: string; dueAt: string | null };
 type ScreenPopPreference = { channel: string; destination: string; consentStatus: string; quietHoursStart: string | null; quietHoursEnd: string | null };
 type SetupReadiness = { status: string; blocked: number; checks: Array<{ label: string; status: string; nextAction: string }> };
+type ArchitectureCandidate = { id: string; name: string; role: string; status: string; externalExecutionPolicy: string; modules: string[]; seams: string[]; readiness: Array<{ label: string; status: string; nextAction: string }> };
 
 async function createAction(formData: FormData) {
   "use server";
@@ -131,6 +134,19 @@ async function taskAction(formData: FormData) {
   revalidatePath("/app/phone");
 }
 
+async function dispositionAction(formData: FormData) {
+  "use server";
+  await createPhoneDispositionTask({
+    conversationId: String(formData.get("conversationId") ?? ""),
+    disposition: String(formData.get("disposition") ?? "GENERAL_PHONE_DISPOSITION"),
+    ownerRoleKey: String(formData.get("ownerRoleKey") ?? "front_desk"),
+    priority: String(formData.get("priority") ?? "NORMAL"),
+    dueIn: String(formData.get("dueIn") ?? "4 hours"),
+    nextAction: String(formData.get("nextAction") ?? ""),
+  });
+  revalidatePath("/app/phone");
+}
+
 async function routeAction(formData: FormData) {
   "use server";
   await createPhoneRoutingRule({
@@ -160,7 +176,15 @@ async function callControlAction(formData: FormData) {
 
 async function deviceAction(formData: FormData) {
   "use server";
-  await updatePhoneDeviceStatus(String(formData.get("id") ?? ""), String(formData.get("provisioningStatus") ?? "NOT_PROVISIONED"), String(formData.get("registrationStatus") ?? "OFFLINE"));
+  await updatePhoneDeviceStatus(
+    String(formData.get("id") ?? ""),
+    String(formData.get("provisioningStatus") ?? "NOT_PROVISIONED"),
+    String(formData.get("registrationStatus") ?? "OFFLINE"),
+    String(formData.get("macAddress") ?? ""),
+    String(formData.get("sipUsername") ?? ""),
+    String(formData.get("assignedTo") ?? ""),
+    String(formData.get("deskLocation") ?? ""),
+  );
   revalidatePath("/app/phone");
 }
 
@@ -185,13 +209,54 @@ async function extensionAction(formData: FormData) {
 
 async function providerAction(formData: FormData) {
   "use server";
-  await updatePhoneProviderStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "SETUP_REQUIRED"), String(formData.get("credentialStatus") ?? "MISSING"), String(formData.get("webhookStatus") ?? "NOT_CONFIGURED"));
+  await updatePhoneProviderStatus(
+    String(formData.get("id") ?? ""),
+    String(formData.get("status") ?? "SETUP_REQUIRED"),
+    String(formData.get("credentialStatus") ?? "MISSING"),
+    String(formData.get("webhookStatus") ?? "NOT_CONFIGURED"),
+    String(formData.get("e911Status") ?? ""),
+    String(formData.get("trunkDomain") ?? ""),
+    String(formData.get("outboundCallerId") ?? ""),
+    String(formData.get("nextAction") ?? ""),
+  );
   revalidatePath("/app/phone");
 }
 
 async function voicemailAction(formData: FormData) {
   "use server";
   await updatePhoneVoicemailStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "NEW"));
+  revalidatePath("/app/phone");
+}
+
+async function webchatStaffAction(formData: FormData) {
+  "use server";
+  await postStaffWebchatEntry({
+    conversationId: String(formData.get("conversationId") ?? ""),
+    body: String(formData.get("body") ?? ""),
+    senderName: String(formData.get("senderName") ?? "Front desk"),
+    entryType: String(formData.get("entryType") ?? "STAFF_NOTE") === "STAFF_REPLY" ? "STAFF_REPLY" : "STAFF_NOTE",
+    status: String(formData.get("status") ?? "OPEN"),
+  });
+  revalidatePath("/app/phone");
+}
+
+async function webchatKnowledgeReviewAction(formData: FormData) {
+  "use server";
+  await updateKnowledgeSourceReview({
+    id: String(formData.get("id") ?? ""),
+    status: String(formData.get("status") ?? "READY_FOR_RETRIEVAL"),
+    actorRole: String(formData.get("actorRole") ?? "practice_manager"),
+  });
+  revalidatePath("/app/phone");
+}
+
+async function webchatKnowledgeCrawlAction(formData: FormData) {
+  "use server";
+  const url = String(formData.get("url") ?? "");
+  const parsed = new URL(url);
+  const firstPartyHost = parsed.hostname === "1dentalai.com" || parsed.hostname.endsWith(".1dentalai.com");
+  if (!firstPartyHost && !process.env.WEBCHAT_CRAWL_TOKEN) throw new Error("External knowledge crawling requires WEBCHAT_CRAWL_TOKEN.");
+  await crawlKnowledgePage({ url });
   revalidatePath("/app/phone");
 }
 
@@ -222,6 +287,9 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
   const formPackets = center.formPackets as FormPacketRow[];
   const schedulingRules = center.schedulingRules as SchedulingRuleRow[];
   const setupReadiness = center.setupReadiness as SetupReadiness;
+  const architectureCandidates = center.architectureCandidates as ArchitectureCandidate[];
+  const webchatReadiness = buildWebchatReadiness(channelSettings, knowledgeSources, leadForms, schedulingRules);
+  const webchatAnalytics = buildWebchatAnalytics(webChats, webChatMessages);
 
   return (
     <FoundationShell active="/app/phone" roleKey={role.key}>
@@ -315,6 +383,33 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
       {view === "setup" ? <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <PmsCard title="Carrier, numbers, and compliance setup" eyebrow="Porting, E911, voice, SMS, recording policy">
           <div className="grid gap-3">
+            {architectureCandidates.map((candidate) => (
+              <div key={candidate.id} className="rounded-md border border-neutral-300 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{candidate.name}</p>
+                    <p className="mt-1 text-xs leading-5 text-neutral-600">{candidate.role}</p>
+                  </div>
+                  <StatusFor value={candidate.status} />
+                </div>
+                <p className="mt-2 text-xs leading-5 text-amber-900">{candidate.externalExecutionPolicy}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <MiniMetric label="FreeSWITCH modules" value={candidate.modules.join(", ")} />
+                  <MiniMetric label="Integration seams" value={candidate.seams.join(", ")} />
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  {candidate.readiness.map((check) => (
+                    <div key={check.label} className="rounded-md bg-neutral-50 p-2 ring-1 ring-neutral-200">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-xs font-semibold text-neutral-950">{check.label}</p>
+                        <StatusFor value={check.status} />
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-neutral-600">{check.nextAction}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
             {providers.map((provider) => (
               <div key={provider.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
                 <div className="flex items-start justify-between gap-3">
@@ -329,13 +424,22 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <MiniMetric label="Webhooks" value={clean(provider.webhookStatus)} />
                   <MiniMetric label="E911" value={clean(provider.e911Status)} />
                 </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <MiniMetric label="SIP trunk" value={provider.trunkDomain ?? "not configured"} />
+                  <MiniMetric label="Outbound caller ID" value={provider.outboundCallerId ?? "not assigned"} />
+                </div>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">Capabilities: {jsonSummary(provider.capabilityMap)}</p>
                 <p className="mt-2 text-xs leading-5 text-neutral-600">{provider.nextAction}</p>
                 <form action={providerAction} className="mt-3 grid gap-2 sm:grid-cols-4">
                   <input type="hidden" name="id" value={provider.id} />
-                  <Select name="status" label="Status" options={["SETUP_REQUIRED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} compact />
-                  <Select name="credentialStatus" label="Credentials" options={["MISSING", "STAGED_IN_VAULT", "VALIDATED"]} compact />
-                  <Select name="webhookStatus" label="Webhooks" options={["NOT_CONFIGURED", "CONFIGURED", "VERIFIED"]} compact />
-                  <label className="grid gap-1 text-xs font-semibold text-transparent">Update<button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700">Update provider</button></label>
+                  <Select name="status" label="Status" options={["SETUP_REQUIRED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} defaultValue={provider.status} compact />
+                  <Select name="credentialStatus" label="Credentials" options={["MISSING", "STAGED_IN_VAULT", "VALIDATED"]} defaultValue={provider.credentialStatus} compact />
+                  <Select name="webhookStatus" label="Webhooks" options={["NOT_CONFIGURED", "CONFIGURED", "VERIFIED"]} defaultValue={provider.webhookStatus} compact />
+                  <Select name="e911Status" label="Provider E911" options={["NOT_CONFIGURED", "NEEDS_VALIDATION", "VALIDATED", "ACTIVE", "NOT_APPLICABLE", "BLOCKED"]} defaultValue={provider.e911Status} compact />
+                  <Input name="trunkDomain" label="SIP trunk domain" defaultValue={provider.trunkDomain ?? ""} />
+                  <Input name="outboundCallerId" label="Outbound caller ID" defaultValue={provider.outboundCallerId ?? ""} />
+                  <Input name="nextAction" label="Next setup action" defaultValue={provider.nextAction} />
+                  <label className="grid gap-1 text-xs font-semibold text-transparent">Update<button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700">Update carrier</button></label>
                 </form>
               </div>
             ))}
@@ -355,13 +459,14 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <MiniMetric label="E911" value={clean(number.e911Status)} />
                   <MiniMetric label="Recording" value={clean(number.recordingPolicy)} />
                 </div>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">Emergency route: {number.emergencyRoute ?? "not assigned"} · SMS registration must be active before outbound texts leave the approval queue.</p>
                 <form action={numberAction} className="mt-3 grid gap-2 sm:grid-cols-6">
                   <input type="hidden" name="id" value={number.id} />
-                  <Select name="portStatus" label="Port" options={["NOT_STARTED", "READY_TO_PORT", "PORTING", "PORTED", "BLOCKED"]} compact />
-                  <Select name="voiceStatus" label="Voice" options={["NOT_CONFIGURED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} compact />
-                  <Select name="smsStatus" label="SMS" options={["NOT_CONFIGURED", "REGISTRATION_REQUIRED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} compact />
-                  <Select name="e911Status" label="E911" options={["NOT_CONFIGURED", "NEEDS_VALIDATION", "VALIDATED", "ACTIVE", "BLOCKED"]} compact />
-                  <Select name="status" label="Number" options={["SETUP_REQUIRED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} compact />
+                  <Select name="portStatus" label="Port" options={["NOT_STARTED", "READY_TO_PORT", "PORTING", "PORTED", "BLOCKED"]} defaultValue={number.portStatus} compact />
+                  <Select name="voiceStatus" label="Voice" options={["NOT_CONFIGURED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} defaultValue={number.voiceStatus} compact />
+                  <Select name="smsStatus" label="SMS/A2P" options={["NOT_CONFIGURED", "REGISTRATION_REQUIRED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} defaultValue={number.smsStatus} compact />
+                  <Select name="e911Status" label="E911" options={["NOT_CONFIGURED", "NEEDS_VALIDATION", "VALIDATED", "ACTIVE", "BLOCKED"]} defaultValue={number.e911Status} compact />
+                  <Select name="status" label="Number" options={["SETUP_REQUIRED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} defaultValue={number.status} compact />
                   <label className="grid gap-1 text-xs font-semibold text-transparent">Update<button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700">Update number</button></label>
                 </form>
               </div>
@@ -382,8 +487,8 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                 </div>
                 <form action={extensionAction} className="mt-3 grid gap-2 sm:grid-cols-3">
                   <input type="hidden" name="id" value={extension.id} />
-                  <Select name="status" label="Extension" options={["ACTIVE", "SETUP_REQUIRED", "DISABLED", "BLOCKED"]} compact />
-                  <Select name="voicemailEnabled" label="Voicemail" options={["true", "false"]} compact />
+                  <Select name="status" label="Extension" options={["ACTIVE", "SETUP_REQUIRED", "DISABLED", "BLOCKED"]} defaultValue={extension.status} compact />
+                  <Select name="voicemailEnabled" label="Voicemail" options={["true", "false"]} defaultValue={String(extension.voicemailEnabled)} compact />
                   <label className="grid gap-1 text-xs font-semibold text-transparent">Update<button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700">Update extension</button></label>
                 </form>
               </div>
@@ -394,14 +499,18 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <div>
                     <p className="text-sm font-semibold text-neutral-950">{device.label}</p>
                     <p className="mt-1 text-xs text-neutral-600">{clean(device.deviceType)} · {device.manufacturer ?? "Unknown"} {device.model ?? ""} · ext {device.extensionNumber ?? "unassigned"}</p>
-                    <p className="mt-1 text-xs text-neutral-600">{device.assignedTo ?? "No assignment"} · {device.deskLocation ?? "No location"}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{device.assignedTo ?? "No assignment"} · {device.deskLocation ?? "No location"} · MAC {device.macAddress ?? "missing"} · SIP {device.sipUsername ?? "missing"}</p>
                   </div>
                   <StatusFor value={device.registrationStatus} />
                 </div>
                 <form action={deviceAction} className="mt-3 grid gap-2 sm:grid-cols-3">
                   <input type="hidden" name="id" value={device.id} />
-                  <Select name="provisioningStatus" label="Provisioning" options={["NOT_PROVISIONED", "NEEDS_MAC_ADDRESS", "CREDENTIALS_REQUIRED", "PROVISIONED"]} compact />
-                  <Select name="registrationStatus" label="Registration" options={["OFFLINE", "REGISTERING", "ONLINE", "ERROR"]} compact />
+                  <Select name="provisioningStatus" label="Provisioning" options={["NOT_PROVISIONED", "NEEDS_MAC_ADDRESS", "CREDENTIALS_REQUIRED", "PROVISIONED"]} defaultValue={device.provisioningStatus} compact />
+                  <Select name="registrationStatus" label="Registration" options={["OFFLINE", "REGISTERING", "ONLINE", "ERROR"]} defaultValue={device.registrationStatus} compact />
+                  <Input name="macAddress" label="MAC address" defaultValue={device.macAddress ?? ""} />
+                  <Input name="sipUsername" label="SIP username" defaultValue={device.sipUsername ?? ""} />
+                  <Input name="assignedTo" label="Assigned to" defaultValue={device.assignedTo ?? ""} />
+                  <Input name="deskLocation" label="Desk location" defaultValue={device.deskLocation ?? ""} />
                   <label className="grid gap-1 text-xs font-semibold text-transparent">Update<button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700">Update device</button></label>
                 </form>
               </div>
@@ -413,6 +522,7 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
       {(view === "today" || view === "calls") ? <section className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <PmsCard title="Active calls and call controls" eyebrow="Dial, answer, hold, warm transfer, call park">
           <form action={callControlAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
+            <p className="text-xs leading-5 text-neutral-600">Actions here are connector-gated work items. They require carrier credentials, voice number activation, webhook verification, and a provider call ID before anything can leave the app.</p>
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="grid gap-1 text-xs font-semibold text-neutral-700">Active call<select name="activeCallId" className="rounded-md border border-neutral-300 px-3 py-2 text-sm"><option value="">New outbound/no active call</option>{activeCalls.map((call) => <option key={call.id} value={call.id}>{call.fromNumber} to {call.toNumber} - {clean(call.callState)}</option>)}</select></label>
               <Select name="actionType" label="Action" options={["OUTBOUND_DIAL", "ANSWER", "HOLD", "RESUME", "WARM_TRANSFER", "BLIND_TRANSFER", "CALL_PARK", "PICKUP_PARK", "SEND_TO_VOICEMAIL", "END_CALL"]} />
@@ -430,8 +540,33 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <div>
                     <p className="text-sm font-semibold text-neutral-950">{call.fromNumber} → {call.toNumber}</p>
                     <p className="mt-1 text-xs text-neutral-600">{clean(call.direction)} · {call.callerName ?? "Unknown caller"} · ext {call.extensionNumber ?? "none"} {call.parkedSlot ? `· parked ${call.parkedSlot}` : ""}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{call.aiIntent ? clean(call.aiIntent) : "Unclassified"} · started {new Date(call.startedAt).toLocaleString()}</p>
                   </div>
                   <StatusFor value={call.callState} />
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-4">
+                  <CallControlButton call={call} actionType="HOLD" label="Hold" />
+                  <CallControlButton call={call} actionType="RESUME" label="Resume" />
+                  <CallControlButton call={call} actionType="END_CALL" label="End" />
+                  <CallControlButton call={call} actionType="SEND_TO_VOICEMAIL" label="Voicemail" targetExtensionId={extensions[0]?.id} />
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  <form action={callControlAction} className="grid gap-2 rounded-md bg-neutral-50 p-2 ring-1 ring-neutral-200">
+                    <input type="hidden" name="activeCallId" value={call.id} />
+                    <input type="hidden" name="conversationId" value={call.conversationId ?? ""} />
+                    <input type="hidden" name="actionType" value="WARM_TRANSFER" />
+                    <input type="hidden" name="requestedByRole" value={role.key} />
+                    <label className="grid gap-1 text-xs font-semibold text-neutral-700">Warm transfer target<select name="targetExtensionId" className="rounded-md border border-neutral-300 px-3 py-2 text-sm">{extensions.map((extension) => <option key={extension.id} value={extension.id}>{extension.extensionNumber} - {extension.displayName}</option>)}</select></label>
+                    <ActionButton label="Stage transfer" />
+                  </form>
+                  <form action={callControlAction} className="grid gap-2 rounded-md bg-neutral-50 p-2 ring-1 ring-neutral-200">
+                    <input type="hidden" name="activeCallId" value={call.id} />
+                    <input type="hidden" name="conversationId" value={call.conversationId ?? ""} />
+                    <input type="hidden" name="actionType" value="CALL_PARK" />
+                    <input type="hidden" name="requestedByRole" value={role.key} />
+                    <Input name="targetParkSlot" label="Park slot" defaultValue={call.parkedSlot ?? "701"} />
+                    <ActionButton label="Stage park" />
+                  </form>
                 </div>
               </div>
             ))}
@@ -516,6 +651,17 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <StatusButton id={call.id} status="OPEN" followUpStatus="CHART_NOTE_REVIEW" label="Chart review" />
                   <StatusButton id={call.id} status="CLOSED" followUpStatus="COMPLETED" label="Close" />
                 </div>
+                <form action={dispositionAction} className="mt-3 grid gap-2 rounded-md border border-neutral-200 bg-white p-3">
+                  <input type="hidden" name="conversationId" value={call.id} />
+                  <div className="grid gap-2 md:grid-cols-4">
+                    <Select name="disposition" label="Disposition" options={["CALLBACK_REQUIRED", "BOOKING_HANDOFF", "BILLING_REVIEW", "EMERGENCY_TRIAGE", "VOICEMAIL_FOLLOW_UP", "SERVICE_RECOVERY", "CHART_REVIEW", "NO_PMS_MATCH"]} defaultValue={call.outcome ?? "CALLBACK_REQUIRED"} compact />
+                    <Select name="ownerRoleKey" label="Owner" options={["front_desk", "billing_rcm", "associate_provider", "practice_manager"]} defaultValue={call.followUpStatus === "BLOCKED_RCM_REVIEW" ? "billing_rcm" : "front_desk"} compact />
+                    <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue={call.aiIntent === "EMERGENCY" ? "HIGH" : "NORMAL"} compact />
+                    <Select name="dueIn" label="Due" options={["15 minutes", "30 minutes", "1 hour", "4 hours", "1 day"]} defaultValue={call.aiIntent === "EMERGENCY" ? "15 minutes" : "1 hour"} compact />
+                  </div>
+                  <Textarea name="nextAction" label="Patient task next action" defaultValue={defaultDispositionAction(call)} required />
+                  <button className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white">Write disposition task</button>
+                </form>
               </div>
             ))}
           </div>
@@ -523,14 +669,44 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
       </section> : null}
 
       {view === "webchat" ? <section className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <PmsCard title="NLP webchat queue" eyebrow="Lead capture, scheduling handoff, PMS writeback">
+        <PmsCard title="Webchat setup readiness" eyebrow="Widget install, consent, KB, lead forms, scheduling handoff">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-neutral-950">{clean(webchatReadiness.status)} · {webchatReadiness.blocked} blocked checks</p>
+            <StatusFor value={webchatReadiness.status} />
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {webchatReadiness.checks.map((check) => (
+              <div key={check.label} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-neutral-950">{check.label}</p>
+                  <StatusFor value={check.status} />
+                </div>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{check.nextAction}</p>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+
+        <PmsCard title="Transcript analytics" eyebrow="Intent mix, handoff load, consent capture">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <MiniMetric label="Open chats" value={webchatAnalytics.openChats} />
+            <MiniMetric label="Handoffs" value={webchatAnalytics.handoffs} />
+            <MiniMetric label="Urgent" value={webchatAnalytics.urgent} />
+            <MiniMetric label="Staff entries" value={webchatAnalytics.staffEntries} />
+            <MiniMetric label="Consent captured" value={webchatAnalytics.consentCaptured} />
+            <MiniMetric label="Top intent" value={clean(webchatAnalytics.topIntent)} />
+          </div>
+          <p className="mt-3 text-xs leading-5 text-neutral-600">Analytics are derived from saved visitor and assistant messages; no external AI or outbound send is claimed from this view.</p>
+        </PmsCard>
+
+        <PmsCard title="NLP webchat queue" eyebrow="Lead capture, scheduling request handoff, PMS writeback">
           <div className="grid gap-3">
             {webChats.map((chat) => (
               <div key={chat.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-neutral-950">{chat.visitorName ?? chat.visitorPhone ?? "Website visitor"}</p>
-                    <p className="mt-1 text-xs text-neutral-600">{chat.sourcePage ?? "site"} · {clean(chat.nlpIntent ?? "unknown intent")} · confidence {chat.nlpConfidence}%</p>
+                    <p className="mt-1 text-xs text-neutral-600">{chat.sourcePage ?? "site"} · {clean(chat.nlpIntent ?? "unknown intent")} · confidence {chat.nlpConfidence}% · owner {clean(chat.ownerRoleKey)}</p>
                   </div>
                   <StatusFor value={chat.status} />
                 </div>
@@ -542,6 +718,17 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <MiniMetric label="PMS" value={clean(chat.pmsWritebackStatus)} />
                 </div>
                 {chat.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{chat.blockedReason}</p> : null}
+                <form action={webchatStaffAction} className="mt-3 grid gap-2 rounded-md border border-neutral-200 bg-white p-3">
+                  <input type="hidden" name="conversationId" value={chat.id} />
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    <Input name="senderName" label="Staff name" />
+                    <Select name="entryType" label="Entry" options={["STAFF_NOTE", "STAFF_REPLY"]} />
+                    <Select name="status" label="Status" options={["OPEN", "STAFF_REVIEW", "WAITING_ON_PATIENT", "CLOSED"]} />
+                    <div className="self-end"><button className="w-full rounded-md bg-neutral-950 px-3 py-2 text-xs font-semibold text-white">Save staff entry</button></div>
+                  </div>
+                  <Textarea name="body" label="Operator reply or staff note" required />
+                  <p className="text-xs leading-5 text-neutral-500">Staff replies are staged in the transcript only; patient delivery remains blocked until a live webchat connector and consent policy are approved.</p>
+                </form>
               </div>
             ))}
           </div>
@@ -563,11 +750,17 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <MiniMetric label="Sentiment" value={clean(message.sentiment ?? "none")} />
                   <MiniMetric label="Confidence" value={`${message.confidence ?? 0}%`} />
                 </div>
+                <p className="mt-2 text-xs leading-5 text-neutral-500">{messageMetadataSummary(message.metadata)}</p>
               </div>
             ))}
           </div>
         </PmsCard>
-        <PmsCard title="Knowledge base" eyebrow="Controls what webchat and AI voice can say">
+        <PmsCard title="Knowledge base source management" eyebrow="Controls what webchat and AI voice can say">
+          <form action={webchatKnowledgeCrawlAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
+            <Input name="url" label="Crawl source URL" />
+            <button className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white">Queue crawl</button>
+            <p className="text-xs leading-5 text-neutral-500">First-party sources can be crawled directly. External sources require the crawl connector token before content is fetched.</p>
+          </form>
           <div className="grid gap-3">
             {knowledgeSources.map((source) => (
               <div key={source.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
@@ -577,7 +770,13 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                 </div>
                 <p className="mt-1 text-xs text-neutral-600">{clean(source.sourceType)} · {source.serviceLine ?? source.sourceModule} · owner {clean(source.ownerRoleKey)}</p>
                 <p className="mt-2 text-sm leading-6 text-neutral-700">{source.contentSummary}</p>
+                <p className="mt-2 text-xs leading-5 text-neutral-500">Source: {source.sourceUrl ?? "manual policy"} · Reviewed {source.lastReviewedAt ? fmtDate(source.lastReviewedAt) : "not yet"}</p>
                 <p className="mt-2 text-xs leading-5 text-neutral-600">{source.nextAction}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <KnowledgeReviewButton id={source.id} actorRole={source.ownerRoleKey} status="NEEDS_REVIEW" label="Needs review" />
+                  <KnowledgeReviewButton id={source.id} actorRole={source.ownerRoleKey} status="READY_FOR_RETRIEVAL" label="Approve retrieval" />
+                  <KnowledgeReviewButton id={source.id} actorRole={source.ownerRoleKey} status="BLOCKED_POLICY_REVIEW" label="Block" />
+                </div>
               </div>
             ))}
           </div>
@@ -806,8 +1005,24 @@ function TaskButton({ id, actorRole, status, label }: { id: string; actorRole: s
   return <form action={taskAction}><input type="hidden" name="id" value={id} /><input type="hidden" name="actorRole" value={actorRole} /><input type="hidden" name="status" value={status} /><ActionButton label={label} /></form>;
 }
 
+function KnowledgeReviewButton({ id, actorRole, status, label }: { id: string; actorRole: string; status: string; label: string }) {
+  return <form action={webchatKnowledgeReviewAction}><input type="hidden" name="id" value={id} /><input type="hidden" name="actorRole" value={actorRole} /><input type="hidden" name="status" value={status} /><ActionButton label={label} /></form>;
+}
+
 function VoicemailButton({ id, status, label }: { id: string; status: string; label: string }) {
   return <form action={voicemailAction}><input type="hidden" name="id" value={id} /><input type="hidden" name="status" value={status} /><ActionButton label={label} /></form>;
+}
+
+function CallControlButton({ call, actionType, label, targetExtensionId }: { call: ActiveCallRow; actionType: string; label: string; targetExtensionId?: string }) {
+  return (
+    <form action={callControlAction}>
+      <input type="hidden" name="activeCallId" value={call.id} />
+      <input type="hidden" name="conversationId" value={call.conversationId ?? ""} />
+      <input type="hidden" name="actionType" value={actionType} />
+      <input type="hidden" name="targetExtensionId" value={targetExtensionId ?? ""} />
+      <ActionButton label={label} />
+    </form>
+  );
 }
 
 function ScreenPop({ call }: { call: ConversationRow }) {
@@ -864,16 +1079,16 @@ function MiniMetric({ label, value }: { label: string; value: React.ReactNode })
   return <div className="rounded-md bg-white p-2 ring-1 ring-neutral-200"><p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">{label}</p><p className="mt-1 text-sm font-semibold text-neutral-950">{value}</p></div>;
 }
 
-function Input({ name, label }: { name: string; label: string }) {
-  return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<input name={name} className="min-w-0 rounded-md border border-neutral-300 px-3 py-2 text-sm" /></label>;
+function Input({ name, label, defaultValue = "" }: { name: string; label: string; defaultValue?: string }) {
+  return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<input name={name} defaultValue={defaultValue} className="min-w-0 rounded-md border border-neutral-300 px-3 py-2 text-sm" /></label>;
 }
 
-function Select({ name, label, options, compact = false }: { name: string; label: string; options: string[]; compact?: boolean }) {
-  return <label className={`grid gap-1 text-xs font-semibold text-neutral-700 ${compact ? "min-w-0" : ""}`}>{label}<select name={name} className="min-w-0 rounded-md border border-neutral-300 px-3 py-2 text-sm">{options.map((option) => <option key={option} value={option}>{clean(option)}</option>)}</select></label>;
+function Select({ name, label, options, defaultValue, compact = false }: { name: string; label: string; options: string[]; defaultValue?: string; compact?: boolean }) {
+  return <label className={`grid gap-1 text-xs font-semibold text-neutral-700 ${compact ? "min-w-0" : ""}`}>{label}<select name={name} defaultValue={defaultValue} className="min-w-0 rounded-md border border-neutral-300 px-3 py-2 text-sm">{options.map((option) => <option key={option} value={option}>{option ? clean(option) : "None"}</option>)}</select></label>;
 }
 
-function Textarea({ name, label, required = false }: { name: string; label: string; required?: boolean }) {
-  return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<textarea name={name} required={required} rows={4} className="min-w-0 rounded-md border border-neutral-300 px-3 py-2 text-sm" /></label>;
+function Textarea({ name, label, required = false, defaultValue = "" }: { name: string; label: string; required?: boolean; defaultValue?: string }) {
+  return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<textarea name={name} required={required} defaultValue={defaultValue} rows={4} className="min-w-0 rounded-md border border-neutral-300 px-3 py-2 text-sm" /></label>;
 }
 
 function asList<T>(value: unknown): T[] {
@@ -894,6 +1109,91 @@ function readinessSummary(value: unknown) {
   const missing = Array.isArray(readiness.missing) ? readiness.missing.filter(Boolean).join(", ") : "";
   const semantics = typeof readiness.semantics === "string" ? readiness.semantics : "Internal queue only; no external transport is claimed.";
   return missing ? `${semantics} Missing: ${missing}.` : semantics;
+}
+
+function buildWebchatReadiness(channelSettings: ChannelSettingRow[], knowledgeSources: KnowledgeSourceRow[], leadForms: LeadFormRow[], schedulingRules: SchedulingRuleRow[]) {
+  const webchat = channelSettings.find((channel) => channel.channel === "WEB_CHAT");
+  const checks = [
+    {
+      label: "Widget channel",
+      status: webchat?.status ?? "SETUP_REQUIRED",
+      nextAction: webchat?.nextAction ?? "Create the WEB_CHAT channel setting before public installation.",
+    },
+    {
+      label: "Consent and privacy",
+      status: "READY_FOR_REVIEW",
+      nextAction: "Widget requires privacy notice acceptance before saving visitor messages; practice counsel should approve final language.",
+    },
+    {
+      label: "Knowledge sources",
+      status: knowledgeSources.some((source) => source.status === "NEEDS_REVIEW") ? "NEEDS_REVIEW" : "READY_FOR_RETRIEVAL",
+      nextAction: knowledgeSources.some((source) => source.status === "NEEDS_REVIEW") ? "Review and approve source language before relying on KB responses." : "Approved sources are available for guarded retrieval.",
+    },
+    {
+      label: "Lead capture",
+      status: leadForms.length ? "READY_FOR_REVIEW" : "SETUP_REQUIRED",
+      nextAction: leadForms.length ? "Lead fields are mapped to internal handoff metadata; PMS creation remains connector-gated." : "Add at least one webchat lead form.",
+    },
+    {
+      label: "Scheduling handoff",
+      status: schedulingRules.some((rule) => rule.sourceChannel === "WEB_CHAT" && rule.pmsWritebackStatus === "READY") ? "READY" : "PMS_CONNECTOR_REQUIRED",
+      nextAction: "Appointment requests create staff tasks until PMS slot search and writeback are approved.",
+    },
+    {
+      label: "External sends",
+      status: webchat?.connectorStatus === "READY" ? "READY" : "CONNECTOR_REQUIRED",
+      nextAction: "Operator replies are staged internally until a live webchat transport connector is active.",
+    },
+  ];
+  const blocked = checks.filter((check) => /REQUIRED|NEEDS|SETUP|BLOCKED/.test(check.status)).length;
+  return { status: blocked ? "SETUP_REQUIRED" : "READY", blocked, checks };
+}
+
+function buildWebchatAnalytics(webChats: WebChatRow[], messages: WebChatMessageRow[]) {
+  const visitorMessages = messages.filter((message) => message.senderType === "VISITOR");
+  const handoffs = visitorMessages.filter((message) => message.actionType && message.actionType !== "KNOWLEDGE_RESPONSE").length;
+  const urgent = visitorMessages.filter((message) => message.intent === "EMERGENCY_TRIAGE" || message.sentiment === "URGENT").length;
+  const staffEntries = messages.filter((message) => message.senderType === "STAFF" || message.senderType === "STAFF_NOTE").length;
+  const consentCaptured = visitorMessages.filter((message) => metadataFlag(message.metadata, "consentAccepted")).length;
+  const intentCounts = visitorMessages.reduce<Record<string, number>>((acc, message) => {
+    const intent = message.intent ?? "UNCLASSIFIED";
+    acc[intent] = (acc[intent] ?? 0) + 1;
+    return acc;
+  }, {});
+  const topIntent = Object.entries(intentCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "UNCLASSIFIED";
+  return {
+    openChats: webChats.filter((chat) => chat.status === "OPEN").length,
+    handoffs,
+    urgent,
+    staffEntries,
+    consentCaptured,
+    topIntent,
+  };
+}
+
+function metadataFlag(value: unknown, key: string) {
+  return Boolean(value && typeof value === "object" && (value as Record<string, unknown>)[key]);
+}
+
+function messageMetadataSummary(value: unknown) {
+  if (!value || typeof value !== "object") return "No metadata recorded.";
+  const metadata = value as { leadCapture?: Record<string, unknown>; sourceTitles?: unknown; externalSendBlocked?: unknown; connectorGated?: unknown; noExternalBooking?: unknown };
+  const leadCapture = metadata.leadCapture && typeof metadata.leadCapture === "object" ? metadata.leadCapture : {};
+  const capture = ["serviceLine", "preferredTime", "patientStatus", "urgency"]
+    .map((key) => leadCapture[key] ? `${clean(key)}: ${String(leadCapture[key])}` : "")
+    .filter(Boolean)
+    .join(" · ");
+  const sources = Array.isArray(metadata.sourceTitles) && metadata.sourceTitles.length ? `Sources: ${metadata.sourceTitles.join(", ")}.` : "";
+  const gated = metadata.externalSendBlocked || metadata.connectorGated || metadata.noExternalBooking ? "Connector-gated; no external booking/send claimed." : "";
+  return [capture, sources, gated].filter(Boolean).join(" ");
+}
+
+function defaultDispositionAction(call: ConversationRow) {
+  if (call.aiIntent === "EMERGENCY") return "Escalate to clinical triage, document symptoms, and confirm same-day or after-hours protocol before giving advice.";
+  if (call.followUpStatus === "BLOCKED_RCM_REVIEW" || call.aiIntent === "PAYMENT_QUESTION" || call.aiIntent === "INSURANCE_QUESTION") return "Review ledger, claim/EOB, and patient balance before calling back or staging any billing message.";
+  if (call.outcome === "MISSED_CALL") return "Call back, document outcome, and convert to Patient Finder or scheduling follow-up if the patient is not reached.";
+  if (call.aiIntent === "CONFIRM_APPOINTMENT") return "Confirm appointment readiness, forms, consent, and any schedule changes before closing the call.";
+  return "Review the call summary, complete patient follow-up, and write only approved details to the PMS task.";
 }
 
 function jsonSummary(value: unknown) {

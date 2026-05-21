@@ -37,6 +37,8 @@ type EngagementEventRow = {
   quietHoursEnd: string | null;
   openForms: number;
   openTasks: number;
+  medicalAlertCount: number;
+  preMedAlertCount: number;
   procedureCode: string | null;
   procedureDescription: string | null;
 };
@@ -63,6 +65,7 @@ type SignalRow = { key: string; value: number };
 type PatientRow = { id: string; firstName: string; lastName: string; chartNumber: string };
 type LifecycleRow = {
   id: string;
+  patientId: string;
   firstName: string;
   lastName: string;
   chartNumber: string;
@@ -75,21 +78,33 @@ type LifecycleRow = {
   quietHoursEnd: string | null;
   openForms: number;
   reminderCount: number;
+  medicalAlertCount: number;
+  preMedAlertCount: number;
+  allergyCount: number;
+  medicationCount: number;
 };
-type RecallRow = { id: string; firstName: string; lastName: string; recallType: string; dueDate: Date | string; status: string; consentStatus: string | null; quietHoursStart: string | null; quietHoursEnd: string | null };
-type BrokenAppointmentRow = { id: string; firstName: string; lastName: string; appointmentType: string; startsAt: Date | string; status: string };
-type WaitlistRow = { id: string; firstName: string | null; lastName: string | null; chartNumber: string | null; requestType: string; source: string; urgency: string; preferredWindow: string | null; note: string | null };
-type PostOpRow = { id: string; firstName: string; lastName: string; serviceDate: Date | string; code: string; description: string; postOpCount: number };
+type BookingRequestRow = { id: string; patientId: string | null; firstName: string | null; lastName: string | null; chartNumber: string | null; requestType: string; source: string; urgency: string; preferredWindow: string | null; note: string | null; consentStatus: string | null; quietHoursStart: string | null; quietHoursEnd: string | null; stagedCount: number };
+type FormPacketRow = { id: string; patientId: string; appointmentId: string | null; firstName: string; lastName: string; chartNumber: string; status: string; dueAt: Date | string | null; templateName: string | null; formType: string | null; appointmentType: string | null; startsAt: Date | string | null; consentStatus: string | null; quietHoursStart: string | null; quietHoursEnd: string | null; stagedCount: number };
+type RecallRow = { id: string; patientId: string; firstName: string; lastName: string; recallType: string; dueDate: Date | string; status: string; consentStatus: string | null; quietHoursStart: string | null; quietHoursEnd: string | null };
+type BrokenAppointmentRow = { id: string; patientId: string; firstName: string; lastName: string; appointmentType: string; startsAt: Date | string; status: string };
+type WaitlistRow = { id: string; patientId: string | null; firstName: string | null; lastName: string | null; chartNumber: string | null; requestType: string; source: string; urgency: string; preferredWindow: string | null; note: string | null };
+type PostOpRow = { id: string; patientId: string; appointmentId: string | null; firstName: string; lastName: string; serviceDate: Date | string; code: string; description: string; postOpCount: number };
+type MedicalAlertRow = { id: string; patientId: string; appointmentId: string | null; firstName: string; lastName: string; chartNumber: string; severity: string; title: string; details: string | null; appointmentType: string | null; startsAt: Date | string | null; stagedCount: number };
 type TaskRow = { id: string; firstName: string | null; lastName: string | null; chartNumber: string | null; ownerRoleKey: string; title: string; priority: string; dueAt: Date | string | null };
 type GovernanceRow = { area: string; control: string; status: string };
 
 const eventTypes = [
+  "BOOKING_REQUEST_RESPONSE",
   "POST_VISIT_REVIEW_REQUEST",
   "POST_OP_INSTRUCTIONS",
   "RECALL_REACTIVATION",
+  "REACTIVATION",
   "APPOINTMENT_CONFIRMATION",
   "APPOINTMENT_REMINDER",
   "FORMS_REMINDER",
+  "INTAKE_PACKET_REMINDER",
+  "MEDICAL_ALERT_REVIEW",
+  "PRE_MED_ALERT_REVIEW",
   "NO_SHOW_RECOVERY",
   "CANCELLATION_FILL",
   "WAITLIST_FILL",
@@ -132,6 +147,8 @@ async function stageAction(formData: FormData) {
     sourceModule: String(formData.get("sourceModule") ?? "PMS_MANUAL_REVIEW"),
     eventType: String(formData.get("eventType") ?? "POST_VISIT_REVIEW_REQUEST"),
     channel: String(formData.get("channel") ?? "SMS"),
+    appointmentId: String(formData.get("appointmentId") ?? "") || undefined,
+    procedureLogId: String(formData.get("procedureLogId") ?? "") || undefined,
     triggerReason: String(formData.get("triggerReason") ?? ""),
     messageBody: String(formData.get("messageBody") ?? ""),
     scheduledFor: String(formData.get("scheduledFor") ?? "") || undefined,
@@ -178,10 +195,13 @@ export default async function EngagementPage({ searchParams }: { searchParams: P
   const signals = command.sourceSignals as SignalRow[];
   const patients = command.patients as PatientRow[];
   const lifecycle = command.lifecycle as LifecycleRow[];
+  const bookingRequests = command.bookingRequests as BookingRequestRow[];
+  const formPackets = command.formPackets as FormPacketRow[];
   const recallQueue = command.recallQueue as RecallRow[];
   const brokenAppointments = command.brokenAppointments as BrokenAppointmentRow[];
   const waitlist = command.waitlist as WaitlistRow[];
   const postOpQueue = command.postOpQueue as PostOpRow[];
+  const medicalAlerts = command.medicalAlerts as MedicalAlertRow[];
   const crossModuleTasks = command.crossModuleTasks as TaskRow[];
   const governance = command.governance as GovernanceRow[];
   const approvalCount = events.filter((event) => event.approvalStatus === "NEEDS_REVIEW").length;
@@ -191,16 +211,17 @@ export default async function EngagementPage({ searchParams }: { searchParams: P
     <FoundationShell active="/app/engagement" roleKey={role.key}>
       <PageHeader
         eyebrow="PMS-connected engagement"
-        title="Patient engagement and reputation workbench"
-        body="Every outreach item starts from a PMS event: completed procedure, recall due, readiness blocker, ledger balance, or appointment status. Staff approve, block, or hand off the work before any patient-facing message leaves the practice."
+        title="Patient engagement scheduling lifecycle"
+        body="Every outreach item starts from a PMS event: booking request, appointment, completed procedure, recall due, readiness blocker, intake packet, medical alert, ledger balance, or appointment status. Post-visit review, reminders, recalls, forms, and recovery work stay staff-approved before any patient-facing message leaves the practice."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/engagement" />
 
-      <section className="grid gap-3 md:grid-cols-4">
-        <Metric label="PMS triggers available" value={signalValue(signals, "completed_procedures") + signalValue(signals, "due_recalls") + signalValue(signals, "open_balances")} detail="completed care, recalls, balances" />
+      <section className="grid gap-3 md:grid-cols-5">
+        <Metric label="PMS triggers available" value={signalValue(signals, "completed_procedures") + signalValue(signals, "due_recalls") + signalValue(signals, "open_balances") + signalValue(signals, "booking_requests")} detail="booking, care, recalls, balances" />
         <Metric label="Needs approval" value={approvalCount} detail="message review required" />
         <Metric label="Recovery holds" value={blockedCount} detail="review requests blocked" />
-        <Metric label="Forms and waitlist" value={signalValue(signals, "open_forms") + signalValue(signals, "waitlist_requests")} detail="consent, forms, ASAP fill" />
+        <Metric label="Forms and waitlist" value={signalValue(signals, "open_forms") + signalValue(signals, "waitlist_requests")} detail="consent, intake, ASAP fill" />
+        <Metric label="Medical/pre-med" value={signalValue(signals, "medical_alerts") + signalValue(signals, "pre_med_alerts")} detail="clinical safety gates" />
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
@@ -211,7 +232,7 @@ export default async function EngagementPage({ searchParams }: { searchParams: P
           </div>
           <div className="grid gap-3 p-4">
             <div className="grid gap-2 lg:grid-cols-5">
-              {["Appointments", "Clinical chart", "Ledger", "Insurance", "Recall"].map((item) => (
+              {["Booking requests", "Appointments", "Clinical chart", "Forms", "Recall"].map((item) => (
                 <div key={item} className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
                   <p className="text-xs font-semibold text-neutral-950">{item}</p>
                   <p className="mt-1 text-[11px] leading-4 text-neutral-500">PMS source record</p>
@@ -223,7 +244,7 @@ export default async function EngagementPage({ searchParams }: { searchParams: P
               <p className="mt-1 text-xs leading-5 text-cyan-800">Tenant rules decide timing, channel, role ownership, consent, quiet hours, forms readiness, service recovery holds, and whether a human must approve the communication. Approval queues work for staff only; this surface does not send messages.</p>
             </div>
             <div className="grid gap-2 lg:grid-cols-4">
-              {["Patient reminders", "Post-op instructions", "Recall and waitlist", "No-show recovery"].map((item) => (
+              {["Confirmations", "Forms/intake packets", "Post-op instructions", "Recall and waitlist", "No-show recovery"].map((item) => (
                 <div key={item} className="rounded-md border border-neutral-200 bg-white px-3 py-2">
                   <p className="text-xs font-semibold text-neutral-950">{item}</p>
                   <p className="mt-1 text-[11px] leading-4 text-neutral-500">Action layer</p>
@@ -289,6 +310,12 @@ export default async function EngagementPage({ searchParams }: { searchParams: P
                       <p><span className="font-semibold text-neutral-800">Readiness:</span> {item.readinessStatus.replaceAll("_", " ")}</p>
                       <p className="mt-1"><span className="font-semibold text-neutral-800">Open forms:</span> {item.openForms}</p>
                       <p className="mt-1"><span className="font-semibold text-neutral-800">Reminder drafts:</span> {item.reminderCount}</p>
+                      <p className="mt-1"><span className="font-semibold text-neutral-800">Medical:</span> {item.medicalAlertCount} alerts · {item.preMedAlertCount} pre-med · {item.allergyCount} allergies · {item.medicationCount} meds</p>
+                      <div className="mt-2 grid gap-1 sm:grid-cols-2">
+                        <StageSourceButton patientId={item.patientId} appointmentId={item.id} eventType="APPOINTMENT_CONFIRMATION" sourceModule="PMS_APPOINTMENT" channel="SMS" triggerReason={`Confirm ${item.appointmentType} appointment on ${fmtDate(item.startsAt)}.`} messageBody="Confirmation is staged for staff approval only. Verify consent, quiet hours, forms, and medical alerts before any connector delivery." label="Stage confirmation" />
+                        <StageSourceButton patientId={item.patientId} appointmentId={item.id} eventType={item.openForms > 0 ? "INTAKE_PACKET_REMINDER" : "APPOINTMENT_REMINDER"} sourceModule={item.openForms > 0 ? "PMS_FORMS" : "PMS_APPOINTMENT"} channel="SMS" triggerReason={item.openForms > 0 ? "Open intake packet is due before visit." : `Reminder for ${item.appointmentType}.`} messageBody="Reminder is staged internally. No external send occurs until consent, quiet hours, connector readiness, and staff approval clear." label={item.openForms > 0 ? "Stage intake" : "Stage reminder"} />
+                        {item.preMedAlertCount || item.medicalAlertCount ? <StageSourceButton patientId={item.patientId} appointmentId={item.id} eventType={item.preMedAlertCount ? "PRE_MED_ALERT_REVIEW" : "MEDICAL_ALERT_REVIEW"} sourceModule="PMS_MEDICAL_ALERT" channel="PHONE" triggerReason="Medical or pre-med safety review is required before patient-facing appointment outreach." messageBody="Clinical safety task is staged internally for staff review. No clinical instruction or external send is claimed." label="Stage safety review" /> : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -313,23 +340,50 @@ export default async function EngagementPage({ searchParams }: { searchParams: P
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-3">
+        <QueueCard title="Booking request lifecycle" empty="No open booking requests" rows={bookingRequests.map((item) => ({
+          id: item.id,
+          title: `${personName(item)} · ${item.requestType}`,
+          detail: `${item.source} · ${item.preferredWindow ?? item.note ?? "No preference"} · ${consentLabel(item.consentStatus)} · quiet ${quietWindow(item.quietHoursStart, item.quietHoursEnd)} · staged ${item.stagedCount}`,
+          status: item.urgency,
+          action: item.patientId ? <StageSourceButton patientId={item.patientId} eventType="BOOKING_REQUEST_RESPONSE" sourceModule="PMS_APPOINTMENT_REQUEST" channel="SMS" triggerReason={`Booking request from ${item.source}: ${item.preferredWindow ?? item.note ?? item.requestType}.`} messageBody="Booking response is staged for staff approval only. Create or update the PMS appointment from the schedule workflow after reviewing availability." label="Stage response" /> : null,
+        }))} />
+        <QueueCard title="Forms and intake packets" empty="No open form packets" rows={formPackets.map((item) => ({
+          id: item.id,
+          title: `${item.lastName}, ${item.firstName} · ${item.templateName ?? item.formType ?? "Form packet"}`,
+          detail: `Due ${fmtDate(item.dueAt)} · ${item.appointmentType ?? "No appointment"} · ${consentLabel(item.consentStatus)} · staged ${item.stagedCount}`,
+          status: item.status,
+          action: <StageSourceButton patientId={item.patientId} appointmentId={item.appointmentId ?? undefined} eventType="INTAKE_PACKET_REMINDER" sourceModule="PMS_FORMS" channel="SMS" triggerReason={`${item.templateName ?? "Intake packet"} remains open before ${item.appointmentType ?? "the visit"}.`} messageBody="Secure forms/intake reminder is staged internally. No form link is fabricated or sent until the connector and consent gates clear." label="Stage packet" />,
+        }))} />
+        <QueueCard title="Medical and pre-med alerts" empty="No active medical alert follow-ups" rows={medicalAlerts.map((item) => ({
+          id: item.id,
+          title: `${item.lastName}, ${item.firstName} · ${item.title}`,
+          detail: `${item.details ?? "Active clinical safety alert"} · next ${item.appointmentType ?? "visit not scheduled"} ${fmtDate(item.startsAt)} · staged ${item.stagedCount}`,
+          status: item.severity,
+          action: <StageSourceButton patientId={item.patientId} appointmentId={item.appointmentId ?? undefined} eventType={item.title.toLowerCase().includes("pre") || String(item.details ?? "").toLowerCase().includes("antibiotic") ? "PRE_MED_ALERT_REVIEW" : "MEDICAL_ALERT_REVIEW"} sourceModule="PMS_MEDICAL_ALERT" channel="PHONE" triggerReason={`Active ${item.severity.toLowerCase()} medical alert: ${item.title}.`} messageBody="Clinical safety review is staged for staff only. No medical advice or patient-facing message is sent from this queue." label="Stage review" />,
+        }))} />
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-3">
         <QueueCard title="Recall and reactivation" empty="No due recall patients" rows={recallQueue.map((item) => ({
           id: item.id,
           title: `${item.lastName}, ${item.firstName} · ${item.recallType}`,
           detail: `Due ${fmtDate(item.dueDate)} · ${consentLabel(item.consentStatus)} · quiet ${quietWindow(item.quietHoursStart, item.quietHoursEnd)}`,
           status: item.status,
+          action: <StageSourceButton patientId={item.patientId} eventType="RECALL_REACTIVATION" sourceModule="PMS_RECALL" channel="SMS" triggerReason={`Recall due: ${item.recallType} on ${fmtDate(item.dueDate)}.`} messageBody="Recall/reactivation outreach is staged internally for staff approval only. No external send occurs from this workbench." label="Stage recall" />,
         }))} />
         <QueueCard title="No-show and cancel recovery" empty="No broken appointments awaiting recovery" rows={brokenAppointments.map((item) => ({
           id: item.id,
           title: `${item.lastName}, ${item.firstName} · ${item.appointmentType}`,
           detail: `${fmtDate(item.startsAt)} · reschedule before review or recall drip`,
           status: item.status,
+          action: <StageSourceButton patientId={item.patientId} appointmentId={item.id} eventType={item.status === "NO_SHOW" ? "NO_SHOW_RECOVERY" : "CANCELLATION_FILL"} sourceModule="PMS_APPOINTMENT" channel="SMS" triggerReason={`${item.status.replaceAll("_", " ")} recovery for ${item.appointmentType}.`} messageBody="Broken appointment recovery is staged internally for approval. Staff must review availability and consent before any connector delivery." label="Stage recovery" />,
         }))} />
         <QueueCard title="Waitlist and ASAP fill" empty="No open waitlist requests" rows={waitlist.map((item) => ({
           id: item.id,
           title: `${personName(item)} · ${item.requestType}`,
           detail: `${item.source} · ${item.preferredWindow ?? item.note ?? "Any matching slot"}`,
           status: item.urgency,
+          action: item.patientId ? <StageSourceButton patientId={item.patientId} eventType="WAITLIST_FILL" sourceModule="PMS_WAITLIST" channel="SMS" triggerReason={`Waitlist/ASAP request: ${item.preferredWindow ?? item.note ?? item.requestType}.`} messageBody="Waitlist fill outreach is staged for staff approval only. PMS schedule changes must be completed in the scheduler." label="Stage waitlist" /> : null,
         }))} />
       </section>
 
@@ -339,6 +393,7 @@ export default async function EngagementPage({ searchParams }: { searchParams: P
           title: `${item.lastName}, ${item.firstName} · ${item.code}`,
           detail: `${item.description} · ${fmtDate(item.serviceDate)} · ${item.postOpCount ? "post-op staged" : "needs clinical decision"}`,
           status: item.postOpCount ? "STAGED" : "OPEN",
+          action: <StageSourceButton patientId={item.patientId} appointmentId={item.appointmentId ?? undefined} procedureLogId={item.id} eventType="POST_OP_INSTRUCTIONS" sourceModule="PMS_PROCEDURE_LOG" channel="SMS" triggerReason={`Completed procedure ${item.code}: ${item.description}.`} messageBody="Post-op instructions are staged for clinical review and staff approval only. No patient-facing medical instruction is sent from this action." label="Stage post-op" />,
         }))} />
         <QueueCard title="Cross-module PMS tasks" empty="No open engagement handoff tasks" rows={crossModuleTasks.map((item) => ({
           id: item.id,
@@ -385,7 +440,7 @@ export default async function EngagementPage({ searchParams }: { searchParams: P
                     <td className="max-w-xl px-4 py-3">
                       <p className="text-xs font-semibold text-neutral-700">{event.triggerReason}</p>
                       <p className="mt-1 text-xs leading-5 text-neutral-600">{event.messageBody}</p>
-                      <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-neutral-500">Consent {consentLabel(event.consentStatus)} · quiet {quietWindow(event.quietHoursStart, event.quietHoursEnd)} · forms {event.openForms} · tasks {event.openTasks}</p>
+                      <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-neutral-500">Consent {consentLabel(event.consentStatus)} · quiet {quietWindow(event.quietHoursStart, event.quietHoursEnd)} · forms {event.openForms} · medical {event.medicalAlertCount} · pre-med {event.preMedAlertCount} · tasks {event.openTasks}</p>
                     </td>
                     <td className="px-4 py-3">
                       <StatusFor value={event.status} />
@@ -458,6 +513,42 @@ function StatusButton({ eventId, status, label }: { eventId: string; status: str
   );
 }
 
+function StageSourceButton({
+  patientId,
+  appointmentId,
+  procedureLogId,
+  eventType,
+  sourceModule,
+  channel,
+  triggerReason,
+  messageBody,
+  label,
+}: {
+  patientId: string;
+  appointmentId?: string;
+  procedureLogId?: string;
+  eventType: string;
+  sourceModule: string;
+  channel: string;
+  triggerReason: string;
+  messageBody: string;
+  label: string;
+}) {
+  return (
+    <form action={stageAction}>
+      <input type="hidden" name="patientId" value={patientId} />
+      <input type="hidden" name="appointmentId" value={appointmentId ?? ""} />
+      <input type="hidden" name="procedureLogId" value={procedureLogId ?? ""} />
+      <input type="hidden" name="eventType" value={eventType} />
+      <input type="hidden" name="sourceModule" value={sourceModule} />
+      <input type="hidden" name="channel" value={channel} />
+      <input type="hidden" name="triggerReason" value={triggerReason} />
+      <input type="hidden" name="messageBody" value={messageBody} />
+      <button className="w-full rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50">{label}</button>
+    </form>
+  );
+}
+
 function Metric({ label, value, detail }: { label: string; value: number; detail: string }) {
   return (
     <div className="rounded-lg border border-neutral-200 bg-white px-4 py-3 shadow-sm">
@@ -480,7 +571,7 @@ function Panel({ eyebrow, title, children }: { eyebrow: string; title: string; c
   );
 }
 
-function QueueCard({ title, empty, rows }: { title: string; empty: string; rows: Array<{ id: string; title: string; detail: string; status: string }> }) {
+function QueueCard({ title, empty, rows }: { title: string; empty: string; rows: Array<{ id: string; title: string; detail: string; status: string; action?: ReactNode | null }> }) {
   return (
     <div className="rounded-lg border border-neutral-200 bg-white shadow-sm">
       <div className="border-b border-neutral-100 px-4 py-3">
@@ -494,6 +585,7 @@ function QueueCard({ title, empty, rows }: { title: string; empty: string; rows:
               <StatusFor value={row.status} />
             </div>
             <p className="mt-2 text-xs leading-5 text-neutral-600">{row.detail}</p>
+            {row.action ? <div className="mt-3">{row.action}</div> : null}
           </div>
         )) : <EmptyPmsState title={empty} body="This queue is sourced from PMS records and only creates internal follow-up work until a real communications connector is configured." />}
       </div>

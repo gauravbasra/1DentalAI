@@ -49,7 +49,7 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
 
       <section className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <PmsCard title="Practice intelligence" eyebrow="Revenue, schedule capacity, provider pace">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             {intelligence.insights.map((insight) => (
               <InsightCard key={insight.label} insight={insight} />
             ))}
@@ -57,6 +57,15 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
           <div className="mt-4 grid gap-4 xl:grid-cols-2">
             <ChartCard title="14-day production" rows={intelligence.productionTrend} valueKey="scheduledCents" labelKey="day" format="money" secondaryKey="completedCents" />
             <ChartCard title="8-week booked production" rows={intelligence.calendarForecast} valueKey="scheduledCents" labelKey="weekStart" format="money" detailKey="appointmentCount" detailSuffix="visits" />
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            {intelligence.bookedProductionHorizon.map((row) => (
+              <div key={row.horizon} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-neutral-500">{row.horizon}</p>
+                <p className="mt-2 text-xl font-semibold text-neutral-950"><Money cents={row.scheduledCents} /></p>
+                <p className="mt-1 text-xs leading-5 text-neutral-600">{row.appointmentCount} visits · {Math.round(row.bookedMinutes / 60)} chair hours · {row.providerCount} providers · {row.roomCount} rooms</p>
+              </div>
+            ))}
           </div>
         </PmsCard>
 
@@ -83,8 +92,8 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
           <RankedBars
             rows={intelligence.serviceMix}
             label={(row) => row.serviceLine}
-            value={(row) => row.scheduledCents}
-            detail={(row) => `${moneyText(row.scheduledCents)} · ${Math.round(row.bookedMinutes / 60)}h · booked until ${shortDate(row.bookedUntil)}`}
+            value={(row) => row.last90RevenueCents || row.scheduledCents}
+            detail={(row) => `${moneyText(row.last90RevenueCents)} actual · ${moneyText(row.scheduledCents)} booked · ${Math.round(row.bookedMinutes / 60)}h`}
           />
         </PmsCard>
 
@@ -92,8 +101,8 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
           <RankedBars
             rows={intelligence.providerProduction}
             label={(row) => row.providerName}
-            value={(row) => row.scheduledCents}
-            detail={(row) => `${moneyText(row.scheduledCents)} · ${row.appointmentCount} visits · ${Math.round(row.bookedMinutes / 60)}h`}
+            value={(row) => row.scheduledCents || row.last30RevenueCents}
+            detail={(row) => `${moneyText(row.last30RevenueCents)} actual · ${moneyText(row.scheduledCents)} booked · ${row.completedProcedureCount} procedures`}
           />
         </PmsCard>
 
@@ -102,7 +111,36 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
             rows={intelligence.payerMix}
             label={(row) => row.payerName}
             value={(row) => row.billedCents}
-            detail={(row) => `${moneyText(row.paidCents)} paid · ${moneyText(row.patientDueCents)} patient due · ${row.denialCount} denials`}
+            detail={(row) => `${row.collectionRate}% collected · ${moneyText(row.openCents)} open · ${moneyText(row.patientDueCents)} patient due · ${row.denialCount} denials`}
+          />
+        </PmsCard>
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-[0.8fr_0.8fr_1.2fr]">
+        <PmsCard title="Hygiene and recall health" eyebrow="Due, overdue, reappointed">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MiniStat label="Due recall" value={intelligence.hygieneRecall.dueCount} detail={`${intelligence.hygieneRecall.overdueCount} overdue`} />
+            <MiniStat label="Unscheduled due" value={intelligence.hygieneRecall.unscheduledDueCount} detail={<Money cents={intelligence.hygieneRecall.recallOpportunityCents} />} />
+            <MiniStat label="Future recall booked" value={intelligence.hygieneRecall.futureRecallBookedCount} detail="active patients" />
+            <MiniStat label="Reappointment" value={`${intelligence.hygieneRecall.reappointmentRate}%`} detail={`${intelligence.hygieneRecall.hygieneReappointed30}/${intelligence.hygieneRecall.hygieneVisits30} visits`} />
+          </div>
+        </PmsCard>
+
+        <PmsCard title="No-show/cancel impact" eyebrow="Last 30 days">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MiniStat label="Broken visits" value={intelligence.noShowCancelImpact.brokenCount} detail={`${intelligence.noShowCancelImpact.noShowCount} no-show · ${intelligence.noShowCancelImpact.cancelCount} cancel`} />
+            <MiniStat label="Lost production" value={<Money cents={intelligence.noShowCancelImpact.lostProductionCents} />} detail="scheduled value" />
+            <MiniStat label="Recovered" value={intelligence.noShowCancelImpact.recoveredCount} detail={<Money cents={intelligence.noShowCancelImpact.recoveredProductionCents} />} />
+            <MiniStat label="Still unscheduled" value={intelligence.noShowCancelImpact.unscheduledPatientCount} detail="patients" />
+          </div>
+        </PmsCard>
+
+        <PmsCard title="Rooms/provider production chart" eyebrow="Next 30 days">
+          <RankedBars
+            rows={intelligence.roomProviderProduction}
+            label={(row) => `${row.roomName} / ${row.providerName}`}
+            value={(row) => row.scheduledCents}
+            detail={(row) => `${row.appointmentCount} visits · ${Math.round(row.bookedMinutes / 60)}h · ${moneyText(row.completedCents)} completed`}
           />
         </PmsCard>
       </section>
@@ -232,6 +270,16 @@ function Metric({ label, value, detail }: { label: string; value: React.ReactNod
       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p>
       <p className="mt-1 text-2xl font-semibold tracking-tight text-neutral-950">{value}</p>
       <p className="mt-0.5 text-xs text-neutral-500">{detail}</p>
+    </div>
+  );
+}
+
+function MiniStat({ label, value, detail }: { label: string; value: React.ReactNode; detail: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-neutral-500">{label}</p>
+      <p className="mt-2 text-xl font-semibold text-neutral-950">{value}</p>
+      <p className="mt-1 text-xs leading-5 text-neutral-600">{detail}</p>
     </div>
   );
 }

@@ -24,15 +24,15 @@ export default async function AppLogin({
 
   return (
     <main className="min-h-screen bg-[#f3f4f6] text-neutral-950">
-      <section className="mx-auto grid min-h-screen max-w-7xl items-center gap-10 px-6 py-10 lg:grid-cols-[0.9fr_1.1fr]">
-        <div>
+      <section className="mx-auto grid min-h-screen max-w-7xl items-center gap-8 px-5 py-8 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:gap-10">
+        <div className="min-w-0">
           <Link href="/" className="text-base font-semibold tracking-tight text-neutral-950">
             1DentalAI
           </Link>
           <p className="mt-8 text-sm font-semibold uppercase tracking-[0.16em] text-cyan-700">
             Secure practice workspace
           </p>
-          <h1 className="mt-5 max-w-3xl text-5xl font-semibold tracking-tight text-neutral-950 sm:text-7xl">
+          <h1 className="mt-5 max-w-3xl text-4xl font-semibold tracking-tight text-neutral-950 text-balance sm:text-6xl">
             Sign in to your dental operating system.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-neutral-600">

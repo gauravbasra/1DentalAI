@@ -4,7 +4,7 @@ import { navItems } from "@/lib/site-data";
 export function SiteHeader() {
   return (
     <header className="sticky left-0 right-0 top-0 z-50 border-b border-black/10 bg-white/82 backdrop-blur-2xl">
-      <nav className="mx-auto flex min-h-14 max-w-7xl items-center justify-between px-5 py-3 sm:px-8">
+      <nav className="mx-auto flex min-h-14 max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-3 sm:px-8">
         <Link href="/" className="flex items-center gap-2 text-sm font-semibold tracking-tight text-neutral-950" aria-label="1DentalAI home">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-700 text-base font-black text-white">
             1
@@ -25,19 +25,19 @@ export function SiteHeader() {
         <div className="flex items-center gap-2">
           <Link
             href="/app"
-            className="hidden rounded-full border border-neutral-300 px-4 py-2 text-xs font-semibold text-neutral-800 transition hover:border-neutral-950 sm:inline-flex"
+            className="inline-flex min-h-9 items-center rounded-md border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-800 transition hover:border-neutral-950"
           >
-            Open platform
+            Sign in
           </Link>
           <Link
             href="/contact"
-            className="rounded-full bg-neutral-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-cyan-700"
+            className="inline-flex min-h-9 items-center rounded-md bg-neutral-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-700"
           >
             Request access
           </Link>
         </div>
       </nav>
-      <div className="mx-auto flex max-w-7xl gap-5 overflow-x-auto px-5 pb-3 sm:px-8 lg:hidden">
+      <div className="app-scrollbar mx-auto flex max-w-7xl gap-5 overflow-x-auto px-5 pb-3 sm:px-8 lg:hidden">
         {navItems.map((item) => (
           <Link
             key={item.href}
