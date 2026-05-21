@@ -5,10 +5,13 @@ export const pmsNav = [
   { href: "/app/pms", label: "Command" },
   { href: "/app/pms/schedule", label: "Schedule" },
   { href: "/app/pms/patients", label: "Patients" },
+  { href: "/app/pms/imaging", label: "Imaging" },
   { href: "/app/pms/treatment-plans", label: "Treatment" },
   { href: "/app/pms/ledger", label: "Ledger" },
   { href: "/app/pms/insurance", label: "Insurance" },
+  { href: "/app/pms/labs", label: "Labs" },
   { href: "/app/pms/documents", label: "Documents" },
+  { href: "/app/pms/reports", label: "Reports" },
   { href: "/app/pms/tasks", label: "Tasks" },
 ];
 

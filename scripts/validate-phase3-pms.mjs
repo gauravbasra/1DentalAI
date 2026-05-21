@@ -7,10 +7,13 @@ const requiredFiles = [
   "src/app/app/pms/patients/[patientId]/page.tsx",
   "src/app/app/pms/chart/[patientId]/page.tsx",
   "src/app/app/pms/perio/[patientId]/page.tsx",
+  "src/app/app/pms/imaging/page.tsx",
   "src/app/app/pms/treatment-plans/page.tsx",
   "src/app/app/pms/ledger/page.tsx",
   "src/app/app/pms/insurance/page.tsx",
+  "src/app/app/pms/labs/page.tsx",
   "src/app/app/pms/documents/page.tsx",
+  "src/app/app/pms/reports/page.tsx",
   "src/app/app/pms/tasks/page.tsx",
   "src/app/api/pms/patients/route.ts",
   "src/app/api/pms/schedule/route.ts",
@@ -39,6 +42,9 @@ const requiredSchemaModels = [
   "PmsLedgerEntry",
   "PmsLedgerAdjustment",
   "PmsDocument",
+  "PmsImagingStudy",
+  "PmsPrescription",
+  "PmsReferral",
   "PmsLabCase",
   "PmsTask",
 ];
@@ -76,6 +82,10 @@ const chartPage = fs.readFileSync("src/app/app/pms/chart/[patientId]/page.tsx", 
 const treatmentPlanPage = fs.readFileSync("src/app/app/pms/treatment-plans/page.tsx", "utf8");
 const insurancePage = fs.readFileSync("src/app/app/pms/insurance/page.tsx", "utf8");
 const ledgerPage = fs.readFileSync("src/app/app/pms/ledger/page.tsx", "utf8");
+const imagingPage = fs.readFileSync("src/app/app/pms/imaging/page.tsx", "utf8");
+const labsPage = fs.readFileSync("src/app/app/pms/labs/page.tsx", "utf8");
+const documentsPage = fs.readFileSync("src/app/app/pms/documents/page.tsx", "utf8");
+const reportsPage = fs.readFileSync("src/app/app/pms/reports/page.tsx", "utf8");
 for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addToothCondition", "addProcedureLog", "Treatment plan builder", "addTreatmentPlanItem", "updateTreatmentPlanStatus"]) {
   const haystack = `${schema}\n${patientsPage}\n${patientRecordPage}\n${chartPage}\n${treatmentPlanPage}\n${insurancePage}\n${ledgerPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
@@ -88,6 +98,14 @@ for (const token of ["createInsurancePlan", "attachInsuranceToPatient", "createC
   const haystack = `${schema}\n${insurancePage}\n${ledgerPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS financial workflow token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["createImagingStudy", "createLabCase", "createDocument", "createPrescription", "createReferral", "getPmsReports", "Imaging orders", "Lab case tracking", "Prescription register", "Practice performance reports"]) {
+  const haystack = `${schema}\n${imagingPage}\n${labsPage}\n${documentsPage}\n${reportsPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+  if (!haystack.includes(token)) {
+    console.error(`PMS completion workflow token missing: ${token}`);
     process.exit(1);
   }
 }

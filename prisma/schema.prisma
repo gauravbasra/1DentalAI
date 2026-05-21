@@ -734,16 +734,87 @@ model PmsDocument {
   id             String   @id @default(cuid())
   tenantId       String
   patientId      String?
+  claimId        String?
+  appointmentId  String?
   documentType   String
   title          String
   storageUri     String?
   status         String   @default("REQUIRED")
   signatureStatus String  @default("NOT_REQUIRED")
+  sourceModule   String?
+  reviewedByRole String?
+  reviewedAt     DateTime?
+  expiresAt       DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   @@index([tenantId, status])
   @@index([patientId, documentType])
+  @@index([claimId, documentType])
+}
+
+model PmsImagingStudy {
+  id                String   @id @default(cuid())
+  tenantId          String
+  patientId         String
+  providerId        String?
+  appointmentId     String?
+  studyType         String
+  acquisitionStatus String   @default("ORDERED")
+  tooth             String?
+  region            String?
+  dicomStudyUid     String?
+  storageUri        String?
+  findings          String?
+  aiReviewStatus    String   @default("NOT_REQUESTED")
+  takenAt           DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantId, acquisitionStatus])
+  @@index([patientId, takenAt])
+}
+
+model PmsPrescription {
+  id             String   @id @default(cuid())
+  tenantId       String
+  patientId      String
+  providerId     String?
+  medicationName String
+  dosage         String?
+  directions     String
+  quantity       String?
+  refills        Int      @default(0)
+  pharmacyName   String?
+  pharmacyPhone  String?
+  status         String   @default("DRAFT")
+  writtenAt      DateTime @default(now())
+  sentAt         DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([patientId, writtenAt])
+}
+
+model PmsReferral {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  patientId           String
+  providerId          String?
+  referralType        String
+  referredToName      String
+  referredToSpecialty String?
+  referredToPhone     String?
+  reason              String
+  status              String   @default("DRAFT")
+  dueAt               DateTime?
+  sentAt              DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([patientId, createdAt])
 }
 
 model PmsLabCase {

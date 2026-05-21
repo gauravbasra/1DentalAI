@@ -290,7 +290,7 @@ export async function getFamilyMembers(patientId: string) {
 }
 
 export async function getPatientAccount(patientId: string) {
-  const [ledger, insurance, claims, treatmentPlans, recalls, documents] = await Promise.all([
+  const [ledger, insurance, claims, treatmentPlans, recalls, documents, imaging, labCases, prescriptions, referrals] = await Promise.all([
     query(`select * from "PmsLedgerEntry" where "patientId" = $1 order by "postedAt" desc limit 50`, [patientId]),
     query(
       `select pi.*, ip."payerName", ip."planName", ip."groupNumber", bs."annualMaxCents", bs."annualUsedCents", bs."frequencies", bs."limitations"
@@ -305,6 +305,10 @@ export async function getPatientAccount(patientId: string) {
     query(`select * from "PmsTreatmentPlan" where "patientId" = $1 order by "updatedAt" desc`, [patientId]),
     query(`select * from "PmsRecall" where "patientId" = $1 order by "dueDate" asc`, [patientId]),
     query(`select * from "PmsDocument" where "patientId" = $1 order by "updatedAt" desc`, [patientId]),
+    query(`select * from "PmsImagingStudy" where "patientId" = $1 order by "takenAt" desc nulls first, "updatedAt" desc`, [patientId]),
+    query(`select * from "PmsLabCase" where "patientId" = $1 order by "dueDate" asc nulls last`, [patientId]),
+    query(`select * from "PmsPrescription" where "patientId" = $1 order by "writtenAt" desc`, [patientId]),
+    query(`select * from "PmsReferral" where "patientId" = $1 order by "createdAt" desc`, [patientId]),
   ]);
 
   return {
@@ -314,6 +318,10 @@ export async function getPatientAccount(patientId: string) {
     treatmentPlans: treatmentPlans.rows,
     recalls: recalls.rows,
     documents: documents.rows,
+    imaging: imaging.rows,
+    labCases: labCases.rows,
+    prescriptions: prescriptions.rows,
+    referrals: referrals.rows,
   };
 }
 
@@ -1009,11 +1017,360 @@ export async function postPatientPayment(input: { tenantId?: string; patientId: 
 
 export async function listDocuments(tenantId = defaultTenantId) {
   return (await query(
-    `select d.*, p."firstName", p."lastName"
+    `select d.*, p."firstName", p."lastName", p."chartNumber", c."claimNumber"
      from "PmsDocument" d left join "PmsPatient" p on p."id" = d."patientId"
+     left join "PmsClaim" c on c."id" = d."claimId"
      where d."tenantId" = $1 order by d."updatedAt" desc`,
     [tenantId],
   )).rows;
+}
+
+export async function createDocument(input: {
+  tenantId?: string;
+  patientId?: string;
+  claimId?: string;
+  appointmentId?: string;
+  documentType: string;
+  title: string;
+  storageUri?: string;
+  sourceModule?: string;
+  signatureStatus?: string;
+  status?: string;
+  expiresAt?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("doc");
+  const result = await query(
+    `insert into "PmsDocument"
+       ("id", "tenantId", "patientId", "claimId", "appointmentId", "documentType", "title", "storageUri", "sourceModule", "signatureStatus", "status", "expiresAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10, 'NOT_REQUIRED'), coalesce($11, 'RECEIVED'), $12::timestamp, current_timestamp)
+     returning *`,
+    [
+      id,
+      tenantId,
+      input.patientId || null,
+      input.claimId || null,
+      input.appointmentId || null,
+      input.documentType.trim(),
+      input.title.trim(),
+      input.storageUri?.trim() || null,
+      input.sourceModule?.trim() || "PMS",
+      input.signatureStatus?.trim() || null,
+      input.status?.trim() || null,
+      input.expiresAt || null,
+    ],
+  );
+  await addAudit(tenantId, "front_desk", "DOCUMENT_CREATED", "PmsDocument", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function updateDocumentStatus(documentId: string, status: string, actorRole = "front_desk") {
+  const result = await query<{ id: string; tenantId: string }>(
+    `update "PmsDocument"
+     set "status" = $2, "reviewedByRole" = $3, "reviewedAt" = current_timestamp, "updatedAt" = current_timestamp
+     where "id" = $1 returning "id", "tenantId"`,
+    [documentId, status, actorRole],
+  );
+  const row = result.rows[0] ?? null;
+  if (row) await addAudit(row.tenantId, actorRole, "DOCUMENT_STATUS_UPDATED", "PmsDocument", documentId, "ALLOWED");
+  return row;
+}
+
+export async function listLabCases(tenantId = defaultTenantId) {
+  return (await query(
+    `select lc.*, p."firstName", p."lastName", p."chartNumber", a."startsAt"::text as "appointmentStartsAt"
+     from "PmsLabCase" lc
+     left join "PmsPatient" p on p."id" = lc."patientId"
+     left join "PmsAppointment" a on a."id" = lc."appointmentId"
+     where lc."tenantId" = $1
+     order by lc."dueDate" asc nulls last, lc."updatedAt" desc`,
+    [tenantId],
+  )).rows;
+}
+
+export async function createLabCase(input: {
+  tenantId?: string;
+  patientId?: string;
+  appointmentId?: string;
+  labName: string;
+  caseType: string;
+  dueDate?: string;
+  trackingNumber?: string;
+  shade?: string;
+  notes?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("lab");
+  const result = await query(
+    `insert into "PmsLabCase"
+       ("id", "tenantId", "patientId", "appointmentId", "labName", "caseType", "status", "dueDate", "trackingNumber", "shade", "notes", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'ORDERED', $7::timestamp, $8, $9, $10, current_timestamp)
+     returning *`,
+    [
+      id,
+      tenantId,
+      input.patientId || null,
+      input.appointmentId || null,
+      input.labName.trim(),
+      input.caseType.trim(),
+      input.dueDate || null,
+      input.trackingNumber?.trim() || null,
+      input.shade?.trim() || null,
+      input.notes?.trim() || null,
+    ],
+  );
+  await addAudit(tenantId, "dental_assistant", "LAB_CASE_CREATED", "PmsLabCase", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function updateLabCaseStatus(labCaseId: string, status: string) {
+  const result = await query<{ id: string; tenantId: string }>(
+    `update "PmsLabCase" set "status" = $2, "updatedAt" = current_timestamp where "id" = $1 returning "id", "tenantId"`,
+    [labCaseId, status],
+  );
+  const row = result.rows[0] ?? null;
+  if (row) await addAudit(row.tenantId, "dental_assistant", "LAB_CASE_STATUS_UPDATED", "PmsLabCase", labCaseId, "ALLOWED");
+  return row;
+}
+
+export async function listImagingStudies(tenantId = defaultTenantId) {
+  return (await query(
+    `select img.*, p."firstName", p."lastName", p."chartNumber", pr."displayName" as "providerName"
+     from "PmsImagingStudy" img
+     join "PmsPatient" p on p."id" = img."patientId"
+     left join "PmsProvider" pr on pr."id" = img."providerId"
+     where img."tenantId" = $1
+     order by img."takenAt" desc nulls first, img."updatedAt" desc`,
+    [tenantId],
+  )).rows;
+}
+
+export async function createImagingStudy(input: {
+  tenantId?: string;
+  patientId: string;
+  providerId?: string;
+  appointmentId?: string;
+  studyType: string;
+  acquisitionStatus?: string;
+  tooth?: string;
+  region?: string;
+  dicomStudyUid?: string;
+  storageUri?: string;
+  findings?: string;
+  aiReviewStatus?: string;
+  takenAt?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("img");
+  const result = await query(
+    `insert into "PmsImagingStudy"
+       ("id", "tenantId", "patientId", "providerId", "appointmentId", "studyType", "acquisitionStatus", "tooth", "region", "dicomStudyUid", "storageUri", "findings", "aiReviewStatus", "takenAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, coalesce($7, 'ORDERED'), $8, $9, $10, $11, $12, coalesce($13, 'NOT_REQUESTED'), $14::timestamp, current_timestamp)
+     returning *`,
+    [
+      id,
+      tenantId,
+      input.patientId,
+      input.providerId || null,
+      input.appointmentId || null,
+      input.studyType.trim(),
+      input.acquisitionStatus?.trim() || null,
+      input.tooth?.trim() || null,
+      input.region?.trim() || null,
+      input.dicomStudyUid?.trim() || null,
+      input.storageUri?.trim() || null,
+      input.findings?.trim() || null,
+      input.aiReviewStatus?.trim() || null,
+      input.takenAt || null,
+    ],
+  );
+  await addAudit(tenantId, "associate_provider", "IMAGING_STUDY_CREATED", "PmsImagingStudy", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function listPrescriptions(tenantId = defaultTenantId) {
+  return (await query(
+    `select rx.*, p."firstName", p."lastName", p."chartNumber", pr."displayName" as "providerName"
+     from "PmsPrescription" rx
+     join "PmsPatient" p on p."id" = rx."patientId"
+     left join "PmsProvider" pr on pr."id" = rx."providerId"
+     where rx."tenantId" = $1
+     order by rx."writtenAt" desc`,
+    [tenantId],
+  )).rows;
+}
+
+export async function createPrescription(input: {
+  tenantId?: string;
+  patientId: string;
+  providerId?: string;
+  medicationName: string;
+  dosage?: string;
+  directions: string;
+  quantity?: string;
+  refills?: number;
+  pharmacyName?: string;
+  pharmacyPhone?: string;
+  status?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("rx");
+  const result = await query(
+    `insert into "PmsPrescription"
+       ("id", "tenantId", "patientId", "providerId", "medicationName", "dosage", "directions", "quantity", "refills", "pharmacyName", "pharmacyPhone", "status", "sentAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9::int, 0), $10, $11, coalesce($12, 'DRAFT'), case when $12 = 'SENT' then current_timestamp else null end, current_timestamp)
+     returning *`,
+    [
+      id,
+      tenantId,
+      input.patientId,
+      input.providerId || null,
+      input.medicationName.trim(),
+      input.dosage?.trim() || null,
+      input.directions.trim(),
+      input.quantity?.trim() || null,
+      input.refills ?? 0,
+      input.pharmacyName?.trim() || null,
+      input.pharmacyPhone?.trim() || null,
+      input.status?.trim() || null,
+    ],
+  );
+  await addAudit(tenantId, "associate_provider", "PRESCRIPTION_CREATED", "PmsPrescription", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function listReferrals(tenantId = defaultTenantId) {
+  return (await query(
+    `select ref.*, p."firstName", p."lastName", p."chartNumber", pr."displayName" as "providerName"
+     from "PmsReferral" ref
+     join "PmsPatient" p on p."id" = ref."patientId"
+     left join "PmsProvider" pr on pr."id" = ref."providerId"
+     where ref."tenantId" = $1
+     order by ref."dueAt" asc nulls last, ref."createdAt" desc`,
+    [tenantId],
+  )).rows;
+}
+
+export async function createReferral(input: {
+  tenantId?: string;
+  patientId: string;
+  providerId?: string;
+  referralType: string;
+  referredToName: string;
+  referredToSpecialty?: string;
+  referredToPhone?: string;
+  reason: string;
+  status?: string;
+  dueAt?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("ref");
+  const result = await query(
+    `insert into "PmsReferral"
+       ("id", "tenantId", "patientId", "providerId", "referralType", "referredToName", "referredToSpecialty", "referredToPhone", "reason", "status", "dueAt", "sentAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10, 'DRAFT'), $11::timestamp, case when $10 = 'SENT' then current_timestamp else null end, current_timestamp)
+     returning *`,
+    [
+      id,
+      tenantId,
+      input.patientId,
+      input.providerId || null,
+      input.referralType.trim(),
+      input.referredToName.trim(),
+      input.referredToSpecialty?.trim() || null,
+      input.referredToPhone?.trim() || null,
+      input.reason.trim(),
+      input.status?.trim() || null,
+      input.dueAt || null,
+    ],
+  );
+  await addAudit(tenantId, "associate_provider", "REFERRAL_CREATED", "PmsReferral", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function getPmsReports(tenantId = defaultTenantId) {
+  const [production, collections, providers, schedule, insurance, aging] = await Promise.all([
+    query<{ productionCents: string; completedCents: string }>(
+      `select coalesce(sum("productionCents"), 0)::text as "productionCents",
+        coalesce(sum(case when "status" = 'COMPLETED' then "productionCents" else 0 end), 0)::text as "completedCents"
+       from "PmsAppointment" where "tenantId" = $1 and "startsAt" >= current_date - interval '30 days'`,
+      [tenantId],
+    ),
+    query<{ chargesCents: string; paymentsCents: string; balanceCents: string }>(
+      `select
+        coalesce(sum(case when "amountCents" > 0 then "amountCents" else 0 end), 0)::text as "chargesCents",
+        abs(coalesce(sum(case when "amountCents" < 0 then "amountCents" else 0 end), 0))::text as "paymentsCents",
+        coalesce(sum("balanceCents"), 0)::text as "balanceCents"
+       from "PmsLedgerEntry" where "tenantId" = $1`,
+      [tenantId],
+    ),
+    query(
+      `select coalesce(pr."displayName", 'Unassigned') as "providerName",
+        count(a."id")::int as "appointmentCount",
+        coalesce(sum(a."productionCents"), 0)::int as "productionCents"
+       from "PmsAppointment" a
+       left join "PmsProvider" pr on pr."id" = a."providerId"
+       where a."tenantId" = $1 and a."startsAt" >= current_date - interval '30 days'
+       group by pr."displayName"
+       order by coalesce(sum(a."productionCents"), 0) desc`,
+      [tenantId],
+    ),
+    query<{ scheduled: string; completed: string; broken: string }>(
+      `select count(*)::text as scheduled,
+        count(*) filter (where "status" = 'COMPLETED')::text as completed,
+        count(*) filter (where "status" in ('CANCELED', 'NO_SHOW', 'BROKEN'))::text as broken
+       from "PmsAppointment" where "tenantId" = $1 and "startsAt" >= current_date - interval '30 days'`,
+      [tenantId],
+    ),
+    query<{ openClaims: string; billedCents: string; paidCents: string }>(
+      `select count(*)::text as "openClaims",
+        coalesce(sum("billedCents"), 0)::text as "billedCents",
+        coalesce(sum("paidCents"), 0)::text as "paidCents"
+       from "PmsClaim" where "tenantId" = $1 and "status" not in ('PAID', 'CLOSED', 'VOID')`,
+      [tenantId],
+    ),
+    query(
+      `select bucket, count(*)::int as "claimCount", coalesce(sum("billedCents" - "paidCents"), 0)::int as "exposureCents"
+       from (
+         select "billedCents", "paidCents",
+          case
+            when "createdAt" >= current_date - interval '30 days' then '0-30'
+            when "createdAt" >= current_date - interval '60 days' then '31-60'
+            when "createdAt" >= current_date - interval '90 days' then '61-90'
+            else '90+'
+          end as bucket
+         from "PmsClaim"
+         where "tenantId" = $1 and "status" not in ('PAID', 'CLOSED', 'VOID')
+       ) claims
+       group by bucket
+       order by bucket`,
+      [tenantId],
+    ),
+  ]);
+
+  return {
+    production: {
+      productionCents: Number(production.rows[0]?.productionCents ?? 0),
+      completedCents: Number(production.rows[0]?.completedCents ?? 0),
+    },
+    collections: {
+      chargesCents: Number(collections.rows[0]?.chargesCents ?? 0),
+      paymentsCents: Number(collections.rows[0]?.paymentsCents ?? 0),
+      balanceCents: Number(collections.rows[0]?.balanceCents ?? 0),
+    },
+    providers: providers.rows,
+    schedule: {
+      scheduled: Number(schedule.rows[0]?.scheduled ?? 0),
+      completed: Number(schedule.rows[0]?.completed ?? 0),
+      broken: Number(schedule.rows[0]?.broken ?? 0),
+    },
+    insurance: {
+      openClaims: Number(insurance.rows[0]?.openClaims ?? 0),
+      billedCents: Number(insurance.rows[0]?.billedCents ?? 0),
+      paidCents: Number(insurance.rows[0]?.paidCents ?? 0),
+    },
+    aging: aging.rows,
+  };
 }
 
 export async function listTasks(tenantId = defaultTenantId, role?: string) {

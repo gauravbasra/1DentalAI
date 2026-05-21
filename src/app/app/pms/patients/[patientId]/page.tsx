@@ -72,6 +72,18 @@ export default async function PatientRecordPage({ params, searchParams }: { para
               <p className="font-semibold text-neutral-950">Account</p>
               <p className="mt-2 text-sm leading-6 text-neutral-600">Ledger, claims, insurance, estimates, patient due, documents, and payment follow-up.</p>
             </Link>
+            <Link href={`/app/pms/imaging?role=${role.key}`} className="rounded-3xl bg-neutral-50 p-5 transition hover:bg-cyan-50">
+              <p className="font-semibold text-neutral-950">Imaging</p>
+              <p className="mt-2 text-sm leading-6 text-neutral-600">X-rays, CBCT, intraoral photos, DICOM identifiers, findings, and review status.</p>
+            </Link>
+            <Link href={`/app/pms/labs?role=${role.key}`} className="rounded-3xl bg-neutral-50 p-5 transition hover:bg-cyan-50">
+              <p className="font-semibold text-neutral-950">Labs</p>
+              <p className="mt-2 text-sm leading-6 text-neutral-600">Outside lab cases, due dates, delivery status, shade, tracking, and remake risk.</p>
+            </Link>
+            <Link href={`/app/pms/documents?role=${role.key}`} className="rounded-3xl bg-neutral-50 p-5 transition hover:bg-cyan-50">
+              <p className="font-semibold text-neutral-950">Documents</p>
+              <p className="mt-2 text-sm leading-6 text-neutral-600">Forms, consents, EOBs, statements, prescriptions, and referrals attached to the chart.</p>
+            </Link>
           </div>
         </PmsCard>
       </section>
@@ -93,12 +105,16 @@ export default async function PatientRecordPage({ params, searchParams }: { para
             <Row label="Open claims">{account.claims.length}</Row>
             <Row label="Ledger entries">{account.ledger.length}</Row>
             <Row label="Treatment plans">{account.treatmentPlans.length}</Row>
+            <Row label="Lab cases">{account.labCases.length}</Row>
           </div>
         </PmsCard>
         <PmsCard title="Recall and documents" eyebrow="Patient access">
           <div className="grid gap-3 text-sm">
             <Row label="Recall items">{account.recalls.length}</Row>
             <Row label="Documents">{account.documents.length}</Row>
+            <Row label="Imaging studies">{account.imaging.length}</Row>
+            <Row label="Prescriptions">{account.prescriptions.length}</Row>
+            <Row label="Referrals">{account.referrals.length}</Row>
             <Row label="Patient note">{patient.patientNote ?? "none"}</Row>
           </div>
         </PmsCard>
