@@ -1,0 +1,304 @@
+import "server-only";
+
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { pbkdf2 as pbkdf2Callback, randomBytes, timingSafeEqual, createHash, createHmac } from "crypto";
+import { promisify } from "util";
+import { query, newId } from "@/lib/db";
+import { defaultTenantId } from "@/lib/pms-repository";
+
+const pbkdf2 = promisify(pbkdf2Callback);
+const sessionCookieName = "__Host-1dentalai_session";
+const sessionMaxAgeSeconds = 60 * 60 * 8;
+const passwordIterations = 310_000;
+
+type AuthUserRow = {
+  id: string;
+  tenantId: string;
+  email: string;
+  displayName: string;
+  roleKey: string;
+  status: string;
+  passwordHash: string;
+  passwordSalt: string;
+  passwordIterations: number;
+  lockedUntil: Date | null;
+};
+
+type AuthSessionRow = {
+  id: string;
+  tenantId: string;
+  userId: string;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  displayName: string;
+  email: string;
+  roleKey: string;
+  status: string;
+};
+
+export type AuthActionState = {
+  ok?: boolean;
+  message?: string;
+};
+
+function authSecret() {
+  return process.env.ONE_DENTAL_AUTH_SECRET || process.env.NEXTAUTH_SECRET || process.env.DATABASE_URL || "local-1dentalai-development-secret";
+}
+
+function normalizeEmail(email: FormDataEntryValue | string | null) {
+  return String(email ?? "").trim().toLowerCase();
+}
+
+function sha256(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function hmac(value: string) {
+  return createHmac("sha256", authSecret()).update(value).digest("base64url");
+}
+
+function signToken(token: string) {
+  return `${token}.${hmac(token)}`;
+}
+
+function readSignedToken(cookieValue?: string) {
+  if (!cookieValue) return null;
+  const [token, signature] = cookieValue.split(".");
+  if (!token || !signature) return null;
+  const expected = hmac(token);
+  const providedBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (providedBuffer.length !== expectedBuffer.length) return null;
+  return timingSafeEqual(providedBuffer, expectedBuffer) ? token : null;
+}
+
+async function requestHashes() {
+  const headerList = await headers();
+  const forwardedFor = headerList.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const userAgent = headerList.get("user-agent") || "unknown";
+  return {
+    ipHash: sha256(forwardedFor),
+    userAgentHash: sha256(userAgent),
+  };
+}
+
+async function hashPassword(password: string, salt: string, iterations = passwordIterations) {
+  const derived = await pbkdf2(password, salt, iterations, 32, "sha256");
+  return derived.toString("base64url");
+}
+
+async function verifyPassword(password: string, user: AuthUserRow) {
+  const derived = await hashPassword(password, user.passwordSalt, user.passwordIterations);
+  const providedBuffer = Buffer.from(derived);
+  const expectedBuffer = Buffer.from(user.passwordHash);
+  return providedBuffer.length === expectedBuffer.length && timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
+async function auditAuth(input: {
+  tenantId?: string;
+  userId?: string | null;
+  sessionId?: string | null;
+  eventType: string;
+  outcome: string;
+  summary: string;
+  metadata?: unknown;
+}) {
+  const { ipHash, userAgentHash } = await requestHashes();
+  await query(
+    `insert into "AuthAuditEvent"
+       ("id", "tenantId", "userId", "sessionId", "eventType", "outcome", "summary", "ipHash", "userAgentHash", "metadata")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
+    [
+      newId("authaudit"),
+      input.tenantId ?? defaultTenantId,
+      input.userId ?? null,
+      input.sessionId ?? null,
+      input.eventType,
+      input.outcome,
+      input.summary,
+      ipHash,
+      userAgentHash,
+      input.metadata ? JSON.stringify(input.metadata) : null,
+    ],
+  );
+}
+
+export async function loginAction(_previousState: AuthActionState, formData: FormData): Promise<AuthActionState> {
+  const email = normalizeEmail(formData.get("email"));
+  const password = String(formData.get("password") ?? "");
+  const next = String(formData.get("next") ?? "/app/overview");
+
+  if (!email || !password) {
+    return { ok: false, message: "Enter your email and password." };
+  }
+
+  const userResult = await query<AuthUserRow>(
+    `select "id", "tenantId", "email", "displayName", "roleKey", "status", "passwordHash", "passwordSalt", "passwordIterations", "lockedUntil"
+     from "AuthUser"
+     where "tenantId" = $1 and "emailHash" = $2
+     limit 1`,
+    [defaultTenantId, sha256(email)],
+  );
+  const user = userResult.rows[0];
+
+  if (!user || user.status !== "ACTIVE" || (user.lockedUntil && user.lockedUntil > new Date())) {
+    await auditAuth({
+      eventType: "LOGIN_BLOCKED",
+      outcome: "BLOCKED",
+      summary: "Login blocked because the account was missing, inactive, or locked.",
+      metadata: { emailHash: sha256(email), phiStored: false },
+    });
+    return { ok: false, message: "We could not verify that account. Contact your practice administrator if this continues." };
+  }
+
+  const passwordOk = await verifyPassword(password, user);
+  if (!passwordOk) {
+    const failedCount = await query<{ failedLoginCount: number }>(
+      `update "AuthUser"
+       set "failedLoginCount" = "failedLoginCount" + 1,
+           "lockedUntil" = case when "failedLoginCount" + 1 >= 5 then current_timestamp + interval '15 minutes' else "lockedUntil" end,
+           "updatedAt" = current_timestamp
+       where "id" = $1
+       returning "failedLoginCount"`,
+      [user.id],
+    );
+    await auditAuth({
+      tenantId: user.tenantId,
+      userId: user.id,
+      eventType: "LOGIN_FAILED",
+      outcome: "BLOCKED",
+      summary: "Password verification failed.",
+      metadata: { failedLoginCount: failedCount.rows[0]?.failedLoginCount ?? 1, phiStored: false },
+    });
+    return { ok: false, message: "We could not verify that account. Contact your practice administrator if this continues." };
+  }
+
+  const rawToken = randomBytes(32).toString("base64url");
+  const tokenHash = sha256(rawToken);
+  const sessionId = newId("authsess");
+  const { ipHash, userAgentHash } = await requestHashes();
+  await query(
+    `insert into "AuthSession" ("id", "tenantId", "userId", "tokenHash", "expiresAt", "ipHash", "userAgentHash")
+     values ($1, $2, $3, $4, current_timestamp + interval '8 hours', $5, $6)`,
+    [sessionId, user.tenantId, user.id, tokenHash, ipHash, userAgentHash],
+  );
+  await query(
+    `update "AuthUser"
+     set "failedLoginCount" = 0, "lockedUntil" = null, "lastLoginAt" = current_timestamp, "updatedAt" = current_timestamp
+     where "id" = $1`,
+    [user.id],
+  );
+  (await cookies()).set(sessionCookieName, signToken(rawToken), {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: sessionMaxAgeSeconds,
+  });
+  await auditAuth({
+    tenantId: user.tenantId,
+    userId: user.id,
+    sessionId,
+    eventType: "LOGIN_SUCCEEDED",
+    outcome: "ALLOWED",
+    summary: "User signed in and session was created.",
+    metadata: { roleKey: user.roleKey, phiStored: false },
+  });
+
+  redirect(next.startsWith("/app") && next !== "/app" ? next : "/app/overview");
+}
+
+export async function signupAction(_previousState: AuthActionState, formData: FormData): Promise<AuthActionState> {
+  const practiceName = String(formData.get("practiceName") ?? "").trim();
+  const contactName = String(formData.get("contactName") ?? "").trim();
+  const email = normalizeEmail(formData.get("email"));
+  const phone = String(formData.get("phone") ?? "").trim();
+  const roleRequested = String(formData.get("roleRequested") ?? "practice_manager").trim();
+
+  if (!practiceName || !contactName || !email || !roleRequested) {
+    return { ok: false, message: "Practice, contact, email, and role are required." };
+  }
+
+  await query(
+    `insert into "AuthSignupRequest"
+       ("id", "tenantId", "practiceName", "contactName", "email", "emailHash", "phone", "roleRequested", "verificationNote")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      newId("signup"),
+      defaultTenantId,
+      practiceName,
+      contactName,
+      email,
+      sha256(email),
+      phone || null,
+      roleRequested,
+      "Pending admin identity verification, BAA/compliance review, and least-privilege role assignment.",
+    ],
+  );
+  await auditAuth({
+    eventType: "SIGNUP_REQUEST_CREATED",
+    outcome: "READ_ONLY",
+    summary: "Signup request created for verification; no workspace access was granted.",
+    metadata: { emailHash: sha256(email), roleRequested, phiStored: false },
+  });
+
+  return { ok: true, message: "Access request received. We will verify the practice and role before activating the account." };
+}
+
+export async function logout() {
+  const cookieStore = await cookies();
+  const token = readSignedToken(cookieStore.get(sessionCookieName)?.value);
+  if (token) {
+    const result = await query<{ id: string; tenantId: string; userId: string }>(
+      `update "AuthSession"
+       set "revokedAt" = current_timestamp
+       where "tokenHash" = $1 and "revokedAt" is null
+       returning "id", "tenantId", "userId"`,
+      [sha256(token)],
+    );
+    const session = result.rows[0];
+    if (session) {
+      await auditAuth({
+        tenantId: session.tenantId,
+        userId: session.userId,
+        sessionId: session.id,
+        eventType: "LOGOUT",
+        outcome: "ALLOWED",
+        summary: "User signed out and session was revoked.",
+      });
+    }
+  }
+  cookieStore.delete(sessionCookieName);
+}
+
+export async function currentSession() {
+  const token = readSignedToken((await cookies()).get(sessionCookieName)?.value);
+  if (!token) return null;
+
+  const result = await query<AuthSessionRow>(
+    `select s."id", s."tenantId", s."userId", s."expiresAt", s."revokedAt",
+            u."displayName", u."email", u."roleKey", u."status"
+     from "AuthSession" s
+     join "AuthUser" u on u."id" = s."userId"
+     where s."tokenHash" = $1
+       and s."revokedAt" is null
+       and s."expiresAt" > current_timestamp
+       and u."status" = 'ACTIVE'
+     limit 1`,
+    [sha256(token)],
+  );
+
+  const session = result.rows[0];
+  if (!session) return null;
+  await query(`update "AuthSession" set "lastSeenAt" = current_timestamp where "id" = $1`, [session.id]);
+  return session;
+}
+
+export async function requireAuth() {
+  const session = await currentSession();
+  if (!session) redirect("/app");
+  return session;
+}
+
+export { sessionCookieName };

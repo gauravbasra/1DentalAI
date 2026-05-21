@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireAuth } from "@/lib/auth";
 import {
   foundationPractice,
   getRole,
@@ -24,7 +25,7 @@ const appNav = [
   { href: "/app/audit", label: "Audit" },
 ];
 
-export function FoundationShell({
+export async function FoundationShell({
   children,
   active,
   roleKey = "owner_dentist",
@@ -33,6 +34,7 @@ export function FoundationShell({
   active: string;
   roleKey?: string;
 }) {
+  const session = await requireAuth();
   const role = getRole(roleKey);
   const roleParam = `role=${role.key}`;
   const modeLabel = foundationPractice.mode === "PRODUCTION_SETUP" ? "Production setup" : "Live";
@@ -50,6 +52,9 @@ export function FoundationShell({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <span className="hidden rounded-md bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-700 sm:inline-flex">
+              {session.displayName}
+            </span>
             <span className="rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
               {modeLabel}
             </span>
@@ -58,6 +63,12 @@ export function FoundationShell({
               className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-semibold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
             >
               Setup
+            </Link>
+            <Link
+              href="/logout"
+              className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-semibold text-neutral-700 transition hover:border-rose-700 hover:text-rose-700"
+            >
+              Logout
             </Link>
           </div>
         </div>

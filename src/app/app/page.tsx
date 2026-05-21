@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LoginForm } from "@/components/auth-forms";
 
 const accessOptions = [
   "Owner dentist",
@@ -7,7 +8,14 @@ const accessOptions = [
   "Billing and RCM",
 ];
 
-export default function AppLogin() {
+export default async function AppLogin({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string; loggedOut?: string }>;
+}) {
+  const params = await searchParams;
+  const next = params.next?.startsWith("/app") ? params.next : "/app/overview";
+
   return (
     <main className="min-h-screen bg-[#f3f4f6] text-neutral-950">
       <section className="mx-auto grid min-h-screen max-w-7xl items-center gap-10 px-6 py-10 lg:grid-cols-[0.9fr_1.1fr]">
@@ -32,6 +40,9 @@ export default function AppLogin() {
               </div>
             ))}
           </div>
+          <Link href="/signup" className="mt-8 inline-flex text-sm font-semibold text-cyan-700 transition hover:text-cyan-900">
+            Request a verified practice account
+          </Link>
         </div>
 
         <div className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm sm:p-8">
@@ -47,48 +58,18 @@ export default function AppLogin() {
             </span>
           </div>
 
-          <form className="mt-6 space-y-5">
-            <label className="block">
-              <span className="text-sm font-semibold text-neutral-700">Email</span>
-              <input
-                type="email"
-                name="email"
-                autoComplete="email"
-                placeholder="you@practice.com"
-                className="mt-2 w-full rounded-md border border-neutral-300 bg-white px-4 py-3 text-base outline-none transition placeholder:text-neutral-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
-              />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-neutral-700">Password</span>
-              <input
-                type="password"
-                name="password"
-                autoComplete="current-password"
-                placeholder="Enter password"
-                className="mt-2 w-full rounded-md border border-neutral-300 bg-white px-4 py-3 text-base outline-none transition placeholder:text-neutral-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
-              />
-            </label>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Link
-                href="/app/overview"
-                className="inline-flex flex-1 items-center justify-center rounded-md bg-neutral-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-cyan-700"
-              >
-                Continue to workspace
-              </Link>
-              <Link
-                href="/contact"
-                className="inline-flex flex-1 items-center justify-center rounded-md border border-neutral-300 px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-cyan-600 hover:text-cyan-700"
-              >
-                Request access
-              </Link>
-            </div>
-          </form>
+          {params.loggedOut ? (
+            <p className="mt-6 rounded-md bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+              You have been signed out.
+            </p>
+          ) : null}
+          <LoginForm next={next} />
 
           <div className="mt-6 rounded-lg bg-neutral-50 p-4">
-            <p className="text-sm font-semibold text-neutral-900">Demo environment</p>
+            <p className="text-sm font-semibold text-neutral-900">Compliance posture</p>
             <p className="mt-2 text-sm leading-6 text-neutral-600">
-              Authentication is staged for production setup. The workspace preview uses
-              sample practice data only.
+              Do not enter patient information on this screen. Access is session-based,
+              audited, role-scoped, and intended for verified practice users only.
             </p>
           </div>
         </div>
