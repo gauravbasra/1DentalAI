@@ -12,6 +12,10 @@ function publicLoginUrl(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const url = new URL(request.url);
+  if (url.searchParams.has("_rsc") || request.headers.get("rsc") === "1" || request.headers.get("next-router-prefetch")) {
+    return new NextResponse(null, { status: 204 });
+  }
   await logout();
   return NextResponse.redirect(publicLoginUrl(request));
 }

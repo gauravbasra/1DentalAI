@@ -64,12 +64,14 @@ export async function FoundationShell({
             >
               Setup
             </Link>
-            <Link
-              href="/logout"
-              className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-semibold text-neutral-700 transition hover:border-rose-700 hover:text-rose-700"
-            >
-              Logout
-            </Link>
+            <form action="/logout" method="post">
+              <button
+                type="submit"
+                className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-semibold text-neutral-700 transition hover:border-rose-700 hover:text-rose-700"
+              >
+                Logout
+              </button>
+            </form>
           </div>
         </div>
         <nav className="mx-auto flex max-w-[1680px] gap-1 overflow-x-auto px-4 pb-2 sm:px-6">
