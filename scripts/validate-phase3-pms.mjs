@@ -134,7 +134,7 @@ for (const token of ["createInsurancePlan", "attachInsuranceToPatient", "createC
   }
 }
 
-for (const token of ["createImagingStudy", "createLabCase", "createDocument", "createPrescription", "createReferral", "getPmsReports", "Imaging orders", "Lab case tracking", "Prescription register", "Practice performance reports"]) {
+for (const token of ["createImagingStudy", "createLabCase", "createDocument", "createPrescription", "createReferral", "getPmsReports", "Imaging orders", "Lab case tracking", "Prescription register", "Practice performance dashboard"]) {
   const haystack = `${schema}\n${imagingPage}\n${labsPage}\n${documentsPage}\n${reportsPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS completion workflow token missing: ${token}`);
