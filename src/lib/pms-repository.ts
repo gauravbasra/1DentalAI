@@ -690,7 +690,7 @@ export async function recordFormResponse(input: {
   await query(
     `insert into "PmsFormResponse"
        ("id", "assignmentId", "patientId", "submittedByName", "submittedByType", "status", "signatureName", "signatureAt", "updatedAt")
-     values ($1, $2, $3, $4, $5, 'SUBMITTED', $6, case when $6 is null then null else current_timestamp end, current_timestamp)`,
+     values ($1, $2, $3, $4, $5, 'SUBMITTED', $6, case when $6::text is null then null else current_timestamp end, current_timestamp)`,
     [
       responseId,
       input.assignmentId,
