@@ -1572,6 +1572,12 @@ model PhoneOutboundMessage {
   linkLabel       String?
   readiness       Json?
   blockedReason   String?
+  provider         String?
+  providerMessageId String?
+  providerStatus  String?
+  providerError   String?
+  lastAttemptAt   DateTime?
+  sentAt          DateTime?
   ownerRoleKey    String   @default("front_desk")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -1579,6 +1585,7 @@ model PhoneOutboundMessage {
   @@index([tenantId, approvalStatus, deliveryStatus])
   @@index([conversationId])
   @@index([patientId, messageType])
+  @@index([provider, providerMessageId])
 }
 
 model PhoneRoutingRule {

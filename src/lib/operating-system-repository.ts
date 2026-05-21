@@ -1245,6 +1245,167 @@ export async function updatePhoneOutboundMessageApproval(id: string, approvalSta
   }
 }
 
+export async function sendApprovedPhoneOutboundMessage(id: string, actorRole = "front_desk") {
+  const result = await query<{
+    id: string;
+    tenantId: string;
+    channel: string;
+    recipientNumber: string | null;
+    body: string;
+    approvalStatus: string;
+    deliveryStatus: string;
+    consentStatus: string;
+    connectorStatus: string;
+    blockedReason: string | null;
+  }>(
+    `select "id", "tenantId", "channel", "recipientNumber", "body", "approvalStatus", "deliveryStatus", "consentStatus", "connectorStatus", "blockedReason"
+     from "PhoneOutboundMessage"
+     where "id" = $1
+     limit 1`,
+    [id],
+  );
+  const message = result.rows[0];
+  if (!message) return;
+
+  const block = await getSmsSendBlock(message);
+  if (block) {
+    await query(
+      `update "PhoneOutboundMessage"
+       set "deliveryStatus" = 'BLOCKED',
+         "blockedReason" = $2,
+         "provider" = 'TWILIO',
+         "providerError" = $2,
+         "lastAttemptAt" = current_timestamp,
+         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioSendAttemptedAt', current_timestamp, 'twilioBlockedReason', $2, 'externalSendBlocked', true),
+         "updatedAt" = current_timestamp
+       where "id" = $1`,
+      [id, block],
+    );
+    await addAudit(message.tenantId, actorRole, "PHONE_SMS_SEND_BLOCKED", "PhoneOutboundMessage", id, "BLOCKED", { blockedReason: block });
+    return;
+  }
+
+  const fromNumber = await getActiveSmsFromNumber(message.tenantId);
+  if (!fromNumber) {
+    const reason = "No active SMS-capable practice number is configured for this tenant.";
+    await query(
+      `update "PhoneOutboundMessage"
+       set "deliveryStatus" = 'BLOCKED_CONNECTOR_REQUIRED',
+         "blockedReason" = $2,
+         "provider" = 'TWILIO',
+         "providerError" = $2,
+         "lastAttemptAt" = current_timestamp,
+         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioBlockedReason', $2, 'externalSendBlocked', true),
+         "updatedAt" = current_timestamp
+       where "id" = $1`,
+      [id, reason],
+    );
+    await addAudit(message.tenantId, actorRole, "PHONE_SMS_SEND_BLOCKED", "PhoneOutboundMessage", id, "BLOCKED", { blockedReason: reason });
+    return;
+  }
+
+  const callbackUrl = `${(process.env.ONE_DENTAL_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://app.1dentalai.com").replace(/\/$/, "")}/api/twilio/sms/status`;
+  try {
+    const twilio = await sendTwilioSms({
+      from: fromNumber,
+      to: message.recipientNumber!,
+      body: message.body,
+      statusCallback: callbackUrl,
+    });
+    await query(
+      `update "PhoneOutboundMessage"
+       set "deliveryStatus" = 'SENT_TO_PROVIDER',
+         "provider" = 'TWILIO',
+         "providerMessageId" = $2,
+         "providerStatus" = $3,
+         "providerError" = null,
+         "lastAttemptAt" = current_timestamp,
+         "sentAt" = current_timestamp,
+         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioProviderSid', $2, 'twilioProviderStatus', $3, 'externalSendBlocked', false),
+         "updatedAt" = current_timestamp
+       where "id" = $1`,
+      [id, twilio.sid, twilio.status],
+    );
+    await addAudit(message.tenantId, actorRole, "PHONE_SMS_SENT_TO_TWILIO", "PhoneOutboundMessage", id, "ALLOWED", { provider: "TWILIO", providerMessageId: twilio.sid, providerStatus: twilio.status });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Twilio SMS send failed.";
+    await query(
+      `update "PhoneOutboundMessage"
+       set "deliveryStatus" = 'PROVIDER_ERROR',
+         "provider" = 'TWILIO',
+         "providerError" = $2,
+         "lastAttemptAt" = current_timestamp,
+         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioProviderError', $2, 'externalSendBlocked', true),
+         "updatedAt" = current_timestamp
+       where "id" = $1`,
+      [id, reason],
+    );
+    await addAudit(message.tenantId, actorRole, "PHONE_SMS_PROVIDER_ERROR", "PhoneOutboundMessage", id, "BLOCKED", { provider: "TWILIO", providerError: reason });
+  }
+}
+
+async function getSmsSendBlock(message: {
+  channel: string;
+  recipientNumber: string | null;
+  body: string;
+  approvalStatus: string;
+  deliveryStatus: string;
+  consentStatus: string;
+  connectorStatus: string;
+  blockedReason: string | null;
+}) {
+  if (message.channel !== "SMS") return "Only SMS messages can be sent through the Twilio SMS connector.";
+  if (message.approvalStatus !== "APPROVED_STAGED") return "Message must be approved and staged by staff before external send.";
+  if (!["READY_FOR_CONNECTOR", "BLOCKED_CONNECTOR_REQUIRED"].includes(message.deliveryStatus)) return `Message is not in a sendable state (${message.deliveryStatus}).`;
+  if (message.connectorStatus !== "READY_FOR_CONNECTOR") return "SMS connector readiness is not complete for this tenant.";
+  if (message.consentStatus !== "VERIFIED") return "Patient SMS consent is not verified.";
+  if (message.blockedReason) return message.blockedReason;
+  if (!message.recipientNumber) return "Recipient mobile number is missing.";
+  if (!message.body.trim()) return "Message body is empty.";
+  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) return "Twilio Account SID/Auth Token are not configured in the production environment.";
+  return null;
+}
+
+async function getActiveSmsFromNumber(tenantId: string) {
+  const result = await query<{ phoneNumber: string }>(
+    `select "phoneNumber"
+     from "PhoneNumber"
+     where "tenantId" = $1 and "status" = 'ACTIVE' and "smsStatus" = 'ACTIVE'
+     order by case when "numberType" = 'MAIN' then 0 else 1 end, "createdAt" desc
+     limit 1`,
+    [tenantId],
+  );
+  return result.rows[0]?.phoneNumber ?? null;
+}
+
+async function sendTwilioSms(input: { from: string; to: string; body: string; statusCallback: string }) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID!;
+  const authToken = process.env.TWILIO_AUTH_TOKEN!;
+  const params = new URLSearchParams({
+    From: input.from,
+    To: input.to,
+    Body: input.body,
+    StatusCallback: input.statusCallback,
+  });
+  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: params.toString(),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = typeof data?.message === "string" ? data.message : `HTTP ${response.status}`;
+    throw new Error(`Twilio SMS rejected: ${detail}`);
+  }
+  return {
+    sid: String(data.sid || ""),
+    status: String(data.status || "accepted"),
+  };
+}
+
 export async function updatePhoneCallTaskStatus(id: string, status: string, actorRole = "front_desk") {
   const result = await query<{ tenantId: string }>(
     `update "PhoneCallTask"

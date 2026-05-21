@@ -232,6 +232,32 @@ export async function ingestIncomingSms(payload: TwilioPayload, tenantId = defau
   return { conversationId };
 }
 
+export async function ingestSmsStatus(payload: TwilioPayload, tenantId = defaultTenantId) {
+  const providerMessageId = payload.MessageSid || payload.SmsSid || "";
+  if (!providerMessageId) {
+    await addAudit(tenantId, "twilio_webhook", "TWILIO_SMS_STATUS_WITHOUT_MESSAGE_ID", "PhoneOutboundMessage", null, "BLOCKED", redactedPayload(payload));
+    return;
+  }
+  const normalizedStatus = mapTwilioSmsStatus(payload.MessageStatus || payload.SmsStatus || "unknown");
+  const result = await query<{ id: string; tenantId: string }>(
+    `update "PhoneOutboundMessage"
+     set "deliveryStatus" = $3,
+       "providerStatus" = $4,
+       "providerError" = coalesce($5, "providerError"),
+       "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioLastStatusAt', current_timestamp, 'twilioDeliveryStatus', $3),
+       "updatedAt" = current_timestamp
+     where "provider" = 'TWILIO' and "providerMessageId" = $2
+     returning "id", "tenantId"`,
+    [tenantId, providerMessageId, normalizedStatus, payload.MessageStatus || payload.SmsStatus || "unknown", payload.ErrorMessage || payload.ErrorCode || null],
+  );
+  const message = result.rows[0];
+  await addAudit(message?.tenantId ?? tenantId, "twilio_webhook", "TWILIO_SMS_STATUS_RECEIVED", "PhoneOutboundMessage", message?.id ?? null, message ? "ALLOWED" : "BLOCKED", {
+    ...redactedPayload(payload),
+    deliveryStatus: normalizedStatus,
+    messageMatched: Boolean(message),
+  });
+}
+
 async function lookupPhoneNumberId(tenantId: string, phoneNumber?: string) {
   if (!phoneNumber) return null;
   const result = await query<{ id: string }>(
@@ -239,6 +265,16 @@ async function lookupPhoneNumberId(tenantId: string, phoneNumber?: string) {
     [tenantId, phoneNumber],
   );
   return result.rows[0]?.id ?? null;
+}
+
+function mapTwilioSmsStatus(status: string) {
+  const normalized = status.toLowerCase();
+  if (["accepted", "queued", "sending"].includes(normalized)) return "SENT_TO_PROVIDER";
+  if (["sent"].includes(normalized)) return "SENT";
+  if (["delivered"].includes(normalized)) return "DELIVERED";
+  if (["undelivered"].includes(normalized)) return "UNDELIVERED";
+  if (["failed"].includes(normalized)) return "FAILED";
+  return status.toUpperCase().replace(/[^A-Z0-9_]/g, "_");
 }
 
 function mapTwilioCallState(status: string) {

@@ -9,6 +9,7 @@ import {
   createPhoneOutboundMessage,
   createPhoneRoutingRule,
   getPhoneOperatingCenter,
+  sendApprovedPhoneOutboundMessage,
   updatePhoneCallTaskStatus,
   updatePhoneConversationStatus,
   updatePhoneDeviceStatus,
@@ -56,7 +57,7 @@ type ConversationRow = {
   openForms: ScreenPopForm[];
   communicationPreferences: ScreenPopPreference[];
 };
-type MessageRow = { id: string; firstName: string | null; lastName: string | null; chartNumber: string | null; channel: string; recipientNumber: string | null; messageType: string; body: string; approvalStatus: string; deliveryStatus: string; consentStatus: string; connectorStatus: string; linkType: string | null; linkTargetId: string | null; linkLabel: string | null; readiness: unknown; blockedReason: string | null; openBalanceCents: number; openFormCount: number };
+type MessageRow = { id: string; firstName: string | null; lastName: string | null; chartNumber: string | null; channel: string; recipientNumber: string | null; messageType: string; body: string; approvalStatus: string; deliveryStatus: string; consentStatus: string; connectorStatus: string; linkType: string | null; linkTargetId: string | null; linkLabel: string | null; readiness: unknown; blockedReason: string | null; provider: string | null; providerMessageId: string | null; providerStatus: string | null; providerError: string | null; lastAttemptAt: string | null; sentAt: string | null; openBalanceCents: number; openFormCount: number };
 type RouteRow = { id: string; name: string; triggerType: string; destinationType: string; destination: string; priority: number; status: string; failoverAction: string | null; locationName: string | null };
 type TaskRow = { id: string; firstName: string | null; lastName: string | null; chartNumber: string | null; aiIntent: string | null; callerNumber: string | null; taskType: string; priority: string; status: string; dueAt: string | null; ownerRoleKey: string; nextAction: string };
 type AnalyticsRow = { id: string; callerName: string | null; callerNumber: string | null; aiIntent: string | null; firstName: string | null; lastName: string | null; chartNumber: string | null; bookingIntentScore: number; serviceRecoveryScore: number; revenueOpportunityCents: number; keywords: string[] | null; riskFlags: string[] | null; summaryQuality: string };
@@ -125,6 +126,12 @@ async function messageAction(formData: FormData) {
 async function messageApprovalAction(formData: FormData) {
   "use server";
   await updatePhoneOutboundMessageApproval(String(formData.get("id") ?? ""), String(formData.get("approvalStatus") ?? "NEEDS_APPROVAL"));
+  revalidatePath("/app/phone");
+}
+
+async function sendMessageAction(formData: FormData) {
+  "use server";
+  await sendApprovedPhoneOutboundMessage(String(formData.get("id") ?? ""));
   revalidatePath("/app/phone");
 }
 
@@ -921,13 +928,17 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <MiniMetric label="Connector" value={clean(message.connectorStatus)} />
                   <MiniMetric label="Link" value={message.linkLabel ?? clean(message.linkType ?? "none")} />
                   <MiniMetric label="PMS context" value={message.linkType === "PAYMENT_LINK" ? <Money cents={Number(message.openBalanceCents ?? 0)} /> : `${message.openFormCount ?? 0} forms`} />
+                  <MiniMetric label="Provider" value={message.provider ? `${message.provider} ${clean(message.providerStatus ?? message.deliveryStatus)}` : "not attempted"} />
+                  <MiniMetric label="SID" value={message.providerMessageId ?? "not assigned"} />
                 </div>
                 <p className="mt-2 text-sm leading-6 text-neutral-700">{message.body}</p>
                 <p className="mt-2 text-xs leading-5 text-neutral-500">{readinessSummary(message.readiness)}</p>
                 {message.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{message.blockedReason}</p> : null}
-                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                {message.providerError ? <p className="mt-2 text-xs leading-5 text-red-700">Provider error: {message.providerError}</p> : null}
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
                   <MessageButton id={message.id} approvalStatus="NEEDS_APPROVAL" label="Needs approval" />
                   <MessageButton id={message.id} approvalStatus="APPROVED_STAGED" label="Approve/stage" />
+                  <SendMessageButton id={message.id} disabled={message.approvalStatus !== "APPROVED_STAGED" || !["READY_FOR_CONNECTOR", "BLOCKED_CONNECTOR_REQUIRED"].includes(message.deliveryStatus)} />
                   <MessageButton id={message.id} approvalStatus="BLOCKED" label="Block" />
                 </div>
               </div>
@@ -1035,6 +1046,10 @@ function StatusButton({ id, status, followUpStatus, label }: { id: string; statu
 
 function MessageButton({ id, approvalStatus, label }: { id: string; approvalStatus: string; label: string }) {
   return <form action={messageApprovalAction}><input type="hidden" name="id" value={id} /><input type="hidden" name="approvalStatus" value={approvalStatus} /><ActionButton label={label} /></form>;
+}
+
+function SendMessageButton({ id, disabled }: { id: string; disabled: boolean }) {
+  return <form action={sendMessageAction}><input type="hidden" name="id" value={id} /><button disabled={disabled} className="w-full rounded-md border border-neutral-950 bg-neutral-950 px-2 py-1.5 text-xs font-semibold text-white hover:bg-neutral-800 disabled:border-neutral-200 disabled:bg-neutral-100 disabled:text-neutral-400">Send Twilio</button></form>;
 }
 
 function TaskButton({ id, actorRole, status, label }: { id: string; actorRole: string; status: string; label: string }) {
