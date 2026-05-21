@@ -76,8 +76,16 @@ const requiredSchemaModels = [
   "ReputationRecoveryCase",
   "RcmWorkItem",
   "PhoneConversation",
+  "PhoneOutboundMessage",
+  "PhoneRoutingRule",
+  "PhoneCallTask",
+  "PhoneCallAnalytics",
   "ReputationReviewWorkflow",
   "PatientSurvey",
+  "ReputationListingProfile",
+  "ReputationReviewResponse",
+  "ReputationCampaignRule",
+  "ReputationReferralRequest",
   "MarketingCampaign",
   "MarketingLandingPage",
   "AiStudioAsset",
@@ -202,7 +210,7 @@ for (const token of ["PhoneConversation", "PhoneOutboundMessage", "PhoneRoutingR
   }
 }
 
-for (const token of ["ReputationReviewWorkflow", "PatientSurvey", "getReputationOperatingCenter", "Reviews, surveys, and service recovery", "BLOCKED_SERVICE_RECOVERY"]) {
+for (const token of ["ReputationReviewWorkflow", "PatientSurvey", "ReputationListingProfile", "ReputationReviewResponse", "ReputationCampaignRule", "ReputationReferralRequest", "getReputationOperatingCenter", "Patient experience command center", "Listing accuracy and review sources", "Campaign rules and suppression logic", "Referral and testimonial queue", "BLOCKED_SERVICE_RECOVERY"]) {
   if (!`${schema}\n${reputationPage}\n${osRepository}`.includes(token)) {
     console.error(`Reputation operating-system token missing: ${token}`);
     process.exit(1);

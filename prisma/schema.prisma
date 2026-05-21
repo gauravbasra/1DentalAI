@@ -1478,6 +1478,95 @@ model PatientSurvey {
   @@index([patientId, surveyType])
 }
 
+model ReputationListingProfile {
+  id               String   @id @default(cuid())
+  tenantId         String
+  locationId       String?
+  platform         String
+  profileUrl       String?
+  nameOnListing    String
+  phoneOnListing   String?
+  addressOnListing String?
+  hoursJson        Json?
+  categoryJson     Json?
+  rating           Float?
+  reviewCount      Int      @default(0)
+  syncStatus       String   @default("NEEDS_CONNECTION")
+  dataQualityScore Int      @default(0)
+  issueSummary     String?
+  nextAction       String
+  lastSyncedAt     DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([tenantId, locationId, platform])
+  @@index([tenantId, syncStatus])
+  @@index([locationId, platform])
+}
+
+model ReputationReviewResponse {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  reviewWorkflowId   String
+  responseChannel    String   @default("PUBLIC_REVIEW_REPLY")
+  draftBody          String
+  approvalStatus     String   @default("NEEDS_REVIEW")
+  publicationStatus  String   @default("NOT_PUBLISHED")
+  blockedReason      String?
+  approvedByRoleKey  String?
+  approvedAt         DateTime?
+  publishedAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantId, approvalStatus, publicationStatus])
+  @@index([reviewWorkflowId])
+}
+
+model ReputationCampaignRule {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  name               String
+  triggerEvent       String
+  serviceLine        String?
+  channel            String   @default("SMS")
+  targetReviewSite   String   @default("SMART_LINK")
+  sendDelayHours     Int      @default(24)
+  cooldownDays       Int      @default(90)
+  minimumSurveyScore Int?
+  suppressions       Json?
+  ownerRoleKey       String   @default("marketing_growth")
+  status             String   @default("ACTIVE")
+  lastEvaluatedAt    DateTime?
+  nextAction         String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantId, status, triggerEvent])
+  @@index([tenantId, serviceLine])
+}
+
+model ReputationReferralRequest {
+  id               String   @id @default(cuid())
+  tenantId         String
+  patientId        String?
+  sourceReviewId   String?
+  requestType      String   @default("REFERRAL")
+  channel          String   @default("SMS")
+  status           String   @default("READY_FOR_APPROVAL")
+  offerSummary     String?
+  messageDraft     String
+  consentStatus    String   @default("UNKNOWN")
+  conversionStatus String   @default("NOT_SENT")
+  dueAt            DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantId, status, dueAt])
+  @@index([patientId, requestType])
+}
+
 model MarketingLandingPage {
   id               String   @id @default(cuid())
   tenantId         String
@@ -1621,4 +1710,79 @@ model PmsAuditEvent {
 
   @@index([tenantId, createdAt])
   @@index([targetType, targetId])
+}
+
+model AuthUser {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  email              String
+  emailHash          String
+  displayName        String
+  roleKey            String
+  status             String    @default("PENDING_VERIFICATION")
+  passwordHash       String
+  passwordSalt       String
+  passwordIterations Int       @default(310000)
+  mfaRequired        Boolean   @default(true)
+  mustChangePassword Boolean   @default(true)
+  failedLoginCount   Int       @default(0)
+  lockedUntil        DateTime?
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([tenantId, emailHash])
+  @@index([tenantId, status, roleKey])
+}
+
+model AuthSession {
+  id            String    @id @default(cuid())
+  tenantId      String
+  userId        String
+  tokenHash     String    @unique
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  ipHash        String?
+  userAgentHash String?
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+
+  @@index([tenantId, userId, expiresAt])
+  @@index([revokedAt, expiresAt])
+}
+
+model AuthSignupRequest {
+  id             String   @id @default(cuid())
+  tenantId       String
+  practiceName   String
+  contactName    String
+  email          String
+  emailHash      String
+  phone          String?
+  roleRequested  String
+  status         String   @default("PENDING_VERIFICATION")
+  verificationNote String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, status, createdAt])
+  @@index([emailHash])
+}
+
+model AuthAuditEvent {
+  id            String   @id @default(cuid())
+  tenantId      String
+  userId        String?
+  sessionId     String?
+  eventType     String
+  outcome       String
+  summary       String
+  ipHash        String?
+  userAgentHash String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([userId, eventType])
+  @@index([outcome])
 }

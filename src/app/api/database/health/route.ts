@@ -81,6 +81,10 @@ const requiredTables = [
   "PhoneCallAnalytics",
   "ReputationReviewWorkflow",
   "PatientSurvey",
+  "ReputationListingProfile",
+  "ReputationReviewResponse",
+  "ReputationCampaignRule",
+  "ReputationReferralRequest",
   "MarketingCampaign",
   "MarketingLandingPage",
   "AiStudioAsset",
@@ -88,6 +92,10 @@ const requiredTables = [
   "PatientFinderFollowUp",
   "MorningHuddleSnapshot",
   "PmsAuditEvent",
+  "AuthUser",
+  "AuthSession",
+  "AuthSignupRequest",
+  "AuthAuditEvent",
 ];
 
 export async function GET() {

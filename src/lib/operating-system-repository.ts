@@ -531,15 +531,19 @@ export async function createPhoneRoutingRule(input: {
 }
 
 export async function getReputationOperatingCenter(tenantId = defaultTenantId) {
-  const [reviews, surveys, recoveryCases, metrics, patients] = await Promise.all([
+  const [reviews, surveys, recoveryCases, listings, responses, campaignRules, referralRequests, metrics, patients] = await Promise.all([
     query(
-      `select r.*, p."firstName", p."lastName", p."chartNumber", pr."displayName" as "providerName", l."name" as "locationName"
+      `select r.*, p."firstName", p."lastName", p."chartNumber", pr."displayName" as "providerName", l."name" as "locationName",
+        a."startsAt", a."appointmentType",
+        rr."id" as "responseId", rr."approvalStatus" as "responseApprovalStatus", rr."publicationStatus", rr."blockedReason" as "responseBlockedReason"
        from "ReputationReviewWorkflow" r
        left join "PmsPatient" p on p."id" = r."patientId"
        left join "PmsProvider" pr on pr."id" = r."providerId"
        left join "Location" l on l."id" = r."locationId"
+       left join "PmsAppointment" a on a."id" = r."appointmentId"
+       left join "ReputationReviewResponse" rr on rr."reviewWorkflowId" = r."id"
        where r."tenantId" = $1
-       order by r."dueAt" asc nulls last, r."createdAt" desc`,
+       order by case when r."requestStatus" like 'BLOCKED%' then 0 when r."requestStatus" = 'READY_FOR_APPROVAL' then 1 else 2 end, r."dueAt" asc nulls last, r."createdAt" desc`,
       [tenantId],
     ),
     query(
@@ -558,17 +562,64 @@ export async function getReputationOperatingCenter(tenantId = defaultTenantId) {
        order by c."dueAt" asc nulls last`,
       [tenantId],
     ),
-    query<{ readyRequests: string; blockedRequests: string; lowSurveys: string; responseDrafts: string }>(
+    query(
+      `select lp.*, l."name" as "locationName"
+       from "ReputationListingProfile" lp
+       left join "Location" l on l."id" = lp."locationId"
+       where lp."tenantId" = $1
+       order by case lp."syncStatus" when 'DATA_MISMATCH' then 0 when 'NEEDS_CONNECTION' then 1 else 2 end, lp."platform"`,
+      [tenantId],
+    ),
+    query(
+      `select rr.*, rw."reviewSite", rw."rating", rw."publicReviewText", p."firstName", p."lastName", p."chartNumber"
+       from "ReputationReviewResponse" rr
+       join "ReputationReviewWorkflow" rw on rw."id" = rr."reviewWorkflowId"
+       left join "PmsPatient" p on p."id" = rw."patientId"
+       where rr."tenantId" = $1
+       order by case rr."approvalStatus" when 'NEEDS_REVIEW' then 0 when 'APPROVED' then 1 else 2 end, rr."createdAt" desc`,
+      [tenantId],
+    ),
+    query(
+      `select *
+       from "ReputationCampaignRule"
+       where "tenantId" = $1
+       order by case "status" when 'ACTIVE' then 0 else 1 end, "triggerEvent", "name"`,
+      [tenantId],
+    ),
+    query(
+      `select rr.*, p."firstName", p."lastName", p."chartNumber"
+       from "ReputationReferralRequest" rr
+       left join "PmsPatient" p on p."id" = rr."patientId"
+       where rr."tenantId" = $1
+       order by case rr."status" when 'READY_FOR_APPROVAL' then 0 when 'BLOCKED_TREATMENT_NOT_COMPLETE' then 1 else 2 end, rr."dueAt" asc nulls last`,
+      [tenantId],
+    ),
+    query<{ readyRequests: string; blockedRequests: string; lowSurveys: string; responseDrafts: string; listingIssues: string; openRecovery: string; referralReady: string; reviewVolume: string; averageRating: string }>(
       `select
         (select count(*) from "ReputationReviewWorkflow" where "tenantId" = $1 and "requestStatus" = 'READY_FOR_APPROVAL')::text as "readyRequests",
         (select count(*) from "ReputationReviewWorkflow" where "tenantId" = $1 and "requestStatus" like 'BLOCKED%')::text as "blockedRequests",
         (select count(*) from "PatientSurvey" where "tenantId" = $1 and "recoveryRequired" = true)::text as "lowSurveys",
-        (select count(*) from "AiStudioAsset" where "tenantId" = $1 and "sourceModule" = 'REPUTATION' and "approvalStatus" = 'NEEDS_REVIEW')::text as "responseDrafts"`,
+        (select count(*) from "ReputationReviewResponse" where "tenantId" = $1 and "approvalStatus" = 'NEEDS_REVIEW')::text as "responseDrafts",
+        (select count(*) from "ReputationListingProfile" where "tenantId" = $1 and "syncStatus" in ('DATA_MISMATCH','NEEDS_CONNECTION','SYNC_ERROR'))::text as "listingIssues",
+        (select count(*) from "ReputationRecoveryCase" where "tenantId" = $1 and "status" not in ('COMPLETED','CLOSED'))::text as "openRecovery",
+        (select count(*) from "ReputationReferralRequest" where "tenantId" = $1 and "status" = 'READY_FOR_APPROVAL')::text as "referralReady",
+        (select coalesce(sum("reviewCount"), 0) from "ReputationListingProfile" where "tenantId" = $1)::text as "reviewVolume",
+        (select coalesce(round(avg("rating")::numeric, 2), 0) from "ReputationListingProfile" where "tenantId" = $1 and "rating" is not null)::text as "averageRating"`,
       [tenantId],
     ),
     listPatientOptions(tenantId),
   ]);
-  return { reviews: reviews.rows, surveys: surveys.rows, recoveryCases: recoveryCases.rows, metrics: metrics.rows[0], patients };
+  return {
+    reviews: reviews.rows,
+    surveys: surveys.rows,
+    recoveryCases: recoveryCases.rows,
+    listings: listings.rows,
+    responses: responses.rows,
+    campaignRules: campaignRules.rows,
+    referralRequests: referralRequests.rows,
+    metrics: metrics.rows[0],
+    patients,
+  };
 }
 
 export async function createReviewWorkflow(input: {
@@ -596,6 +647,95 @@ export async function updateReviewWorkflowStatus(id: string, requestStatus: stri
     [id, requestStatus],
   );
   if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "REPUTATION_STATUS_UPDATED", "ReputationReviewWorkflow", id, "ALLOWED", { requestStatus });
+}
+
+export async function updateReviewResponseApproval(id: string, approvalStatus: string) {
+  const result = await query<{ tenantId: string }>(
+    `update "ReputationReviewResponse"
+     set "approvalStatus" = $2,
+       "approvedByRoleKey" = case when $2 = 'APPROVED' then 'marketing_growth' else "approvedByRoleKey" end,
+       "approvedAt" = case when $2 = 'APPROVED' then current_timestamp else "approvedAt" end,
+       "publicationStatus" = case when $2 = 'APPROVED' then 'BLOCKED_CONNECTOR_REQUIRED' else "publicationStatus" end,
+       "blockedReason" = case when $2 = 'APPROVED' then 'Review source connector and publication policy are required before external posting.' else "blockedReason" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId"`,
+    [id, approvalStatus],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "REVIEW_RESPONSE_APPROVAL_UPDATED", "ReputationReviewResponse", id, "ALLOWED", { approvalStatus });
+}
+
+export async function updateListingProfileStatus(id: string, syncStatus: string, nextAction: string) {
+  const result = await query<{ tenantId: string }>(
+    `update "ReputationListingProfile"
+     set "syncStatus" = $2,
+       "nextAction" = $3,
+       "lastSyncedAt" = case when $2 like 'CONNECTED%' then current_timestamp else "lastSyncedAt" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId"`,
+    [id, syncStatus, nextAction.trim()],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "LISTING_PROFILE_STATUS_UPDATED", "ReputationListingProfile", id, "ALLOWED", { syncStatus });
+}
+
+export async function createReputationCampaignRule(input: {
+  tenantId?: string;
+  name: string;
+  triggerEvent: string;
+  serviceLine?: string;
+  channel: string;
+  targetReviewSite: string;
+  sendDelayHours: number;
+  cooldownDays: number;
+  minimumSurveyScore?: number;
+  suppressions?: string;
+  nextAction: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("repcamp");
+  const suppressions = input.suppressions ? input.suppressions.split(",").map((item) => item.trim()).filter(Boolean) : [];
+  await query(
+    `insert into "ReputationCampaignRule"
+       ("id", "tenantId", "name", "triggerEvent", "serviceLine", "channel", "targetReviewSite", "sendDelayHours", "cooldownDays", "minimumSurveyScore", "suppressions", "status", "nextAction", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, 'ACTIVE', $12, current_timestamp)`,
+    [id, tenantId, input.name.trim(), input.triggerEvent, input.serviceLine?.trim() || null, input.channel, input.targetReviewSite, input.sendDelayHours, input.cooldownDays, input.minimumSurveyScore ?? null, JSON.stringify({ rules: suppressions }), input.nextAction.trim()],
+  );
+  await addAudit(tenantId, "marketing_growth", "REPUTATION_CAMPAIGN_RULE_CREATED", "ReputationCampaignRule", id);
+}
+
+export async function createReferralRequest(input: {
+  tenantId?: string;
+  patientId?: string;
+  requestType: string;
+  channel: string;
+  offerSummary?: string;
+  messageDraft: string;
+  consentStatus: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("repref");
+  await query(
+    `insert into "ReputationReferralRequest"
+       ("id", "tenantId", "patientId", "requestType", "channel", "status", "offerSummary", "messageDraft", "consentStatus", "conversionStatus", "dueAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, 'READY_FOR_APPROVAL', $6, $7, $8, 'NOT_SENT', current_timestamp + interval '1 day', current_timestamp)`,
+    [id, tenantId, input.patientId || null, input.requestType, input.channel, input.offerSummary?.trim() || null, input.messageDraft.trim(), input.consentStatus],
+  );
+  await addAudit(tenantId, "marketing_growth", "REPUTATION_REFERRAL_REQUEST_CREATED", "ReputationReferralRequest", id);
+}
+
+export async function updateReferralRequestStatus(id: string, status: string) {
+  const result = await query<{ tenantId: string }>(
+    `update "ReputationReferralRequest"
+     set "status" = $2,
+       "conversionStatus" = case when $2 = 'APPROVED_TO_SEND' then 'BLOCKED_CONNECTOR_REQUIRED' else "conversionStatus" end,
+       "completedAt" = case when $2 in ('COMPLETED','CLOSED') then current_timestamp else "completedAt" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId"`,
+    [id, status],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "REPUTATION_REFERRAL_STATUS_UPDATED", "ReputationReferralRequest", id, "ALLOWED", { status });
 }
 
 export async function getMarketingOperatingCenter(tenantId = defaultTenantId) {
