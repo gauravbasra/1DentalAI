@@ -10,6 +10,7 @@ import { defaultTenantId } from "@/lib/pms-repository";
 const pbkdf2 = promisify(pbkdf2Callback);
 const sessionCookieName = "__Secure-1dentalai_session";
 const legacySessionCookieName = "__Host-1dentalai_session";
+const ipFallbackSessionCookieName = "1dentalai_session";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
 const passwordIterations = 310_000;
 
@@ -93,6 +94,11 @@ async function requestHashes() {
 function requestHostDomain(headerList: Awaited<ReturnType<typeof headers>>) {
   const host = (headerList.get("x-forwarded-host") || headerList.get("host") || "").split(":")[0]?.toLowerCase();
   return host === "1dentalai.com" || host.endsWith(".1dentalai.com") ? ".1dentalai.com" : undefined;
+}
+
+function requestIsIpFallback(headerList: Awaited<ReturnType<typeof headers>>) {
+  const host = (headerList.get("x-forwarded-host") || headerList.get("host") || "").split(":")[0]?.toLowerCase();
+  return host === "162.243.186.191";
 }
 
 async function hashPassword(password: string, salt: string, iterations = passwordIterations) {
@@ -204,13 +210,14 @@ export async function loginWithPassword(formData: FormData): Promise<LoginResult
   const cookieStore = await cookies();
   const headerList = await headers();
   const cookieDomain = requestHostDomain(headerList);
-  cookieStore.set(sessionCookieName, signToken(rawToken), {
+  const isIpFallback = requestIsIpFallback(headerList);
+  cookieStore.set(isIpFallback ? ipFallbackSessionCookieName : sessionCookieName, signToken(rawToken), {
     httpOnly: true,
-    secure: true,
+    secure: !isIpFallback,
     sameSite: "lax",
     path: "/",
     maxAge: sessionMaxAgeSeconds,
-    ...(cookieDomain ? { domain: cookieDomain } : {}),
+    ...(!isIpFallback && cookieDomain ? { domain: cookieDomain } : {}),
   });
   cookieStore.delete(legacySessionCookieName);
   await auditAuth({
@@ -278,7 +285,10 @@ export async function signupAction(_previousState: AuthActionState, formData: Fo
 
 export async function logout() {
   const cookieStore = await cookies();
-  const token = readSignedToken(cookieStore.get(sessionCookieName)?.value) ?? readSignedToken(cookieStore.get(legacySessionCookieName)?.value);
+  const token =
+    readSignedToken(cookieStore.get(sessionCookieName)?.value) ??
+    readSignedToken(cookieStore.get(legacySessionCookieName)?.value) ??
+    readSignedToken(cookieStore.get(ipFallbackSessionCookieName)?.value);
   if (token) {
     const result = await query<{ id: string; tenantId: string; userId: string }>(
       `update "AuthSession"
@@ -303,6 +313,7 @@ export async function logout() {
   const cookieDomain = requestHostDomain(headerList);
   cookieStore.delete(sessionCookieName);
   cookieStore.delete(legacySessionCookieName);
+  cookieStore.delete(ipFallbackSessionCookieName);
   if (cookieDomain) {
     cookieStore.set(sessionCookieName, "", {
       httpOnly: true,
@@ -317,7 +328,10 @@ export async function logout() {
 
 export async function currentSession() {
   const cookieStore = await cookies();
-  const token = readSignedToken(cookieStore.get(sessionCookieName)?.value) ?? readSignedToken(cookieStore.get(legacySessionCookieName)?.value);
+  const token =
+    readSignedToken(cookieStore.get(sessionCookieName)?.value) ??
+    readSignedToken(cookieStore.get(legacySessionCookieName)?.value) ??
+    readSignedToken(cookieStore.get(ipFallbackSessionCookieName)?.value);
   if (!token) return null;
 
   const result = await query<AuthSessionRow>(

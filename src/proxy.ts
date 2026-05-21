@@ -1,15 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-const sessionCookieNames = ["__Secure-1dentalai_session", "__Host-1dentalai_session"];
+const sessionCookieNames = ["__Secure-1dentalai_session", "__Host-1dentalai_session", "1dentalai_session"];
 const canonicalHost = "1dentalai.com";
 
 function canonicalizeHost(request: NextRequest) {
   const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || "";
   const hostname = host.split(":")[0]?.toLowerCase();
-  if (!hostname || hostname === canonicalHost || hostname === "localhost" || hostname === "127.0.0.1") {
+  if (!hostname || hostname === canonicalHost || hostname === "localhost" || hostname === "127.0.0.1" || hostname === "162.243.186.191") {
     return null;
   }
-  if (hostname === "www.1dentalai.com" || hostname === "app.1dentalai.com" || hostname === "162.243.186.191") {
+  if (hostname === "www.1dentalai.com" || hostname === "app.1dentalai.com") {
     return NextResponse.redirect(new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, `https://${canonicalHost}`), 308);
   }
   return null;

@@ -4,9 +4,10 @@ import { logout } from "@/lib/auth";
 function publicLoginUrl(request: Request) {
   const hostHeader = request.headers.get("x-forwarded-host") || request.headers.get("host") || "";
   const hostOnly = hostHeader.split(":")[0]?.toLowerCase();
+  const isIpFallback = hostOnly === "162.243.186.191";
   const isFirstParty = hostOnly === "1dentalai.com" || Boolean(hostOnly?.endsWith(".1dentalai.com"));
-  const host = isFirstParty ? hostHeader : "1dentalai.com";
-  const proto = isFirstParty ? "https" : "https";
+  const host = isFirstParty || isIpFallback ? hostHeader : "1dentalai.com";
+  const proto = isIpFallback ? "http" : "https";
   return new URL("/app?loggedOut=1", `${proto}://${host}`);
 }
 

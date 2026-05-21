@@ -5,9 +5,10 @@ function publicUrl(pathname: string, request: Request) {
   const hostHeader = request.headers.get("x-forwarded-host") || request.headers.get("host") || "";
   const hostOnly = hostHeader.split(":")[0]?.toLowerCase();
   const isLocal = /^(0\.0\.0\.0|127\.0\.0\.1|localhost)$/.test(hostOnly);
+  const isIpFallback = hostOnly === "162.243.186.191";
   const isFirstParty = hostOnly === "1dentalai.com" || Boolean(hostOnly?.endsWith(".1dentalai.com"));
-  const host = isFirstParty ? hostHeader : isLocal ? "1dentalai.com" : "1dentalai.com";
-  const proto = isFirstParty || !isLocal ? "https" : "http";
+  const host = isFirstParty || isIpFallback ? hostHeader : isLocal ? "1dentalai.com" : "1dentalai.com";
+  const proto = isIpFallback || isLocal ? "http" : "https";
   return new URL(pathname, `${proto}://${host}`);
 }
 
