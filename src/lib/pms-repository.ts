@@ -2610,6 +2610,21 @@ export function classifyEngagementWork(eventType: string) {
   return { ownerRoleKey: "marketing_growth", taskType: "PATIENT_ENGAGEMENT_REVIEW", priority: "NORMAL" };
 }
 
+async function safeEngagementRows<T>(label: string, promise: Promise<{ rows: T[] }>) {
+  try {
+    return await promise;
+  } catch (error) {
+    return {
+      rows: [],
+      readinessError: {
+        area: label,
+        control: error instanceof Error ? error.message : "This PMS lane could not be loaded.",
+        status: "DATA_READINESS_REVIEW",
+      },
+    };
+  }
+}
+
 export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
   const [events, recoveryCases, sourceSignals, patients, lifecycle, recallQueue, brokenAppointments, waitlist, postOpQueue, crossModuleTasks, governance] = await Promise.all([
     query(
@@ -2694,7 +2709,7 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
       [tenantId],
     ),
     listPatients(tenantId),
-    query(
+    safeEngagementRows("Appointment lifecycle", query(
       `select a."id", a."patientId", a."appointmentType", a."startsAt", a."status", a."readinessStatus", p."firstName", p."lastName", p."chartNumber",
         cp."consentStatus", cp."quietHoursStart", cp."quietHoursEnd",
         coalesce(forms."openForms", 0)::int as "openForms",
@@ -2724,8 +2739,8 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
        order by a."startsAt" asc
        limit 12`,
       [tenantId],
-    ),
-    query(
+    )),
+    safeEngagementRows("Recall queue", query(
       `select r.*, p."firstName", p."lastName", p."chartNumber", cp."consentStatus", cp."quietHoursStart", cp."quietHoursEnd"
        from "PmsRecall" r
        join "PmsPatient" p on p."id" = r."patientId"
@@ -2740,8 +2755,8 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
        order by r."dueDate" asc
        limit 10`,
       [tenantId],
-    ),
-    query(
+    )),
+    safeEngagementRows("Broken appointment recovery", query(
       `select a."id", a."patientId", a."appointmentType", a."startsAt", a."status", p."firstName", p."lastName", p."chartNumber"
        from "PmsAppointment" a
        join "PmsPatient" p on p."id" = a."patientId"
@@ -2753,8 +2768,8 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
        order by a."startsAt" desc
        limit 10`,
       [tenantId],
-    ),
-    query(
+    )),
+    safeEngagementRows("Waitlist and ASAP fill", query(
       `select ar.*, p."firstName", p."lastName", p."chartNumber"
        from "PmsAppointmentRequest" ar
        left join "PmsPatient" p on p."id" = ar."patientId"
@@ -2762,8 +2777,8 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
        order by case ar."urgency" when 'HIGH' then 0 when 'NORMAL' then 1 else 2 end, ar."createdAt" asc
        limit 10`,
       [tenantId],
-    ),
-    query(
+    )),
+    safeEngagementRows("Post-op follow-up", query(
       `select pl."id", pl."patientId", pl."appointmentId", pl."serviceDate", pl."status",
         p."firstName", p."lastName", p."chartNumber", pc."code", pc."description",
         coalesce(events."postOpCount", 0)::int as "postOpCount"
@@ -2780,8 +2795,8 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
        order by pl."serviceDate" desc
        limit 10`,
       [tenantId],
-    ),
-    query(
+    )),
+    safeEngagementRows("Cross-module PMS tasks", query(
       `select t.*, p."firstName", p."lastName", p."chartNumber"
        from "PmsTask" t
        left join "PmsPatient" p on p."id" = t."patientId"
@@ -2790,7 +2805,7 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
        order by case t."priority" when 'HIGH' then 0 when 'NORMAL' then 1 else 2 end, t."dueAt" asc nulls last, t."createdAt" desc
        limit 12`,
       [tenantId],
-    ),
+    )),
     Promise.resolve([
       { area: "Consent", control: "SMS/email/portal outreach checks patient communication preferences and status before approval.", status: "LIVE_GATED" },
       { area: "Quiet hours", control: "Quiet-hour windows are surfaced with every staged item; approval is queue-only and does not send.", status: "LIVE_GATED" },
@@ -2811,7 +2826,12 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
     waitlist: waitlist.rows,
     postOpQueue: postOpQueue.rows,
     crossModuleTasks: crossModuleTasks.rows,
-    governance,
+    governance: [
+      ...governance,
+      ...[lifecycle, recallQueue, brokenAppointments, waitlist, postOpQueue, crossModuleTasks]
+        .map((lane) => "readinessError" in lane ? lane.readinessError : null)
+        .filter(Boolean),
+    ],
   };
 }
 
