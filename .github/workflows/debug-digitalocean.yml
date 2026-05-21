@@ -24,16 +24,31 @@ jobs:
             cd "${DEPLOY_PATH}"
             docker compose -f docker-compose.yml -f docker-compose.public.yml logs --tail=120 app
             docker compose -f docker-compose.yml -f docker-compose.public.yml exec -T postgres psql -U dentalai_app -d dentalai_prod -c "
-              select b.\"id\", b.\"firstName\", b.\"lastName\", b.\"insurancePayerName\", b.\"eligibilityStatus\", b.\"appointmentId\", b.\"providerId\", b.\"operatoryId\", b.\"startsAt\"
-              from \"PmsOnlineBooking\" b
-              where b.\"email\" like 'qa-online-booking%'
-              order by b.\"createdAt\" desc;
-            "
-            docker compose -f docker-compose.yml -f docker-compose.public.yml exec -T postgres psql -U dentalai_app -d dentalai_prod -c "
-              select a.\"id\", p.\"firstName\", p.\"lastName\", a.\"providerId\", a.\"operatoryId\", a.\"startsAt\", a.\"endsAt\", a.\"status\", a.\"appointmentType\"
-              from \"PmsAppointment\" a
-              left join \"PmsPatient\" p on p.\"id\" = a.\"patientId\"
-              where p.\"email\" like 'qa-online-booking%' or a.\"notes\" ilike '%QA validation booking%'
-              order by a.\"startsAt\";
+              create temporary table qa_appointments as
+                select distinct b.\"appointmentId\" as id
+                from \"PmsOnlineBooking\" b
+                where b.\"appointmentId\" is not null
+                  and (b.\"firstName\" in ('QAOnline', 'QAOnline2', 'PWOnline')
+                    or b.\"email\" in ('qa-online-booking@example.test', 'qa-online-booking-2@example.test', 'pw-online-booking@example.test')
+                    or b.\"patientNote\" ilike '%validation booking%');
+              create temporary table qa_patients as
+                select distinct b.\"patientId\" as id
+                from \"PmsOnlineBooking\" b
+                where b.\"patientId\" is not null
+                  and (b.\"firstName\" in ('QAOnline', 'QAOnline2', 'PWOnline')
+                    or b.\"email\" in ('qa-online-booking@example.test', 'qa-online-booking-2@example.test', 'pw-online-booking@example.test')
+                    or b.\"patientNote\" ilike '%validation booking%');
+              delete from \"PmsAppointmentStatusHistory\" where \"appointmentId\" in (select id from qa_appointments);
+              delete from \"PmsOnlineBooking\"
+              where \"firstName\" in ('QAOnline', 'QAOnline2', 'PWOnline')
+                 or \"email\" in ('qa-online-booking@example.test', 'qa-online-booking-2@example.test', 'pw-online-booking@example.test')
+                 or \"patientNote\" ilike '%validation booking%';
+              delete from \"PmsAppointment\" where \"id\" in (select id from qa_appointments);
+              delete from \"PmsPatient\" where \"id\" in (select id from qa_patients);
+              select count(*) as remaining_qa_bookings
+              from \"PmsOnlineBooking\"
+              where \"firstName\" in ('QAOnline', 'QAOnline2', 'PWOnline')
+                 or \"email\" in ('qa-online-booking@example.test', 'qa-online-booking-2@example.test', 'pw-online-booking@example.test')
+                 or \"patientNote\" ilike '%validation booking%';
             "
           EOF
