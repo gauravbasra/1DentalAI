@@ -10,6 +10,24 @@ The current 1DentalAI app has PMS workbenches, connector contracts, and a produc
 
 Phase 3 builds the cloud PMS core first. After that, RCM, phone, reputation, AI Studio, Local SEO, AI scribe, AI perio, imaging, payments, and analytics become workflows around real PMS entities instead of disconnected pages.
 
+## Architecture Correction
+
+The current Phase 2 app still has an architectural problem: it uses one generic module renderer and one generic workbench renderer. That pattern is rejected for production product work. It makes different domains look and behave the same even when the users, tasks, data, urgency, and decisions are completely different.
+
+Phase 3 must not extend the generic renderer pattern. The PMS must have domain-specific pages and components:
+
+- appointment book page with provider columns and operatory lanes
+- patient search and patient profile pages
+- chart page with medical alerts, clinical history, odontogram structure, notes, and evidence
+- perio page with tooth/site measurement UI
+- treatment planning page with procedure sequencing, estimates, acceptance, and status
+- ledger page with charges, payments, adjustments, claims, and balances
+- insurance page with plans, benefits, eligibility, estimates, and claim readiness
+- documents/forms page with patient documents tied to appointments, claims, referrals, and treatment
+- task page with role ownership and audit trail
+
+Shared UI primitives are allowed, but the workflow and page composition must be bespoke to the PMS domain. This same rule applies to future RCM, phone, reputation, AI Studio, Local SEO, and clinical AI phases.
+
 ## Research Basis
 
 Archy shows the product direction: cloud PMS, scheduling, online forms, insurance verification, lab tracking, reporting, imaging, payments, team management, AI scribe, AI verification, AI communications, and AI reporting in one platform.
@@ -199,10 +217,13 @@ Add:
 - Use provider columns, operatory lanes, patient header, tabs, chart panels, perio grid, treatment-plan table, ledger table, and document/task lists.
 - Do not use marketing-page hero language.
 - Every button must call an API or show a real permission/setup block.
+- Do not render PMS pages through `/app/modules/page.tsx` or the generic `/app/work/[slug]` renderer. Phase 3 PMS routes must use PMS-specific page components and PMS-specific data.
+- `/app/modules` may remain only as a product directory/status index; it cannot be the working surface for PMS, RCM, clinical, phone, marketing, or AI workflows.
 
 ## Acceptance Criteria
 
 - PMS has its own nav and routes.
+- PMS pages are not rendered by the generic module or generic workbench renderer.
 - Patient search opens a real patient profile from Postgres.
 - Schedule renders provider/operatories and appointments from Postgres.
 - Patient chart renders clinical data from Postgres.
