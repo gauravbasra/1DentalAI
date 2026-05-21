@@ -42,7 +42,10 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.DO_SSH_PRIVATE_KEY }}" > ~/.ssh/do_deploy_key
           chmod 600 ~/.ssh/do_deploy_key
-          ssh-keyscan -p "${DEPLOY_PORT}" -H "${{ secrets.DO_SSH_HOST }}" >> ~/.ssh/known_hosts
+          for i in 1 2 3 4 5; do
+            ssh-keyscan -p "${DEPLOY_PORT}" -H "${{ secrets.DO_SSH_HOST }}" >> ~/.ssh/known_hosts && break
+            sleep 3
+          done
 
       - name: Sync release to droplet
         run: |
@@ -50,12 +53,12 @@ jobs:
             --exclude='.git' \
             --exclude='node_modules' \
             --exclude='.next/cache' \
-            -e "ssh -p ${DEPLOY_PORT} -i ~/.ssh/do_deploy_key" \
+            -e "ssh -p ${DEPLOY_PORT} -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new" \
             ./ "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}:${DEPLOY_PATH}/"
 
       - name: Provision database and run migrations
         run: |
-          ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
+          ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
             set -euo pipefail
             cd "${DEPLOY_PATH}"
             if [ ! -f .env ] || ! grep -q '^DB_PASSWORD_ENCODING=hex$' .env; then
@@ -78,7 +81,7 @@ jobs:
 
       - name: Install and restart 1DentalAI service
         run: |
-          ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
+          ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
             set -euo pipefail
             cd "${DEPLOY_PATH}"
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build app
