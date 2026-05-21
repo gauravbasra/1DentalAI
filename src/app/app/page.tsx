@@ -11,10 +11,10 @@ const accessOptions = [
 export default async function AppLogin({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; loggedOut?: string }>;
+  searchParams: Promise<{ next?: string; loggedOut?: string; error?: string }>;
 }) {
   const params = await searchParams;
-  const next = params.next?.startsWith("/app") ? params.next : "/app/overview";
+  const next = params.next && (params.next.startsWith("/app") || params.next.startsWith("/admin")) ? params.next : "/app/overview";
 
   return (
     <main className="min-h-screen bg-[#f3f4f6] text-neutral-950">
@@ -63,7 +63,7 @@ export default async function AppLogin({
               You have been signed out.
             </p>
           ) : null}
-          <LoginForm next={next} />
+          <LoginForm next={next} error={Boolean(params.error)} />
 
           <div className="mt-6 rounded-lg bg-neutral-50 p-4">
             <p className="text-sm font-semibold text-neutral-900">Compliance posture</p>

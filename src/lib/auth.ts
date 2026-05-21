@@ -44,6 +44,10 @@ export type AuthActionState = {
 
 export type CurrentSession = AuthSessionRow;
 
+type LoginResult = AuthActionState & {
+  redirectTo?: string;
+};
+
 function authSecret() {
   return process.env.ONE_DENTAL_AUTH_SECRET || process.env.NEXTAUTH_SECRET || process.env.DATABASE_URL || "local-1dentalai-development-secret";
 }
@@ -126,7 +130,7 @@ async function auditAuth(input: {
   );
 }
 
-export async function loginAction(_previousState: AuthActionState, formData: FormData): Promise<AuthActionState> {
+export async function loginWithPassword(formData: FormData): Promise<LoginResult> {
   const email = normalizeEmail(formData.get("email"));
   const password = String(formData.get("password") ?? "");
   const next = String(formData.get("next") ?? "/app/overview");
@@ -209,10 +213,19 @@ export async function loginAction(_previousState: AuthActionState, formData: For
   });
 
   if (user.roleKey === "super_admin" && (!next || next === "/app/overview")) {
-    redirect("/admin/settings");
+    return { ok: true, redirectTo: "/admin/settings" };
   }
 
-  redirect((next.startsWith("/app") || next.startsWith("/admin")) && next !== "/app" ? next : "/app/overview");
+  return {
+    ok: true,
+    redirectTo: (next.startsWith("/app") || next.startsWith("/admin")) && next !== "/app" ? next : "/app/overview",
+  };
+}
+
+export async function loginAction(_previousState: AuthActionState, formData: FormData): Promise<AuthActionState> {
+  const result = await loginWithPassword(formData);
+  if (result.redirectTo) redirect(result.redirectTo);
+  return result;
 }
 
 export async function signupAction(_previousState: AuthActionState, formData: FormData): Promise<AuthActionState> {

@@ -1,15 +1,13 @@
 "use client";
 
 import { useActionState } from "react";
-import { loginFormAction, signupFormAction } from "@/lib/auth-actions";
+import { signupFormAction } from "@/lib/auth-actions";
 
 const initialState = { ok: false, message: "" };
 
-export function LoginForm({ next = "/app/overview" }: { next?: string }) {
-  const [state, formAction, pending] = useActionState(loginFormAction, initialState);
-
+export function LoginForm({ next = "/app/overview", error = false }: { next?: string; error?: boolean }) {
   return (
-    <form action={formAction} className="mt-6 space-y-5">
+    <form action="/login" method="post" className="mt-6 space-y-5">
       <input type="hidden" name="next" value={next} />
       <label className="block">
         <span className="text-sm font-semibold text-neutral-700">Email</span>
@@ -33,17 +31,16 @@ export function LoginForm({ next = "/app/overview" }: { next?: string }) {
           className="mt-2 w-full rounded-md border border-neutral-300 bg-white px-4 py-3 text-base outline-none transition placeholder:text-neutral-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100"
         />
       </label>
-      {state.message ? (
-        <p className={`rounded-md px-3 py-2 text-sm font-semibold ${state.ok ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"}`}>
-          {state.message}
+      {error ? (
+        <p className="rounded-md bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-800">
+          We could not verify that account. Check the email and password, then try again.
         </p>
       ) : null}
       <button
         type="submit"
-        disabled={pending}
         className="inline-flex w-full items-center justify-center rounded-md bg-neutral-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-neutral-400"
       >
-        {pending ? "Verifying..." : "Sign in"}
+        Sign in
       </button>
     </form>
   );
