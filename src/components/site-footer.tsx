@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { navItems } from "@/lib/site-data";
 
@@ -6,11 +7,14 @@ export function SiteFooter() {
     <footer className="border-t border-neutral-200 bg-white">
       <div className="mx-auto grid max-w-7xl gap-10 px-6 py-12 sm:px-8 lg:grid-cols-[1.3fr_1fr]">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-700 text-lg font-black text-white">
-              1
-            </span>
-            <p className="text-lg font-semibold text-neutral-950">1DentalAI</p>
+          <div className="flex items-center">
+            <Image
+              src="/wordmark-light.svg"
+              alt="1dentalAI.com"
+              width={300}
+              height={90}
+              className="h-11 w-[168px] object-contain"
+            />
           </div>
           <p className="mt-3 max-w-xl text-sm leading-6 text-neutral-600">
             A dental AI operating system for practices that want phones,

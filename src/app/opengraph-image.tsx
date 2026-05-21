@@ -17,40 +17,27 @@ export default function Image() {
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
-          background: "linear-gradient(135deg, #ecfeff 0%, #f8fafc 45%, #ffffff 100%)",
-          color: "#0f172a",
+          background:
+            "radial-gradient(circle at 16% 34%, rgba(14,165,233,0.48), transparent 28%), radial-gradient(circle at 84% 28%, rgba(37,99,235,0.34), transparent 26%), linear-gradient(135deg, #020617 0%, #111827 52%, #030712 100%)",
+          color: "#f8fafc",
           padding: 72,
           fontFamily: "Arial",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-          <div
-            style={{
-              width: 72,
-              height: 72,
-              borderRadius: 18,
-              background: "#0e7490",
-              color: "white",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 42,
-              fontWeight: 800,
-            }}
-          >
-            1
+          <div style={{ display: "flex", fontSize: 42, fontWeight: 900, letterSpacing: -2 }}>
+            <span style={{ color: "#38bdf8" }}>1</span>dental<span style={{ color: "#2563eb" }}>AI</span><span style={{ color: "#94a3b8" }}>.com</span>
           </div>
-          <div style={{ fontSize: 36, fontWeight: 800 }}>1DentalAI</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column" }}>
           <div style={{ fontSize: 72, lineHeight: 0.94, fontWeight: 800, maxWidth: 940 }}>
             Dental AI operating system for modern practices
           </div>
-          <div style={{ marginTop: 28, fontSize: 30, lineHeight: 1.25, color: "#334155", maxWidth: 880 }}>
+          <div style={{ marginTop: 28, fontSize: 30, lineHeight: 1.25, color: "#cbd5e1", maxWidth: 880 }}>
             Phones, insurance, RCM, clinical AI, reputation, and analytics in one accountable workflow.
           </div>
         </div>
-        <div style={{ display: "flex", gap: 14, fontSize: 24, color: "#0e7490", fontWeight: 700 }}>
+        <div style={{ display: "flex", gap: 14, fontSize: 24, color: "#67e8f9", fontWeight: 700 }}>
           <span>AI receptionist</span>
           <span>•</span>
           <span>Clinical scribe</span>

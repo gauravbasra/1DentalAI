@@ -1,0 +1,49 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="brandGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(150 186) rotate(20) scale(190 150)">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="0.56" stop-color="#2563EB"/>
+      <stop offset="0.82" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="aiGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1014 180) rotate(22) scale(165 115)">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="0.55" stop-color="#2563EB"/>
+      <stop offset="0.8" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mark" x1="58" y1="70" x2="260" y2="286" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="0.5" stop-color="#0EA5E9"/>
+      <stop offset="0.75" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <linearGradient id="ai" x1="970" y1="84" x2="1138" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="0.52" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <filter id="markGlow" x="8" y="34" width="300" height="300" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="18" flood-color="#0EA5E9" flood-opacity="0.92"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="28" flood-color="#7C3AED" flood-opacity="0.42"/>
+    </filter>
+    <filter id="textGlow" x="273" y="73" width="885" height="210" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="14" flood-color="#2563EB" flood-opacity="0.42"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="24" flood-color="#0EA5E9" flood-opacity="0.24"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="360" fill="#020617"/>
+  <rect width="1200" height="360" fill="url(#brandGlow)" opacity="0.55"/>
+  <rect width="1200" height="360" fill="url(#aiGlow)" opacity="0.66"/>
+  <g filter="url(#markGlow)">
+    <path d="M66 150C80 144 95 136 109 128C123 120 134 109 149 106C160 103 171 105 174 113C178 121 175 132 172 143L135 278C132 290 133 300 144 302C156 304 165 298 171 287L196 239C206 219 229 222 234 243L246 288C249 300 257 306 268 303C279 300 284 290 281 276L258 130C255 113 244 102 226 102C214 102 203 106 191 110C176 115 160 120 144 119C128 118 113 114 97 114C80 114 69 125 66 150Z" fill="url(#mark)" stroke="#7DD3FC" stroke-width="8" stroke-linejoin="round"/>
+    <path d="M46 185L72 176L95 170L62 284C59 298 66 309 81 311C97 313 111 313 126 310" stroke="#38BDF8" stroke-width="29" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M157 198C169 198 178 207 178 219V287" stroke="#7DD3FC" stroke-width="25" stroke-linecap="round"/>
+    <path d="M163 162L174 187L199 198L174 209L163 234L151 209L127 198L151 187L163 162Z" fill="#C4B5FD"/>
+  </g>
+  <g filter="url(#textGlow)">
+    <text x="318" y="220" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="146" font-weight="800" letter-spacing="-5" fill="#020617" stroke="#172554" stroke-width="2">dental</text>
+    <text x="876" y="220" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="150" font-weight="900" letter-spacing="-5" fill="url(#ai)" stroke="#38BDF8" stroke-width="1.4">AI</text>
+    <text x="968" y="282" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="58" font-weight="700" letter-spacing="11" fill="#111827" stroke="#334155" stroke-width="0.8">.com</text>
+  </g>
+</svg>
