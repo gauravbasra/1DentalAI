@@ -62,7 +62,8 @@ jobs:
 
       - name: Provision database and run migrations
         run: |
-          ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
+          for i in 1 2 3; do
+            timeout 180s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
             set -euo pipefail
             cd "${DEPLOY_PATH}"
             if [ ! -f .env ] || ! grep -q '^DB_PASSWORD_ENCODING=hex$' .env; then
@@ -82,10 +83,14 @@ jobs:
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
             docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate < /dev/null
           EOF
+            sleep 10
+          done
+          exit 1
 
       - name: Install and restart 1DentalAI service
         run: |
-          ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
+          for i in 1 2 3; do
+            timeout 240s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
             set -euo pipefail
             cd "${DEPLOY_PATH}"
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build app
@@ -96,6 +101,9 @@ jobs:
             curl -fsS http://127.0.0.1:3001/api/health
             curl -fsS http://127.0.0.1:3001/api/database/health
           EOF
+            sleep 10
+          done
+          exit 1
 
       - name: Verify public health
         run: |
