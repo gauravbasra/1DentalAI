@@ -7,7 +7,7 @@ import {
 } from "@/lib/foundation-data";
 
 const appNav = [
-  { href: "/app", label: "Overview" },
+  { href: "/app/overview", label: "Overview" },
   { href: "/app/huddle", label: "Huddle" },
   { href: "/app/patient-finder", label: "Patient Finder" },
   { href: "/app/pms", label: "PMS" },
