@@ -326,9 +326,10 @@ async function revenueStatusAction(formData: FormData) {
   revalidatePath("/app/rcm");
 }
 
-export default async function RcmPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
+export default async function RcmPage({ searchParams }: { searchParams: Promise<{ role?: string; view?: string }> }) {
   const params = await searchParams;
   const role = getRole(params.role);
+  const view = ["today", "benefits", "auth", "claims", "denials", "era", "revenue", "queue"].includes(params.view ?? "") ? String(params.view) : "today";
   const center = await getRcmOperatingCenter();
   const items = center.items as RcmItemRow[];
   const claims = center.claims as ClaimRow[];
@@ -353,6 +354,7 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
         body="RCM work starts from the PMS: treatment plans, coverage, benefits, clinical evidence, claims, payer follow-up, EOB/ERA posting, ledger balances, payments, and revenue integrity all stay tied to the patient record."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/rcm" />
+      <RcmViewNav active={view} roleKey={role.key} />
 
       <section className="grid gap-3 md:grid-cols-5">
         <Metric label="Coverage reviews" value={benefits.filter((row) => row.eligibilityStatus !== "ACTIVE").length} detail="eligibility or benefit gaps" />
@@ -362,7 +364,7 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
         <Metric label="Leakage" value={<Money cents={Number(metrics.leakageDollars)} />} detail="recoverable variance" />
       </section>
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+      {(view === "today" || view === "benefits") ? <section className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <PmsCard title="Coverage and benefits" eyebrow="Eligibility, annual max, deductible, limitations">
           <div className="grid gap-3 lg:grid-cols-2">
             {benefits.map((row) => (
@@ -409,9 +411,9 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[0.62fr_1.38fr]">
+      {view === "auth" ? <section className="mt-4 grid gap-4 xl:grid-cols-[0.62fr_1.38fr]">
         <PmsCard title="Stage prior authorization" eyebrow="Evidence bundle before payer submission">
           <form action={priorAuthAction} className="grid gap-3">
             <label className="grid gap-1 text-xs font-semibold text-neutral-700">Treatment plan<select name="treatmentPlanKey" required className="rounded-md border border-neutral-300 px-3 py-2 text-sm">{treatmentPlans.map((plan) => <option key={plan.id} value={`${plan.patientId}|${plan.id}|${plan.patientInsuranceId ?? ""}|${plan.payerName ?? ""}|${plan.totalFeeCents}`}>{plan.lastName}, {plan.firstName} - {plan.name} - {plan.payerName ?? "no payer"}</option>)}</select></label>
@@ -439,9 +441,9 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
+      {(view === "today" || view === "claims") ? <section className="mt-4 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <PmsCard title="Claim management" eyebrow="Line readiness, attachments, payer exposure">
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
@@ -475,9 +477,9 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
             <button disabled={!claims.length} className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white disabled:bg-neutral-300">Create denial case</button>
           </form>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-2">
+      {view === "denials" ? <section className="mt-4 grid gap-4 xl:grid-cols-2">
         <PmsCard title="Denial management" eyebrow="Appeals, root cause, evidence">
           <div className="grid gap-3">
             {denials.map((denial) => (
@@ -521,9 +523,9 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-2">
+      {view === "era" ? <section className="mt-4 grid gap-4 xl:grid-cols-2">
         <PmsCard title="EOB / ERA posting" eyebrow="Reconcile, post, update claim and ledger">
           <div className="grid gap-3">
             {eras.map((era) => (
@@ -561,9 +563,9 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+      {(view === "today" || view === "revenue" || view === "queue") ? <section className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <PmsCard title="Revenue integrity" eyebrow="Underpayments, unposted ERA, missed charges, write-off review">
           <div className="grid gap-3 lg:grid-cols-2">
             {revenueFindings.map((finding) => (
@@ -582,7 +584,7 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
           </div>
         </PmsCard>
 
-        <PmsCard title="General RCM queue" eyebrow="Manual exceptions and escalations">
+        {view === "revenue" ? null : <PmsCard title="General RCM queue" eyebrow="Manual exceptions and escalations">
           <form action={createAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <Select name="workType" label="Work type" options={["ELIGIBILITY_AND_BENEFITS", "PRIOR_AUTH", "CLAIM_ATTACHMENT", "DENIAL_APPEAL", "ERA_EOB_POSTING", "REVENUE_INTEGRITY", "CREDENTIALING", "PATIENT_BALANCE"]} />
@@ -612,14 +614,42 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
               </WorkCard>
             ))}
           </div>
-        </PmsCard>
-      </section>
+        </PmsCard>}
+      </section> : null}
     </FoundationShell>
   );
 }
 
 function clean(value: string) {
   return value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function RcmViewNav({ active, roleKey }: { active: string; roleKey: string }) {
+  const items = [
+    { key: "today", label: "Today" },
+    { key: "benefits", label: "Benefits" },
+    { key: "auth", label: "Prior Auth" },
+    { key: "claims", label: "Claims" },
+    { key: "denials", label: "Denials" },
+    { key: "era", label: "ERA / EOB" },
+    { key: "revenue", label: "Revenue Integrity" },
+    { key: "queue", label: "Queue" },
+  ];
+  return (
+    <div className="mb-4 flex gap-1 overflow-x-auto rounded-lg border border-neutral-200 bg-white p-1 shadow-sm">
+      {items.map((item) => (
+        <a
+          key={item.key}
+          href={`/app/rcm?role=${roleKey}&view=${item.key}`}
+          className={`shrink-0 rounded-md px-3 py-2 text-xs font-semibold transition ${
+            active === item.key ? "bg-neutral-950 text-white" : "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950"
+          }`}
+        >
+          {item.label}
+        </a>
+      ))}
+    </div>
+  );
 }
 
 function jsonSummary(value: unknown) {
