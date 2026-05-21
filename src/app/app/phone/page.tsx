@@ -69,7 +69,7 @@ type ControlRow = { id: string; actionType: string; requestedByRole: string; tar
 type VoicemailRow = { id: string; callerNumber: string | null; callerName: string | null; status: string; durationSeconds: number | null; transcription: string | null; ownerRoleKey: string; dueAt: string | null; extensionNumber: string | null; extensionName: string | null };
 type ChannelSettingRow = { id: string; channel: string; displayName: string; status: string; theme: unknown; nlpMode: string; knowledgeBaseStatus: string; schedulingStatus: string; formsStatus: string; connectorStatus: string; approvalPolicy: unknown; nextAction: string };
 type KnowledgeSourceRow = { id: string; title: string; sourceType: string; sourceModule: string; serviceLine: string | null; status: string; ownerRoleKey: string; contentSummary: string; sourceUrl: string | null; lastReviewedAt: string | null; nextAction: string };
-type WebChatRow = { id: string; visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null; sourcePage: string | null; nlpIntent: string | null; nlpConfidence: number; status: string; transcriptSummary: string | null; schedulingOutcome: string; pmsWritebackStatus: string; leadFormName: string | null; serviceLine: string | null; ownerRoleKey: string; blockedReason: string | null; createdAt: string; updatedAt: string };
+type WebChatRow = { id: string; visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null; sourcePage: string | null; sourceChannel: string | null; campaignSource: string | null; referrerUrl: string | null; landingPageSlug: string | null; nlpIntent: string | null; nlpConfidence: number; leadScore: number; qualificationStage: string | null; status: string; transcriptSummary: string | null; schedulingOutcome: string; pmsWritebackStatus: string; leadFormName: string | null; serviceLine: string | null; ownerRoleKey: string; nextBestAction: string | null; staffOwnerDueAt: string | null; blockedReason: string | null; createdAt: string; updatedAt: string };
 type WebChatMessageRow = { id: string; conversationId: string; senderType: string; senderName: string | null; body: string; intent: string | null; sentiment: string | null; confidence: number; actionType: string | null; actionStatus: string; metadata: unknown; sourcePage: string | null; visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null; conversationStatus: string; createdAt: string };
 type LeadFormRow = { id: string; name: string; serviceLine: string; sourceChannel: string; status: string; fieldSchema: unknown; pmsMapping: unknown; routingRule: string | null; connectorStatus: string; conversionStatus: string; nextAction: string };
 type FormPacketRow = { id: string; packetType: string; status: string; deliveryChannel: string; pmsWritebackStatus: string; consentStatus: string; dueAt: string | null; nextAction: string; firstName: string | null; lastName: string | null; chartNumber: string | null; appointmentType: string | null; startsAt: string | null };
@@ -353,6 +353,12 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <MiniMetric label="PMS writeback" value={clean(chat.pmsWritebackStatus)} />
                   <MiniMetric label="Lead form" value={chat.leadFormName ?? "not captured"} />
                 </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Lead score" value={`${chat.leadScore ?? 0}`} />
+                  <MiniMetric label="Stage" value={clean(chat.qualificationStage ?? "new")} />
+                  <MiniMetric label="Source" value={clean(chat.campaignSource ?? chat.sourceChannel ?? "website")} />
+                </div>
+                {chat.nextBestAction ? <p className="mt-2 text-xs leading-5 text-neutral-700">Next best action: {chat.nextBestAction}</p> : null}
                 {chat.blockedReason ? <p className="mt-2 text-xs leading-5 text-amber-900">{chat.blockedReason}</p> : null}
               </div>
             ))}
@@ -695,8 +701,33 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
             <MiniMetric label="Staff entries" value={webchatAnalytics.staffEntries} />
             <MiniMetric label="Consent captured" value={webchatAnalytics.consentCaptured} />
             <MiniMetric label="Top intent" value={clean(webchatAnalytics.topIntent)} />
+            <MiniMetric label="Booking ready" value={webchatAnalytics.bookingReady} />
+            <MiniMetric label="Avg lead score" value={webchatAnalytics.averageLeadScore} />
+            <MiniMetric label="Top source" value={clean(webchatAnalytics.topCampaignSource)} />
           </div>
           <p className="mt-3 text-xs leading-5 text-neutral-600">Analytics are derived from saved visitor and assistant messages; no external AI or outbound send is claimed from this view.</p>
+        </PmsCard>
+
+        <PmsCard title="Lead qualification board" eyebrow="OutreachHub-style conversation-to-conversion queue">
+          <div className="grid gap-3">
+            {webChats.slice().sort((a, b) => Number(b.leadScore ?? 0) - Number(a.leadScore ?? 0)).slice(0, 6).map((chat) => (
+              <div key={`${chat.id}-qualification`} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{chat.visitorName ?? chat.visitorPhone ?? "Website visitor"} · score {chat.leadScore ?? 0}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{clean(chat.qualificationStage ?? "new")} · {clean(chat.campaignSource ?? "direct website")} · landing {chat.landingPageSlug ?? "unknown"}</p>
+                  </div>
+                  <StatusFor value={chat.qualificationStage ?? chat.status} />
+                </div>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">{chat.nextBestAction ?? chat.transcriptSummary}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Owner" value={clean(chat.ownerRoleKey)} />
+                  <MiniMetric label="Due" value={chat.staffOwnerDueAt ? new Date(chat.staffOwnerDueAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "not assigned"} />
+                  <MiniMetric label="PMS" value={clean(chat.pmsWritebackStatus)} />
+                </div>
+              </div>
+            ))}
+          </div>
         </PmsCard>
 
         <PmsCard title="NLP webchat queue" eyebrow="Lead capture, scheduling request handoff, PMS writeback">
@@ -716,7 +747,12 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <MiniMetric label="Lead form" value={chat.leadFormName ?? "none"} />
                   <MiniMetric label="Booking" value={clean(chat.schedulingOutcome)} />
                   <MiniMetric label="PMS" value={clean(chat.pmsWritebackStatus)} />
+                  <MiniMetric label="Lead score" value={`${chat.leadScore ?? 0}`} />
+                  <MiniMetric label="Stage" value={clean(chat.qualificationStage ?? "new")} />
+                  <MiniMetric label="Campaign" value={clean(chat.campaignSource ?? "direct website")} />
+                  <MiniMetric label="Landing" value={chat.landingPageSlug ?? "unknown"} />
                 </div>
+                {chat.nextBestAction ? <p className="mt-2 text-xs leading-5 text-neutral-700">Next best action: {chat.nextBestAction}</p> : null}
                 {chat.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{chat.blockedReason}</p> : null}
                 <form action={webchatStaffAction} className="mt-3 grid gap-2 rounded-md border border-neutral-200 bg-white p-3">
                   <input type="hidden" name="conversationId" value={chat.id} />
@@ -1161,6 +1197,14 @@ function buildWebchatAnalytics(webChats: WebChatRow[], messages: WebChatMessageR
     return acc;
   }, {});
   const topIntent = Object.entries(intentCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "UNCLASSIFIED";
+  const bookingReady = webChats.filter((chat) => chat.qualificationStage === "BOOKING_READY").length;
+  const averageLeadScore = webChats.length ? Math.round(webChats.reduce((sum, chat) => sum + Number(chat.leadScore ?? 0), 0) / webChats.length) : 0;
+  const sourceCounts = webChats.reduce<Record<string, number>>((acc, chat) => {
+    const source = chat.campaignSource ?? chat.sourceChannel ?? "DIRECT_WEBSITE";
+    acc[source] = (acc[source] ?? 0) + 1;
+    return acc;
+  }, {});
+  const topCampaignSource = Object.entries(sourceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "DIRECT_WEBSITE";
   return {
     openChats: webChats.filter((chat) => chat.status === "OPEN").length,
     handoffs,
@@ -1168,6 +1212,9 @@ function buildWebchatAnalytics(webChats: WebChatRow[], messages: WebChatMessageR
     staffEntries,
     consentCaptured,
     topIntent,
+    bookingReady,
+    averageLeadScore,
+    topCampaignSource,
   };
 }
 

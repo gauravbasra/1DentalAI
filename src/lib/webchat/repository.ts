@@ -18,6 +18,10 @@ type LeadCapture = {
   preferredTime?: string;
   patientStatus?: string;
   urgency?: string;
+  sourceChannel?: string;
+  campaignSource?: string;
+  referrerUrl?: string;
+  landingPageSlug?: string;
   consentAccepted?: boolean;
   privacyNoticeVersion?: string;
 };
@@ -112,6 +116,10 @@ export async function createWebchatSession(input: {
   preferredTime?: string;
   patientStatus?: string;
   urgency?: string;
+  sourceChannel?: string;
+  campaignSource?: string;
+  referrerUrl?: string;
+  landingPageSlug?: string;
   consentAccepted?: boolean;
   privacyNoticeVersion?: string;
 }) {
@@ -119,10 +127,11 @@ export async function createWebchatSession(input: {
   const id = newId("chat");
   const leadFormId = await selectLeadFormId(tenantId, input.serviceLine, "");
   const leadCapture = normalizeLeadCapture(input);
+  const qualification = qualifyLead({ analysis: analyzeMessage(`${input.serviceLine ?? ""} ${input.sourcePage ?? ""}`), leadCapture, body: input.sourcePage || "" });
   await query(
     `insert into "PatientWebChatConversation"
-      ("id", "tenantId", "visitorName", "visitorPhone", "visitorEmail", "sourcePage", "status", "transcriptSummary", "schedulingOutcome", "pmsWritebackStatus", "leadFormId", "ownerRoleKey", "blockedReason")
-     values ($1, $2, $3, $4, $5, $6, 'OPEN', $7, 'NOT_ATTEMPTED', 'PMS_CONNECTOR_REQUIRED', $8, $9, null)`,
+      ("id", "tenantId", "visitorName", "visitorPhone", "visitorEmail", "sourcePage", "sourceChannel", "campaignSource", "referrerUrl", "landingPageSlug", "leadScore", "qualificationStage", "status", "transcriptSummary", "schedulingOutcome", "pmsWritebackStatus", "leadFormId", "ownerRoleKey", "nextBestAction", "staffOwnerDueAt", "blockedReason")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'OPEN', $13, 'NOT_ATTEMPTED', 'PMS_CONNECTOR_REQUIRED', $14, $15, $16, current_timestamp + interval '30 minutes', null)`,
     [
       id,
       tenantId,
@@ -130,9 +139,16 @@ export async function createWebchatSession(input: {
       input.visitorPhone || null,
       input.visitorEmail || null,
       input.sourcePage || null,
+      leadCapture.sourceChannel || "WEBSITE",
+      leadCapture.campaignSource || inferCampaignSource(input.sourcePage),
+      leadCapture.referrerUrl || null,
+      leadCapture.landingPageSlug || inferLandingPageSlug(input.sourcePage),
+      qualification.leadScore,
+      qualification.qualificationStage,
       buildTranscriptSummary("Conversation started from website widget.", leadCapture),
       leadFormId,
       ownerForServiceLine(input.serviceLine),
+      qualification.nextBestAction,
     ],
   );
   await query(
@@ -197,7 +213,7 @@ export async function postWebchatMessage(input: {
   const tenantId = input.tenantId ?? defaultTenantId;
   const analysis = analyzeMessage(input.body);
   const leadCapture = normalizeLeadCapture(input.leadCapture ?? {});
-  await updateLeadCapture({ tenantId, conversationId: input.conversationId, leadCapture, body: input.body, analysis });
+  const qualification = await updateLeadCapture({ tenantId, conversationId: input.conversationId, leadCapture, body: input.body, analysis });
   const userMessageId = newId("msg");
   await query(
     `insert into "PatientWebChatMessage"
@@ -214,7 +230,7 @@ export async function postWebchatMessage(input: {
       analysis.confidence,
       analysis.actionType ?? null,
       analysis.actionStatus ?? "NONE",
-      JSON.stringify({ analyzer: "rules_v2", externalAiUsed: false, leadCapture, consentAccepted: Boolean(leadCapture.consentAccepted) }),
+      JSON.stringify({ analyzer: "rules_v3_dental_qualification", externalAiUsed: false, leadCapture, qualification, consentAccepted: Boolean(leadCapture.consentAccepted) }),
     ],
   );
   await query(
@@ -241,7 +257,7 @@ export async function postWebchatMessage(input: {
       knowledge.map((row) => row.id),
       analysis.actionType ?? null,
       analysis.actionStatus ?? "NONE",
-      JSON.stringify({ sourceTitles: knowledge.map((row) => row.heading ?? row.pageTitle), noClinicalDiagnosis: true, noExternalBooking: true }),
+      JSON.stringify({ sourceTitles: knowledge.map((row) => row.heading ?? row.pageTitle), noClinicalDiagnosis: true, noExternalBooking: true, qualification }),
     ],
   );
 
@@ -249,13 +265,17 @@ export async function postWebchatMessage(input: {
     `update "PatientWebChatConversation"
      set "nlpIntent" = $3,
          "nlpConfidence" = $4,
-         "transcriptSummary" = $5,
-         "schedulingOutcome" = case when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then $6 else "schedulingOutcome" end,
+         "leadScore" = greatest("leadScore", $5),
+         "qualificationStage" = $6,
+         "nextBestAction" = $7,
+         "staffOwnerDueAt" = current_timestamp + ($8::text)::interval,
+         "transcriptSummary" = $9,
+         "schedulingOutcome" = case when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then $10 else "schedulingOutcome" end,
          "pmsWritebackStatus" = case when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then 'PMS_CONNECTOR_REQUIRED' else "pmsWritebackStatus" end,
          "blockedReason" = case when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then 'PMS scheduling/writeback connector is not approved; staff must complete appointment work.' else "blockedReason" end,
          "updatedAt" = current_timestamp
      where "tenantId" = $1 and "id" = $2`,
-    [tenantId, input.conversationId, analysis.intent, analysis.confidence, `Latest visitor intent: ${analysis.intent}. ${input.body.slice(0, 180)}`, analysis.actionStatus ?? "STAFF_APPROVAL_REQUIRED"],
+    [tenantId, input.conversationId, analysis.intent, analysis.confidence, qualification.leadScore, qualification.qualificationStage, qualification.nextBestAction, qualification.dueIn, `Latest visitor intent: ${analysis.intent}. Score ${qualification.leadScore}. Stage ${qualification.qualificationStage}. ${input.body.slice(0, 180)}`, analysis.actionStatus ?? "STAFF_APPROVAL_REQUIRED"],
   );
 
   if (analysis.actionType && analysis.actionType !== "KNOWLEDGE_RESPONSE") {
@@ -267,9 +287,10 @@ export async function postWebchatMessage(input: {
     actionStatus: analysis.actionStatus ?? null,
     connectorBlocked: analysis.actionStatus !== "ANSWERED_WITH_GUARDRAILS",
     consentAccepted: Boolean(leadCapture.consentAccepted),
+    qualification,
   });
 
-  return { userMessageId, replyId, reply, analysis };
+  return { userMessageId, replyId, reply, analysis, qualification };
 }
 
 export async function postStaffWebchatEntry(input: {
@@ -336,6 +357,7 @@ export async function updateKnowledgeSourceReview(input: { tenantId?: string; id
 }
 
 async function createWebchatTask(input: { tenantId: string; conversationId: string; analysis: WebchatAnalysis; body: string; leadCapture: LeadCapture }) {
+  const qualification = qualifyLead({ analysis: input.analysis, leadCapture: input.leadCapture, body: input.body });
   const exists = await query<{ count: string }>(
     `select count(*)::text as count
      from "PhoneCallTask"
@@ -352,9 +374,9 @@ async function createWebchatTask(input: { tenantId: string; conversationId: stri
       input.tenantId,
       input.conversationId,
       input.analysis.actionType,
-      input.analysis.sentiment === "URGENT" ? "HIGH" : "NORMAL",
+      qualification.priority,
       input.analysis.intent === "INSURANCE_OR_PRICE" ? "treatment_coordinator" : "front_desk",
-      `Review webchat ${input.analysis.intent.toLowerCase().replaceAll("_", " ")}. Do not claim booking/writeback until PMS connector is approved. ${leadHandoffSummary(input.leadCapture)} Visitor said: ${input.body.slice(0, 160)}`,
+      `${qualification.nextBestAction} Do not claim booking/writeback until PMS connector is approved. ${leadHandoffSummary(input.leadCapture)} Visitor said: ${input.body.slice(0, 160)}`,
     ],
   );
 }
@@ -439,6 +461,7 @@ export async function crawlKnowledgePage(input: { tenantId?: string; url: string
 async function updateLeadCapture(input: { tenantId: string; conversationId: string; leadCapture: LeadCapture; body: string; analysis: WebchatAnalysis }) {
   const hasCapture = Object.values(input.leadCapture).some((value) => value !== undefined && value !== "" && value !== false);
   const leadFormId = await selectLeadFormId(input.tenantId, input.leadCapture.serviceLine, input.body);
+  const qualification = qualifyLead(input);
   await query(
     `update "PatientWebChatConversation"
      set "visitorName" = coalesce(nullif($3, ''), "visitorName"),
@@ -446,6 +469,10 @@ async function updateLeadCapture(input: { tenantId: string; conversationId: stri
          "visitorEmail" = coalesce(nullif($5, ''), "visitorEmail"),
          "leadFormId" = coalesce($6, "leadFormId"),
          "ownerRoleKey" = $7,
+         "sourceChannel" = coalesce(nullif($8, ''), "sourceChannel"),
+         "campaignSource" = coalesce(nullif($9, ''), "campaignSource"),
+         "referrerUrl" = coalesce(nullif($10, ''), "referrerUrl"),
+         "landingPageSlug" = coalesce(nullif($11, ''), "landingPageSlug"),
          "updatedAt" = current_timestamp
      where "tenantId" = $1 and "id" = $2`,
     [
@@ -456,6 +483,10 @@ async function updateLeadCapture(input: { tenantId: string; conversationId: stri
       input.leadCapture.visitorEmail ?? "",
       leadFormId,
       input.analysis.intent === "INSURANCE_OR_PRICE" ? "treatment_coordinator" : ownerForServiceLine(input.leadCapture.serviceLine),
+      input.leadCapture.sourceChannel ?? "",
+      input.leadCapture.campaignSource ?? "",
+      input.leadCapture.referrerUrl ?? "",
+      input.leadCapture.landingPageSlug ?? "",
     ],
   );
   if (hasCapture) {
@@ -465,6 +496,7 @@ async function updateLeadCapture(input: { tenantId: string; conversationId: stri
       [newId("evt"), input.tenantId, input.conversationId, JSON.stringify({ leadCapture: input.leadCapture, leadFormId })],
     );
   }
+  return qualification;
 }
 
 async function selectLeadFormId(tenantId: string, serviceLine?: string, body = "") {
@@ -492,9 +524,60 @@ function normalizeLeadCapture(input: LeadCapture): LeadCapture {
     preferredTime: cleanInput(input.preferredTime),
     patientStatus: cleanInput(input.patientStatus),
     urgency: cleanInput(input.urgency),
+    sourceChannel: cleanInput(input.sourceChannel) || "WEBSITE",
+    campaignSource: cleanInput(input.campaignSource),
+    referrerUrl: cleanInput(input.referrerUrl),
+    landingPageSlug: cleanInput(input.landingPageSlug),
     consentAccepted: input.consentAccepted === true,
     privacyNoticeVersion: cleanInput(input.privacyNoticeVersion) || "webchat-privacy-v1",
   };
+}
+
+function qualifyLead(input: { analysis: WebchatAnalysis; leadCapture: LeadCapture; body: string }) {
+  const hasContact = Boolean(input.leadCapture.visitorPhone || input.leadCapture.visitorEmail);
+  const urgent = input.analysis.intent === "EMERGENCY_TRIAGE" || input.leadCapture.urgency === "URGENT";
+  const scheduling = ["SCHEDULE_APPOINTMENT", "RESCHEDULE_APPOINTMENT"].includes(input.analysis.intent);
+  const implantOrHighValue = /implant|aligner|cosmetic|veneer|sedation|full arch|clear aligner/i.test(`${input.leadCapture.serviceLine ?? ""} ${input.body}`);
+  const financing = /insurance|financing|payment|cost|price|covered/i.test(input.body);
+  let leadScore = input.analysis.confidence;
+  if (hasContact) leadScore += 12;
+  if (urgent) leadScore += 15;
+  if (scheduling) leadScore += 10;
+  if (implantOrHighValue) leadScore += 8;
+  if (financing) leadScore += 4;
+  leadScore = Math.max(20, Math.min(100, leadScore));
+  const qualificationStage = urgent ? "URGENT_TRIAGE" : hasContact && scheduling ? "BOOKING_READY" : hasContact ? "QUALIFIED_LEAD" : scheduling ? "NEEDS_CONTACT" : "ENGAGED";
+  const priority = urgent || leadScore >= 85 ? "HIGH" : leadScore >= 65 ? "NORMAL" : "LOW";
+  const dueIn = urgent ? "10 minutes" : leadScore >= 85 ? "15 minutes" : leadScore >= 65 ? "30 minutes" : "4 hours";
+  const nextBestAction = urgent
+    ? "Call patient immediately, verify red-flag symptoms, and use emergency scheduling protocol."
+    : scheduling
+      ? "Confirm contact details, check PMS availability, and convert to an approved appointment request."
+      : financing
+        ? "Route to treatment coordinator for benefits, fee range, financing, and case-acceptance follow-up."
+        : "Qualify contact details, answer from approved knowledge, and assign the right practice owner.";
+  return { leadScore, qualificationStage, priority, dueIn, nextBestAction, hasContact, scheduling, urgent, implantOrHighValue };
+}
+
+function inferCampaignSource(sourcePage?: string) {
+  const source = sourcePage ?? "";
+  if (/utm_source=google/i.test(source)) return "GOOGLE_ADS";
+  if (/utm_source=gbp|google-business/i.test(source)) return "GOOGLE_BUSINESS_PROFILE";
+  if (/facebook|instagram|meta/i.test(source)) return "SOCIAL";
+  if (/implant/i.test(source)) return "IMPLANT_LANDING_PAGE";
+  if (/emergency/i.test(source)) return "EMERGENCY_LANDING_PAGE";
+  return "DIRECT_WEBSITE";
+}
+
+function inferLandingPageSlug(sourcePage?: string) {
+  if (!sourcePage) return "unknown";
+  try {
+    const url = new URL(sourcePage);
+    const slug = url.pathname.split("/").filter(Boolean).pop();
+    return slug || "home";
+  } catch {
+    return "unknown";
+  }
 }
 
 function cleanInput(value?: string) {
@@ -518,6 +601,7 @@ function leadHandoffSummary(leadCapture: LeadCapture) {
     leadCapture.preferredTime ? `preferred time ${leadCapture.preferredTime}` : "",
     leadCapture.patientStatus ? `patient status ${leadCapture.patientStatus}` : "",
     leadCapture.urgency ? `urgency ${leadCapture.urgency}` : "",
+    leadCapture.campaignSource ? `campaign ${leadCapture.campaignSource}` : "",
     leadCapture.consentAccepted ? "privacy/communication notice accepted" : "privacy/communication notice not accepted",
   ].filter(Boolean);
   return fields.length ? `Captured ${fields.join("; ")}.` : "";

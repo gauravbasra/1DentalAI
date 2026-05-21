@@ -27,7 +27,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
   var scriptEl = document.currentScript;
   var API_BASE = scriptEl && scriptEl.src ? new URL(scriptEl.src).origin : window.location.origin;
   var TENANT = ${JSON.stringify(tenant)};
-  var state = { open: false, session: null, visitor: { patientStatus: 'NEW_PATIENT', urgency: 'ROUTINE', consentAccepted: false }, sending: false, settings: null, messages: [] };
+  var state = { open: false, session: null, visitor: { patientStatus: 'NEW_PATIENT', urgency: 'ROUTINE', consentAccepted: false, sourceChannel: 'WEBSITE', campaignSource: campaignSource(), referrerUrl: document.referrer || '', landingPageSlug: landingSlug() }, sending: false, settings: null, messages: [] };
   var root = document.createElement('div');
   root.id = 'one-dental-ai-webchat';
   var shadow = root.attachShadow({ mode: 'open' });
@@ -59,6 +59,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       '.head{background:#0a0a0a;color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px}' +
       '.title{font-size:14px;font-weight:850}.sub{font-size:11px;color:#cbd5e1;margin-top:2px}.close{background:transparent;border:0;color:#fff;font-size:24px;line-height:1;cursor:pointer}' +
       '.identity{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border-bottom:1px solid #e5e5e5;background:#fafafa}.identity input,.identity select{min-width:0;border:1px solid #d4d4d4;border-radius:9px;padding:10px;font-size:13px;background:#fff}.identity input:first-child{grid-column:1/-1}.wide{grid-column:1/-1}.consent{grid-column:1/-1;display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start;border:1px solid #e5e5e5;border-radius:9px;background:#fff;padding:9px;font-size:11px;line-height:1.35;color:#525252}.consent input{margin-top:2px}.consent b{color:#171717}' +
+      '.chips{display:flex;gap:7px;overflow-x:auto;padding:10px 12px;border-bottom:1px solid #e5e5e5;background:#fff}.chip{white-space:nowrap;border:1px solid #d4d4d4;background:#fff;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}.chip:hover{border-color:'+primary+';color:'+primary+'}' +
       '.msgs{flex:1;overflow:auto;padding:14px;background:#f5f5f4;display:flex;flex-direction:column;gap:10px}.msg{max-width:86%;border-radius:13px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap}.bot{align-self:flex-start;background:#fff;border:1px solid #e5e5e5}.me{align-self:flex-end;background:'+primary+';color:#fff}' +
       '.composer{display:grid;grid-template-columns:1fr auto;gap:8px;padding:12px;border-top:1px solid #e5e5e5;background:#fff}.composer textarea{height:44px;resize:none;border:1px solid #d4d4d4;border-radius:10px;padding:10px;font-size:13px;font-family:inherit}.composer button{border:0;border-radius:10px;background:#0a0a0a;color:#fff;font-weight:850;padding:0 14px;cursor:pointer}.composer button:disabled{opacity:.55;cursor:not-allowed}.note{padding:9px 12px;font-size:11px;line-height:1.35;color:#525252;border-top:1px solid #eee;background:#fff}' +
       '@media(max-width:520px){.wrap{right:12px;bottom:12px}.panel{width:calc(100vw - 24px);height:calc(100vh - 88px)}.identity{grid-template-columns:1fr}}' +
@@ -94,6 +95,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
         select('urgency','Urgency', [['ROUTINE','Routine'],['THIS_WEEK','This week'],['URGENT','Urgent symptoms']]),
         consentNotice()
       ]),
+      quickChips(),
       messages,
       h('form', { class:'composer', onsubmit: submitMessage }, [
         h('textarea', { name:'message', placeholder:'Ask a question or request an appointment', maxlength:'3000' }, []),
@@ -101,6 +103,23 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       ]),
       h('div', { class:'note', text:'Appointment changes, insurance estimates, payments, and clinical decisions require staff verification and approved connectors.' }, [])
     ]);
+  }
+
+  function quickChips(){
+    return h('div', { class:'chips' }, [
+      h('button', { class:'chip', type:'button', onclick:function(){ seedPrompt('I want to schedule a dental appointment.'); }, text:'Book visit' }, []),
+      h('button', { class:'chip', type:'button', onclick:function(){ seedPrompt('I have tooth pain or swelling and need help.'); }, text:'Urgent pain' }, []),
+      h('button', { class:'chip', type:'button', onclick:function(){ seedPrompt('I want to know insurance or financing options.'); }, text:'Insurance/cost' }, []),
+      h('button', { class:'chip', type:'button', onclick:function(){ seedPrompt('I need to reschedule my appointment.'); }, text:'Reschedule' }, [])
+    ]);
+  }
+
+  function seedPrompt(text){
+    var textarea = shadow.querySelector('textarea[name="message"]');
+    if (textarea) {
+      textarea.value = text;
+      textarea.focus();
+    }
   }
 
   function input(key, label){
@@ -201,11 +220,36 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       preferredTime:state.visitor.preferredTime,
       patientStatus:state.visitor.patientStatus,
       urgency:state.visitor.urgency,
+      sourceChannel:state.visitor.sourceChannel,
+      campaignSource:state.visitor.campaignSource,
+      referrerUrl:state.visitor.referrerUrl,
+      landingPageSlug:state.visitor.landingPageSlug,
       consentAccepted:state.visitor.consentAccepted === true,
       privacyNoticeVersion:notice.version || 'webchat-privacy-v1'
     };
     Object.keys(extra || {}).forEach(function(key){ payload[key] = extra[key]; });
     return payload;
+  }
+
+  function campaignSource(){
+    try {
+      var url = new URL(window.location.href);
+      var source = url.searchParams.get('utm_source');
+      var campaign = url.searchParams.get('utm_campaign');
+      if (source || campaign) return [source, campaign].filter(Boolean).join(':').toUpperCase();
+      if (/implant/i.test(url.pathname)) return 'IMPLANT_LANDING_PAGE';
+      if (/emergency/i.test(url.pathname)) return 'EMERGENCY_LANDING_PAGE';
+    } catch(e) {}
+    return 'DIRECT_WEBSITE';
+  }
+
+  function landingSlug(){
+    try {
+      var parts = window.location.pathname.split('/').filter(Boolean);
+      return parts.pop() || 'home';
+    } catch(e) {
+      return 'unknown';
+    }
   }
 
   fetch(API_BASE + '/api/webchat/settings?tenant=' + encodeURIComponent(TENANT)).then(function(r){ return r.json(); }).then(function(json){ state.settings = json; render(); }).catch(render);

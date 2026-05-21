@@ -1844,14 +1844,22 @@ model PatientWebChatConversation {
   visitorPhone    String?
   visitorEmail    String?
   sourcePage      String?
+  sourceChannel   String   @default("WEBSITE")
+  campaignSource  String?
+  referrerUrl     String?
+  landingPageSlug String?
   nlpIntent       String?
   nlpConfidence   Int      @default(0)
+  leadScore       Int      @default(0)
+  qualificationStage String @default("NEW")
   status          String   @default("OPEN")
   transcriptSummary String?
   schedulingOutcome String @default("NOT_ATTEMPTED")
   pmsWritebackStatus String @default("PMS_CONNECTOR_REQUIRED")
   leadFormId      String?
   ownerRoleKey    String   @default("front_desk")
+  nextBestAction  String?
+  staffOwnerDueAt DateTime?
   blockedReason   String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -1859,6 +1867,8 @@ model PatientWebChatConversation {
   @@index([tenantId, status, createdAt])
   @@index([patientId, createdAt])
   @@index([tenantId, nlpIntent])
+  @@index([tenantId, qualificationStage, leadScore])
+  @@index([tenantId, campaignSource])
 }
 
 model PatientWebChatMessage {
