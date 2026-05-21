@@ -1,6 +1,22 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const sessionCookieName = "__Host-1dentalai_session";
+const canonicalHost = "1dentalai.com";
+
+function canonicalizeHost(request: NextRequest) {
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || "";
+  const hostname = host.split(":")[0]?.toLowerCase();
+  if (!hostname || hostname === canonicalHost || hostname === "localhost" || hostname === "127.0.0.1") {
+    return null;
+  }
+  if (hostname === "www.1dentalai.com" || hostname === "app.1dentalai.com" || hostname === "162.243.186.191") {
+    const url = request.nextUrl.clone();
+    url.protocol = "https:";
+    url.host = canonicalHost;
+    return NextResponse.redirect(url, 308);
+  }
+  return null;
+}
 
 function bytesToBase64Url(bytes: ArrayBuffer) {
   const binary = String.fromCharCode(...new Uint8Array(bytes));
@@ -22,6 +38,9 @@ async function hasValidSignedCookie(request: NextRequest) {
 }
 
 export async function proxy(request: NextRequest) {
+  const canonicalRedirect = canonicalizeHost(request);
+  if (canonicalRedirect) return canonicalRedirect;
+
   const { pathname, search } = request.nextUrl;
   const protectedWorkspace = pathname.startsWith("/app/") && pathname !== "/app/";
   const protectedAdmin = pathname.startsWith("/admin");
@@ -41,5 +60,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/app/:path*", "/admin/:path*"],
+  matcher: ["/", "/app/:path*", "/admin/:path*", "/login", "/logout", "/signup"],
 };
