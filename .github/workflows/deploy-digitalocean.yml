@@ -10,7 +10,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       DEPLOY_PATH: ${{ secrets.DO_DEPLOY_PATH != '' && secrets.DO_DEPLOY_PATH || '/var/www/1DentalAI' }}
       DEPLOY_PORT: ${{ secrets.DO_SSH_PORT != '' && secrets.DO_SSH_PORT || '22' }}
@@ -91,7 +91,7 @@ jobs:
       - name: Install and restart 1DentalAI service
         run: |
           for i in 1 2 3; do
-            timeout 240s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
+            timeout 900s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
             set -euo pipefail
             cd "${DEPLOY_PATH}"
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build app
