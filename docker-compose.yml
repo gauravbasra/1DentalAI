@@ -44,6 +44,7 @@ services:
       PORT: 3001
       HOSTNAME: 0.0.0.0
       DATABASE_URL: ${DATABASE_URL}
+      GOOGLE_SITE_VERIFICATION: ${GOOGLE_SITE_VERIFICATION:-}
     depends_on:
       postgres:
         condition: service_healthy
