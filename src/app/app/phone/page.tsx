@@ -188,9 +188,10 @@ async function voicemailAction(formData: FormData) {
   revalidatePath("/app/phone");
 }
 
-export default async function PhonePage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
+export default async function PhonePage({ searchParams }: { searchParams: Promise<{ role?: string; view?: string }> }) {
   const params = await searchParams;
   const role = getRole(params.role);
+  const view = ["today", "setup", "calls", "inbox", "messages", "routing"].includes(params.view ?? "") ? String(params.view) : "today";
   const center = await getPhoneOperatingCenter();
   const metrics = center.metrics;
   const conversations = center.conversations as ConversationRow[];
@@ -216,6 +217,7 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
         body="This is the telephony operating layer: carrier setup, number porting, E911, desk phones, softphones, extensions, call routing, hold, transfer, call park, voicemail, missed-call recovery, PMS screen pop, and approved outbound communication."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/phone" />
+      <PhoneViewNav active={view} roleKey={role.key} />
 
       <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
         <Metric label="Open calls" value={metrics.openCalls} />
@@ -228,7 +230,7 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
         <Metric label="Opportunity" value={<Money cents={Number(metrics.opportunityCents)} />} />
       </section>
 
-      <section className="mt-4">
+      {(view === "today" || view === "setup") ? <section className="mt-4">
         <PmsCard title="Phone setup readiness" eyebrow="No live calling, texting, payment links, or form links until every required connector check passes">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm font-semibold text-neutral-950">{clean(setupReadiness.status)} · {setupReadiness.blocked} blocked readiness checks</p>
@@ -246,9 +248,9 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+      {view === "setup" ? <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <PmsCard title="Carrier, numbers, and compliance setup" eyebrow="Porting, E911, voice, SMS, recording policy">
           <div className="grid gap-3">
             {providers.map((provider) => (
@@ -344,9 +346,9 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+      {(view === "today" || view === "calls") ? <section className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <PmsCard title="Active calls and call controls" eyebrow="Dial, answer, hold, warm transfer, call park">
           <form action={callControlAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <div className="grid gap-3 sm:grid-cols-3">
@@ -407,9 +409,9 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[0.72fr_1.28fr]">
+      {(view === "today" || view === "inbox") ? <section className="mt-4 grid gap-4 xl:grid-cols-[0.72fr_1.28fr]">
         <PmsCard title="Log or import call" eyebrow="Telephony connector intake">
           <form action={createAction} className="grid gap-3">
             <label className="grid gap-1 text-xs font-semibold text-neutral-700">Matched patient<select name="patientId" className="rounded-md border border-neutral-300 px-3 py-2 text-sm"><option value="">Unknown caller</option>{patients.map((p) => <option key={p.id} value={p.id}>{p.lastName}, {p.firstName} - {p.chartNumber}</option>)}</select></label>
@@ -456,9 +458,9 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-2">
+      {view === "messages" ? <section className="mt-4 grid gap-4 xl:grid-cols-2">
         <PmsCard title="Outbound messages" eyebrow="Approved SMS/email drafts, no fake sends">
           <form action={messageAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <label className="grid gap-1 text-xs font-semibold text-neutral-700">Conversation<select name="conversationKey" className="rounded-md border border-neutral-300 px-3 py-2 text-sm">{conversations.map((call) => <option key={call.id} value={`${call.id}|${call.patientId ?? ""}|${call.appointmentId ?? ""}|${call.callerNumber ?? ""}`}>{call.callerName ?? call.callerNumber ?? call.id} - {clean(call.aiIntent ?? "call")}</option>)}</select></label>
@@ -533,9 +535,9 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4">
+      {view === "routing" ? <section className="mt-4">
         <PmsCard title="Routing rules" eyebrow="Queues, ring groups, AI receptionist, voicemail, failover">
           <form action={routeAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <Input name="name" label="Rule name" />
@@ -561,8 +563,34 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
     </FoundationShell>
+  );
+}
+
+function PhoneViewNav({ active, roleKey }: { active: string; roleKey: string }) {
+  const items = [
+    { key: "today", label: "Today" },
+    { key: "setup", label: "Setup" },
+    { key: "calls", label: "Call console" },
+    { key: "inbox", label: "PMS inbox" },
+    { key: "messages", label: "Messages" },
+    { key: "routing", label: "Routing" },
+  ];
+  return (
+    <div className="mb-4 flex gap-1 overflow-x-auto rounded-lg border border-neutral-200 bg-white p-1 shadow-sm">
+      {items.map((item) => (
+        <a
+          key={item.key}
+          href={`/app/phone?role=${roleKey}&view=${item.key}`}
+          className={`shrink-0 rounded-md px-3 py-2 text-xs font-semibold transition ${
+            active === item.key ? "bg-neutral-950 text-white" : "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950"
+          }`}
+        >
+          {item.label}
+        </a>
+      ))}
+    </div>
   );
 }
 

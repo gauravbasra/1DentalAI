@@ -122,6 +122,16 @@ export type PmsScheduleBoard = {
   production: { scheduledCents: number; completedCents: number; unscheduledRequests: number; dueRecalls: number; labCaseRisks: number };
 };
 
+export type PmsPracticeIntelligence = {
+  productionTrend: Array<{ day: string; scheduledCents: number; completedCents: number; appointmentCount: number }>;
+  providerProduction: Array<{ providerId: string | null; providerName: string; providerType: string | null; scheduledCents: number; completedCents: number; appointmentCount: number; bookedMinutes: number; bookedUntil: string | null }>;
+  roomUtilization: Array<{ operatoryId: string | null; roomName: string; roomCode: string | null; scheduledCents: number; bookedMinutes: number; utilizationPercent: number; appointmentCount: number; bookedUntil: string | null }>;
+  serviceMix: Array<{ serviceLine: string; scheduledCents: number; completedCents: number; bookedMinutes: number; appointmentCount: number; bookedUntil: string | null }>;
+  payerMix: Array<{ payerName: string; billedCents: number; paidCents: number; patientDueCents: number; claimCount: number; denialCount: number }>;
+  calendarForecast: Array<{ weekStart: string; scheduledCents: number; bookedMinutes: number; appointmentCount: number }>;
+  insights: Array<{ label: string; value: string; detail: string; tone: "green" | "amber" | "red" | "neutral" }>;
+};
+
 export type PmsOnlineSchedulingLinkRow = {
   id: string;
   tenantId: string;
@@ -197,6 +207,215 @@ export async function getPmsDashboard(tenantId = defaultTenantId) {
     patientBalanceCents: Number(ledgers.rows[0]?.balance ?? 0),
     procedureCodeCount: Number(procedures.rows[0]?.count ?? 0),
   };
+}
+
+export async function getPracticeIntelligence(tenantId = defaultTenantId): Promise<PmsPracticeIntelligence> {
+  const [
+    productionTrend,
+    providerProduction,
+    roomUtilization,
+    serviceMix,
+    payerMix,
+    calendarForecast,
+  ] = await Promise.all([
+    query<{ day: string; scheduledCents: string; completedCents: string; appointmentCount: string }>(
+      `select to_char(days.day, 'Mon DD') as day,
+        coalesce(sum(a."productionCents"), 0)::text as "scheduledCents",
+        coalesce(sum(a."productionCents") filter (where a."status" in ('COMPLETED','CHECKED_OUT')), 0)::text as "completedCents",
+        count(a."id")::text as "appointmentCount"
+       from generate_series(current_date - interval '13 days', current_date, interval '1 day') days(day)
+       left join "PmsAppointment" a on a."tenantId" = $1 and a."startsAt"::date = days.day::date
+       group by days.day
+       order by days.day`,
+      [tenantId],
+    ),
+    query<{ providerId: string | null; providerName: string | null; providerType: string | null; scheduledCents: string; completedCents: string; appointmentCount: string; bookedMinutes: string; bookedUntil: string | null }>(
+      `select a."providerId",
+        coalesce(pr."displayName", 'Unassigned provider') as "providerName",
+        pr."providerType",
+        coalesce(sum(a."productionCents"), 0)::text as "scheduledCents",
+        coalesce(sum(a."productionCents") filter (where a."status" in ('COMPLETED','CHECKED_OUT')), 0)::text as "completedCents",
+        count(a."id")::text as "appointmentCount",
+        coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0)::int::text as "bookedMinutes",
+        max(a."endsAt")::text as "bookedUntil"
+       from "PmsAppointment" a
+       left join "PmsProvider" pr on pr."id" = a."providerId"
+       where a."tenantId" = $1
+         and a."startsAt" >= current_date
+         and a."startsAt" < current_date + interval '30 days'
+         and a."status" not in ('CANCELED','BROKEN')
+       group by a."providerId", pr."displayName", pr."providerType"
+       order by coalesce(sum(a."productionCents"), 0) desc
+       limit 8`,
+      [tenantId],
+    ),
+    query<{ operatoryId: string | null; roomName: string | null; roomCode: string | null; scheduledCents: string; bookedMinutes: string; appointmentCount: string; bookedUntil: string | null }>(
+      `select a."operatoryId",
+        coalesce(op."name", 'Unassigned room') as "roomName",
+        op."code" as "roomCode",
+        coalesce(sum(a."productionCents"), 0)::text as "scheduledCents",
+        coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0)::int::text as "bookedMinutes",
+        count(a."id")::text as "appointmentCount",
+        max(a."endsAt")::text as "bookedUntil"
+       from "PmsAppointment" a
+       left join "PmsOperatory" op on op."id" = a."operatoryId"
+       where a."tenantId" = $1
+         and a."startsAt" >= current_date
+         and a."startsAt" < current_date + interval '14 days'
+         and a."status" not in ('CANCELED','BROKEN')
+       group by a."operatoryId", op."name", op."code"
+       order by coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0) desc
+       limit 10`,
+      [tenantId],
+    ),
+    query<{ serviceLine: string; scheduledCents: string; completedCents: string; bookedMinutes: string; appointmentCount: string; bookedUntil: string | null }>(
+      `with appointment_services as (
+        select a."id", a."startsAt", a."endsAt", a."status", a."productionCents",
+          coalesce(pc."category", a."appointmentType", 'Uncategorized') as service_line,
+          row_number() over (partition by a."id" order by ap."feeCents" desc nulls last) as rn
+        from "PmsAppointment" a
+        left join "PmsAppointmentProcedure" ap on ap."appointmentId" = a."id"
+        left join "PmsProcedureCode" pc on pc."id" = ap."procedureCodeId"
+        where a."tenantId" = $1
+          and a."startsAt" >= current_date - interval '30 days'
+          and a."startsAt" < current_date + interval '30 days'
+          and a."status" not in ('CANCELED','BROKEN')
+      )
+      select service_line as "serviceLine",
+        coalesce(sum("productionCents"), 0)::text as "scheduledCents",
+        coalesce(sum("productionCents") filter (where "status" in ('COMPLETED','CHECKED_OUT')), 0)::text as "completedCents",
+        coalesce(sum(extract(epoch from ("endsAt" - "startsAt")) / 60), 0)::int::text as "bookedMinutes",
+        count("id")::text as "appointmentCount",
+        max("endsAt")::text as "bookedUntil"
+      from appointment_services
+      where rn = 1
+      group by service_line
+      order by coalesce(sum("productionCents"), 0) desc
+      limit 10`,
+      [tenantId],
+    ),
+    query<{ payerName: string; billedCents: string; paidCents: string; patientDueCents: string; claimCount: string; denialCount: string }>(
+      `select coalesce("payerName", 'Patient / no payer') as "payerName",
+        coalesce(sum("billedCents"), 0)::text as "billedCents",
+        coalesce(sum("paidCents"), 0)::text as "paidCents",
+        coalesce(sum("patientDueCents"), 0)::text as "patientDueCents",
+        count(*)::text as "claimCount",
+        count(*) filter (where "status" in ('DENIED','REJECTED'))::text as "denialCount"
+       from "PmsClaim"
+       where "tenantId" = $1
+         and "createdAt" >= current_date - interval '90 days'
+       group by coalesce("payerName", 'Patient / no payer')
+       order by coalesce(sum("billedCents"), 0) desc
+       limit 8`,
+      [tenantId],
+    ),
+    query<{ weekStart: string; scheduledCents: string; bookedMinutes: string; appointmentCount: string }>(
+      `select to_char(date_trunc('week', weeks.week_start), 'Mon DD') as "weekStart",
+        coalesce(sum(a."productionCents"), 0)::text as "scheduledCents",
+        coalesce(sum(extract(epoch from (a."endsAt" - a."startsAt")) / 60), 0)::int::text as "bookedMinutes",
+        count(a."id")::text as "appointmentCount"
+       from generate_series(date_trunc('week', current_date), date_trunc('week', current_date) + interval '7 weeks', interval '1 week') weeks(week_start)
+       left join "PmsAppointment" a on a."tenantId" = $1
+        and a."startsAt" >= weeks.week_start
+        and a."startsAt" < weeks.week_start + interval '1 week'
+        and a."status" not in ('CANCELED','BROKEN')
+       group by weeks.week_start
+       order by weeks.week_start`,
+      [tenantId],
+    ),
+  ]);
+
+  const rooms = roomUtilization.rows.map((room) => {
+    const bookedMinutes = Number(room.bookedMinutes ?? 0);
+    return {
+      operatoryId: room.operatoryId,
+      roomName: room.roomName ?? "Unassigned room",
+      roomCode: room.roomCode,
+      scheduledCents: Number(room.scheduledCents ?? 0),
+      bookedMinutes,
+      utilizationPercent: Math.min(100, Math.round((bookedMinutes / (14 * 8 * 60)) * 100)),
+      appointmentCount: Number(room.appointmentCount ?? 0),
+      bookedUntil: room.bookedUntil,
+    };
+  });
+  const services = serviceMix.rows.map((service) => ({
+    serviceLine: service.serviceLine,
+    scheduledCents: Number(service.scheduledCents ?? 0),
+    completedCents: Number(service.completedCents ?? 0),
+    bookedMinutes: Number(service.bookedMinutes ?? 0),
+    appointmentCount: Number(service.appointmentCount ?? 0),
+    bookedUntil: service.bookedUntil,
+  }));
+  const topService = services[0];
+  const topRoom = rooms[0];
+  const payerRows = payerMix.rows.map((payer) => ({
+    payerName: payer.payerName,
+    billedCents: Number(payer.billedCents ?? 0),
+    paidCents: Number(payer.paidCents ?? 0),
+    patientDueCents: Number(payer.patientDueCents ?? 0),
+    claimCount: Number(payer.claimCount ?? 0),
+    denialCount: Number(payer.denialCount ?? 0),
+  }));
+  const topPayerRisk = payerRows.slice().sort((a, b) => b.denialCount - a.denialCount)[0];
+
+  return {
+    productionTrend: productionTrend.rows.map((row) => ({
+      day: row.day,
+      scheduledCents: Number(row.scheduledCents ?? 0),
+      completedCents: Number(row.completedCents ?? 0),
+      appointmentCount: Number(row.appointmentCount ?? 0),
+    })),
+    providerProduction: providerProduction.rows.map((provider) => ({
+      providerId: provider.providerId,
+      providerName: provider.providerName ?? "Unassigned provider",
+      providerType: provider.providerType,
+      scheduledCents: Number(provider.scheduledCents ?? 0),
+      completedCents: Number(provider.completedCents ?? 0),
+      appointmentCount: Number(provider.appointmentCount ?? 0),
+      bookedMinutes: Number(provider.bookedMinutes ?? 0),
+      bookedUntil: provider.bookedUntil,
+    })),
+    roomUtilization: rooms,
+    serviceMix: services,
+    payerMix: payerRows,
+    calendarForecast: calendarForecast.rows.map((week) => ({
+      weekStart: week.weekStart,
+      scheduledCents: Number(week.scheduledCents ?? 0),
+      bookedMinutes: Number(week.bookedMinutes ?? 0),
+      appointmentCount: Number(week.appointmentCount ?? 0),
+    })),
+    insights: [
+      {
+        label: "Top revenue service",
+        value: topService?.serviceLine ?? "No scheduled service",
+        detail: topService ? `${cents(topService.scheduledCents)} scheduled across ${topService.appointmentCount} visits` : "No production data available.",
+        tone: "green",
+      },
+      {
+        label: "Most calendar time",
+        value: topService?.serviceLine ?? "No service time",
+        detail: topService ? `${Math.round(topService.bookedMinutes / 60)} hours booked; latest ${formatShortDate(topService.bookedUntil)}` : "No booked minutes available.",
+        tone: "neutral",
+      },
+      {
+        label: "Busiest room",
+        value: topRoom?.roomName ?? "No room schedule",
+        detail: topRoom ? `${topRoom.utilizationPercent}% of two-week chair capacity, booked until ${formatShortDate(topRoom.bookedUntil)}` : "No room utilization yet.",
+        tone: topRoom && topRoom.utilizationPercent > 85 ? "amber" : "neutral",
+      },
+      {
+        label: "Payer risk",
+        value: topPayerRisk?.payerName ?? "No payer claims",
+        detail: topPayerRisk ? `${topPayerRisk.denialCount} denied/rejected claims, ${cents(topPayerRisk.billedCents)} billed` : "No payer risk found.",
+        tone: topPayerRisk && topPayerRisk.denialCount > 0 ? "red" : "green",
+      },
+    ],
+  };
+}
+
+function formatShortDate(value: string | null) {
+  if (!value) return "not booked";
+  return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export async function listPatients(tenantId = defaultTenantId, search = "") {

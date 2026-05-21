@@ -1,16 +1,18 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
 import { Money, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
-import { getInsuranceBoard, getLedgerBoard, getPmsDashboard, listLabCases, listPatients, listSchedule, listTasks } from "@/lib/pms-repository";
+import { getInsuranceBoard, getLedgerBoard, getPmsDashboard, getPracticeIntelligence, listLabCases, listPatients, listSchedule, listTasks } from "@/lib/pms-repository";
 
 export const dynamic = "force-dynamic";
 
 export default async function PmsCommandPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
   const role = getRole(params.role);
-  const [dashboard, schedule, patients, tasks, insurance, ledger, labs] = await Promise.all([
+  const [dashboard, intelligence, schedule, patients, tasks, insurance, ledger, labs] = await Promise.all([
     getPmsDashboard(),
+    getPracticeIntelligence(),
     listSchedule(),
     listPatients(),
     listTasks(undefined, role.key),
@@ -30,8 +32,8 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
     <FoundationShell active="/app/pms" roleKey={role.key}>
       <PageHeader
         eyebrow="Cloud PMS"
-        title="Daily practice console"
-        body="A dense operating view for the front desk, providers, assistants, billing, and management: today’s schedule, patient movement, readiness blockers, account risk, and assigned work."
+        title="Practice command center"
+        body="Production, chair time, provider pace, payer drag, service mix, readiness blockers, and the exact work that moves today’s patients through the practice."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms" />
       <PmsSectionNav active="/app/pms" roleKey={role.key} />
@@ -43,6 +45,66 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
         <Metric label="Claims" value={dashboard.openClaimCount} detail={<Money cents={dashboard.claimExposureCents} />} />
         <Metric label="Balances" value={<Money cents={dashboard.patientBalanceCents} />} detail={`${ledger.patientCountWithBalance} patients`} />
         <Metric label="Codes" value={dashboard.procedureCodeCount} detail="fee schedule" />
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <PmsCard title="Practice intelligence" eyebrow="Revenue, schedule capacity, provider pace">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {intelligence.insights.map((insight) => (
+              <InsightCard key={insight.label} insight={insight} />
+            ))}
+          </div>
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            <ChartCard title="14-day production" rows={intelligence.productionTrend} valueKey="scheduledCents" labelKey="day" format="money" secondaryKey="completedCents" />
+            <ChartCard title="8-week booked production" rows={intelligence.calendarForecast} valueKey="scheduledCents" labelKey="weekStart" format="money" detailKey="appointmentCount" detailSuffix="visits" />
+          </div>
+        </PmsCard>
+
+        <PmsCard title="Booked capacity" eyebrow="Rooms and calendar time">
+          <div className="space-y-3">
+            {intelligence.roomUtilization.map((room) => (
+              <div key={room.operatoryId ?? room.roomName} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{room.roomName}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{room.appointmentCount} visits · {Math.round(room.bookedMinutes / 60)} booked hours · booked until {shortDate(room.bookedUntil)}</p>
+                  </div>
+                  <p className="text-sm font-semibold text-neutral-950">{room.utilizationPercent}%</p>
+                </div>
+                <Bar value={room.utilizationPercent} max={100} tone={room.utilizationPercent > 85 ? "amber" : "cyan"} />
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-3">
+        <PmsCard title="Service revenue and calendar share" eyebrow="What earns, what consumes chair time">
+          <RankedBars
+            rows={intelligence.serviceMix}
+            label={(row) => row.serviceLine}
+            value={(row) => row.scheduledCents}
+            detail={(row) => `${moneyText(row.scheduledCents)} · ${Math.round(row.bookedMinutes / 60)}h · booked until ${shortDate(row.bookedUntil)}`}
+          />
+        </PmsCard>
+
+        <PmsCard title="Provider production pace" eyebrow="Next 30 days">
+          <RankedBars
+            rows={intelligence.providerProduction}
+            label={(row) => row.providerName}
+            value={(row) => row.scheduledCents}
+            detail={(row) => `${moneyText(row.scheduledCents)} · ${row.appointmentCount} visits · ${Math.round(row.bookedMinutes / 60)}h`}
+          />
+        </PmsCard>
+
+        <PmsCard title="Payer mix and denial drag" eyebrow="Claims and collections signal">
+          <RankedBars
+            rows={intelligence.payerMix}
+            label={(row) => row.payerName}
+            value={(row) => row.billedCents}
+            detail={(row) => `${moneyText(row.paidCents)} paid · ${moneyText(row.patientDueCents)} patient due · ${row.denialCount} denials`}
+          />
+        </PmsCard>
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-[1.45fr_0.85fr_0.9fr]">
@@ -172,6 +234,130 @@ function Metric({ label, value, detail }: { label: string; value: React.ReactNod
       <p className="mt-0.5 text-xs text-neutral-500">{detail}</p>
     </div>
   );
+}
+
+function InsightCard({ insight }: { insight: { label: string; value: string; detail: string; tone: "green" | "amber" | "red" | "neutral" } }) {
+  const tones = {
+    green: "border-emerald-200 bg-emerald-50 text-emerald-900",
+    amber: "border-amber-200 bg-amber-50 text-amber-900",
+    red: "border-rose-200 bg-rose-50 text-rose-900",
+    neutral: "border-neutral-200 bg-neutral-50 text-neutral-900",
+  };
+  return (
+    <div className={`min-w-0 rounded-lg border p-3 ${tones[insight.tone]}`}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.1em] opacity-70">{insight.label}</p>
+      <p className="mt-2 truncate text-base font-semibold">{insight.value}</p>
+      <p className="mt-1 text-xs leading-5 opacity-80">{insight.detail}</p>
+    </div>
+  );
+}
+
+function ChartCard<T extends Record<string, unknown>>({
+  title,
+  rows,
+  valueKey,
+  labelKey,
+  secondaryKey,
+  detailKey,
+  detailSuffix,
+  format,
+}: {
+  title: string;
+  rows: T[];
+  valueKey: keyof T;
+  labelKey: keyof T;
+  secondaryKey?: keyof T;
+  detailKey?: keyof T;
+  detailSuffix?: string;
+  format: "money" | "number";
+}) {
+  const max = Math.max(1, ...rows.map((row) => Number(row[valueKey] ?? 0)));
+  return (
+    <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">{title}</p>
+      <div className="mt-3 flex h-40 items-end gap-1.5">
+        {rows.map((row) => {
+          const value = Number(row[valueKey] ?? 0);
+          const secondary = secondaryKey ? Number(row[secondaryKey] ?? 0) : 0;
+          return (
+            <div key={String(row[labelKey])} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
+              <div className="flex h-28 w-full items-end rounded-sm bg-white ring-1 ring-neutral-200">
+                <div
+                  className="w-full rounded-sm bg-cyan-600"
+                  style={{ height: `${Math.max(4, Math.round((value / max) * 100))}%` }}
+                  title={`${String(row[labelKey])}: ${formatValue(value, format)}`}
+                />
+                {secondaryKey ? (
+                  <div
+                    className="-ml-full w-full rounded-sm bg-emerald-500/70"
+                    style={{ height: `${Math.max(4, Math.round((secondary / max) * 100))}%` }}
+                    title={`Completed ${formatValue(secondary, format)}`}
+                  />
+                ) : null}
+              </div>
+              <p className="w-full truncate text-center text-[10px] font-semibold text-neutral-500">{String(row[labelKey])}</p>
+              {detailKey ? <p className="text-[10px] text-neutral-500">{String(row[detailKey] ?? 0)} {detailSuffix}</p> : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RankedBars<T>({
+  rows,
+  label,
+  value,
+  detail,
+}: {
+  rows: T[];
+  label: (row: T) => string;
+  value: (row: T) => number;
+  detail: (row: T) => ReactNode;
+}) {
+  const max = Math.max(1, ...rows.map((row) => value(row)));
+  return (
+    <div className="space-y-3">
+      {rows.map((row) => {
+        const amount = value(row);
+        return (
+          <div key={label(row)} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-neutral-950">{label(row)}</p>
+                <p className="mt-1 text-xs leading-5 text-neutral-600">{detail(row)}</p>
+              </div>
+              <p className="shrink-0 text-sm font-semibold text-neutral-950">{moneyText(amount)}</p>
+            </div>
+            <Bar value={amount} max={max} tone="cyan" />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Bar({ value, max, tone }: { value: number; max: number; tone: "cyan" | "amber" }) {
+  const color = tone === "amber" ? "bg-amber-500" : "bg-cyan-600";
+  return (
+    <div className="mt-2 h-2 overflow-hidden rounded-full bg-white ring-1 ring-neutral-200">
+      <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.max(3, Math.min(100, Math.round((value / Math.max(1, max)) * 100)))}%` }} />
+    </div>
+  );
+}
+
+function formatValue(value: number, format: "money" | "number") {
+  return format === "money" ? moneyText(value) : String(value);
+}
+
+function moneyText(cents: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(cents ?? 0) / 100);
+}
+
+function shortDate(value: string | null) {
+  if (!value) return "not booked";
+  return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function time(value: string) {
