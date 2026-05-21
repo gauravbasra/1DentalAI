@@ -10,11 +10,7 @@ function canonicalizeHost(request: NextRequest) {
     return null;
   }
   if (hostname === "www.1dentalai.com" || hostname === "app.1dentalai.com" || hostname === "162.243.186.191") {
-    const url = request.nextUrl.clone();
-    url.protocol = "https:";
-    url.hostname = canonicalHost;
-    url.port = "";
-    return NextResponse.redirect(url, 308);
+    return NextResponse.redirect(new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, `https://${canonicalHost}`), 308);
   }
   return null;
 }
