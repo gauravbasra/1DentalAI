@@ -258,6 +258,7 @@ export async function loginWithPassword(formData: FormData): Promise<LoginResult
     sameSite: "lax",
     path: "/",
     maxAge: sessionMaxAgeSeconds,
+    ...(!isIpFallback && cookieDomain ? { domain: cookieDomain } : {}),
   });
   await auditAuth({
     tenantId: user.tenantId,
