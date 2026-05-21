@@ -25,6 +25,10 @@ const requiredSchemaModels = [
   "PmsProvider",
   "PmsOperatory",
   "PmsAppointment",
+  "PmsAppointmentCategory",
+  "PmsBlockout",
+  "PmsAppointmentRequest",
+  "PmsRecall",
   "PmsProcedureCode",
   "PmsClinicalNote",
   "PmsPerioExam",
@@ -33,6 +37,7 @@ const requiredSchemaModels = [
   "PmsClaim",
   "PmsLedgerEntry",
   "PmsDocument",
+  "PmsLabCase",
   "PmsTask",
 ];
 
@@ -53,6 +58,14 @@ const pmsPage = fs.readFileSync("src/app/app/pms/page.tsx", "utf8");
 if (pmsPage.includes("workbenchAreas") || pmsPage.includes("getWorkbenchesForRole")) {
   console.error("PMS page must not be driven by the generic workbench renderer/data contract.");
   process.exit(1);
+}
+
+const schedulePage = fs.readFileSync("src/app/app/pms/schedule/page.tsx", "utf8");
+for (const token of ["Operatory day sheet", "Pinboard", "Recall", "Lab case", "AppointmentCategory"]) {
+  if (!schedulePage.includes(token) && !schema.includes(token)) {
+    console.error(`Schedule PMS depth token missing: ${token}`);
+    process.exit(1);
+  }
 }
 
 console.log("Phase 3 PMS validation passed: bespoke routes, APIs, schema, and database migration exist.");

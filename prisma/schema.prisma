@@ -288,6 +288,81 @@ model PmsAppointment {
   @@index([tenantId, status])
 }
 
+model PmsAppointmentCategory {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  name                String
+  color               String
+  defaultMinutes      Int
+  productionType      String
+  defaultProcedureCodes String[]
+  providerType        String?
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId, active])
+}
+
+model PmsBlockout {
+  id          String   @id @default(cuid())
+  tenantId    String
+  operatoryId String?
+  providerId  String?
+  startsAt    DateTime
+  endsAt      DateTime
+  reason      String
+  blockType   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, startsAt])
+  @@index([operatoryId, startsAt])
+}
+
+model PmsAppointmentStatusHistory {
+  id            String   @id @default(cuid())
+  appointmentId String
+  status        String
+  actorRole     String
+  note          String?
+  createdAt     DateTime @default(now())
+
+  @@index([appointmentId, createdAt])
+}
+
+model PmsAppointmentRequest {
+  id              String   @id @default(cuid())
+  tenantId        String
+  patientId       String?
+  requestType     String
+  source          String
+  preferredWindow String?
+  urgency         String
+  status          String   @default("OPEN")
+  note            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, urgency])
+}
+
+model PmsRecall {
+  id           String   @id @default(cuid())
+  tenantId     String
+  patientId    String
+  recallType   String
+  dueDate      DateTime
+  status       String   @default("DUE")
+  procedureCodes String[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId, status, dueDate])
+  @@index([patientId, recallType])
+}
+
 model PmsProcedureCode {
   id              String   @id @default(cuid())
   tenantId        String
@@ -570,6 +645,25 @@ model PmsDocument {
 
   @@index([tenantId, status])
   @@index([patientId, documentType])
+}
+
+model PmsLabCase {
+  id            String   @id @default(cuid())
+  tenantId      String
+  patientId     String?
+  appointmentId String?
+  labName       String
+  caseType      String
+  status        String   @default("ORDERED")
+  dueDate       DateTime?
+  trackingNumber String?
+  shade         String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId, status, dueDate])
+  @@index([appointmentId])
 }
 
 model PmsTask {

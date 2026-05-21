@@ -32,6 +32,29 @@ export type PmsAppointmentRow = {
   notes: string | null;
 };
 
+export type PmsAppointmentCategoryRow = {
+  id: string;
+  name: string;
+  color: string;
+  defaultMinutes: number;
+  productionType: string;
+  defaultProcedureCodes: string[];
+  providerType: string | null;
+};
+
+export type PmsScheduleBoard = {
+  date: string;
+  operatories: Array<{ id: string; code: string; name: string; status: string }>;
+  providers: Array<{ id: string; displayName: string; providerType: string }>;
+  categories: PmsAppointmentCategoryRow[];
+  appointments: PmsAppointmentRow[];
+  blockouts: Array<{ id: string; operatoryId: string | null; providerId: string | null; startsAt: string; endsAt: string; reason: string; blockType: string }>;
+  requests: Array<{ id: string; requestType: string; source: string; urgency: string; preferredWindow: string | null; status: string; note: string | null; patientName: string | null }>;
+  recalls: Array<{ id: string; recallType: string; dueDate: string; status: string; procedureCodes: string[]; patientName: string }>;
+  labCases: Array<{ id: string; labName: string; caseType: string; status: string; dueDate: string | null; patientName: string | null }>;
+  production: { scheduledCents: number; completedCents: number; unscheduledRequests: number; dueRecalls: number; labCaseRisks: number };
+};
+
 export function cents(amount: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -201,6 +224,87 @@ export async function listSchedule(tenantId = defaultTenantId, date?: string) {
   return result.rows;
 }
 
+export async function getScheduleBoard(tenantId = defaultTenantId, date?: string): Promise<PmsScheduleBoard> {
+  const boardDate = date ?? new Date().toISOString().slice(0, 10);
+  const [appointments, operatories, providers, categories, blockouts, requests, recalls, labCases, production] = await Promise.all([
+    listSchedule(tenantId, boardDate),
+    listOperatories(tenantId),
+    listProviders(tenantId),
+    listAppointmentCategories(tenantId),
+    query<PmsScheduleBoard["blockouts"][number]>(
+      `select "id", "operatoryId", "providerId", "startsAt"::text as "startsAt", "endsAt"::text as "endsAt", "reason", "blockType"
+       from "PmsBlockout"
+       where "tenantId" = $1 and "startsAt"::date = $2::date
+       order by "startsAt"`,
+      [tenantId, boardDate],
+    ),
+    query<PmsScheduleBoard["requests"][number]>(
+      `select ar."id", ar."requestType", ar."source", ar."urgency", ar."preferredWindow", ar."status", ar."note",
+        case when p."id" is null then null else p."lastName" || ', ' || p."firstName" end as "patientName"
+       from "PmsAppointmentRequest" ar
+       left join "PmsPatient" p on p."id" = ar."patientId"
+       where ar."tenantId" = $1 and ar."status" = 'OPEN'
+       order by ar."urgency" desc, ar."createdAt"`,
+      [tenantId],
+    ),
+    query<PmsScheduleBoard["recalls"][number]>(
+      `select r."id", r."recallType", r."dueDate"::text as "dueDate", r."status", r."procedureCodes",
+        p."lastName" || ', ' || p."firstName" as "patientName"
+       from "PmsRecall" r
+       join "PmsPatient" p on p."id" = r."patientId"
+       where r."tenantId" = $1 and r."status" in ('DUE', 'OVERDUE')
+       order by r."dueDate" asc limit 25`,
+      [tenantId],
+    ),
+    query<PmsScheduleBoard["labCases"][number]>(
+      `select lc."id", lc."labName", lc."caseType", lc."status", lc."dueDate"::text as "dueDate",
+        case when p."id" is null then null else p."lastName" || ', ' || p."firstName" end as "patientName"
+       from "PmsLabCase" lc
+       left join "PmsPatient" p on p."id" = lc."patientId"
+       where lc."tenantId" = $1 and lc."status" not in ('DELIVERED', 'CANCELED')
+       order by lc."dueDate" asc nulls last limit 25`,
+      [tenantId],
+    ),
+    query<{ scheduled: string; completed: string }>(
+      `select
+        coalesce(sum("productionCents"), 0)::text as scheduled,
+        coalesce(sum(case when "status" = 'COMPLETED' then "productionCents" else 0 end), 0)::text as completed
+       from "PmsAppointment"
+       where "tenantId" = $1 and "startsAt"::date = $2::date`,
+      [tenantId, boardDate],
+    ),
+  ]);
+
+  return {
+    date: boardDate,
+    operatories,
+    providers,
+    categories,
+    appointments,
+    blockouts: blockouts.rows,
+    requests: requests.rows,
+    recalls: recalls.rows,
+    labCases: labCases.rows,
+    production: {
+      scheduledCents: Number(production.rows[0]?.scheduled ?? 0),
+      completedCents: Number(production.rows[0]?.completed ?? 0),
+      unscheduledRequests: requests.rows.length,
+      dueRecalls: recalls.rows.length,
+      labCaseRisks: labCases.rows.filter((item) => item.status !== "DELIVERED").length,
+    },
+  };
+}
+
+export async function listAppointmentCategories(tenantId = defaultTenantId) {
+  return (await query<PmsAppointmentCategoryRow>(
+    `select "id", "name", "color", "defaultMinutes", "productionType", "defaultProcedureCodes", "providerType"
+     from "PmsAppointmentCategory"
+     where "tenantId" = $1 and "active" = true
+     order by "productionType", "defaultMinutes", "name"`,
+    [tenantId],
+  )).rows;
+}
+
 export async function listProviders(tenantId = defaultTenantId) {
   return (await query<{ id: string; displayName: string; providerType: string }>(
     `select "id", "displayName", "providerType" from "PmsProvider" where "tenantId" = $1 and "status" = 'ACTIVE' order by "providerType", "displayName"`,
@@ -223,17 +327,30 @@ export async function createAppointmentHold(input: {
   startsAt: string;
   endsAt: string;
   appointmentType: string;
+  categoryId?: string;
   notes?: string;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("appt");
+  const category = input.categoryId
+    ? (await query<{ name: string; defaultProcedureCodes: string[]; defaultMinutes: number }>(
+        `select "name", "defaultProcedureCodes", "defaultMinutes" from "PmsAppointmentCategory" where "id" = $1 and "tenantId" = $2`,
+        [input.categoryId, tenantId],
+      )).rows[0]
+    : null;
+  const appointmentType = category?.name ?? input.appointmentType;
   const result = await query<PmsAppointmentRow>(
     `insert into "PmsAppointment"
        ("id", "tenantId", "patientId", "providerId", "operatoryId", "startsAt", "endsAt", "status", "appointmentType", "notes", "updatedAt")
      values ($1, $2, $3, $4, $5, $6::timestamp, $7::timestamp, 'HELD', $8, $9, current_timestamp)
      returning "id", "patientId", null::text as "patientName", null::text as "providerName", null::text as "operatoryName",
        "startsAt"::text as "startsAt", "endsAt"::text as "endsAt", "status", "appointmentType", "productionCents", "readinessStatus", "notes"`,
-    [id, tenantId, input.patientId ?? null, input.providerId ?? null, input.operatoryId ?? null, input.startsAt, input.endsAt, input.appointmentType, input.notes ?? null],
+    [id, tenantId, input.patientId ?? null, input.providerId ?? null, input.operatoryId ?? null, input.startsAt, input.endsAt, appointmentType, input.notes ?? null],
+  );
+  await query(
+    `insert into "PmsAppointmentStatusHistory" ("id", "appointmentId", "status", "actorRole", "note")
+     values ($1, $2, 'HELD', 'front_desk', $3)`,
+    [newId("apst"), id, category ? `Created from category ${category.name}` : null],
   );
   await addAudit(tenantId, "front_desk", "APPOINTMENT_HELD", "PmsAppointment", id, "ALLOWED");
   return result.rows[0];
@@ -245,7 +362,14 @@ export async function updateAppointmentStatus(appointmentId: string, status: str
     [appointmentId, status],
   );
   const row = result.rows[0] ?? null;
-  if (row) await addAudit(row.tenantId, "front_desk", "APPOINTMENT_STATUS_UPDATED", "PmsAppointment", appointmentId, "ALLOWED");
+  if (row) {
+    await query(
+      `insert into "PmsAppointmentStatusHistory" ("id", "appointmentId", "status", "actorRole")
+       values ($1, $2, $3, 'front_desk')`,
+      [newId("apst"), appointmentId, status],
+    );
+    await addAudit(row.tenantId, "front_desk", "APPOINTMENT_STATUS_UPDATED", "PmsAppointment", appointmentId, "ALLOWED");
+  }
   return row;
 }
 
