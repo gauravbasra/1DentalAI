@@ -42,6 +42,8 @@ export type AuthActionState = {
   message?: string;
 };
 
+export type CurrentSession = AuthSessionRow;
+
 function authSecret() {
   return process.env.ONE_DENTAL_AUTH_SECRET || process.env.NEXTAUTH_SECRET || process.env.DATABASE_URL || "local-1dentalai-development-secret";
 }
@@ -206,7 +208,11 @@ export async function loginAction(_previousState: AuthActionState, formData: For
     metadata: { roleKey: user.roleKey, phiStored: false },
   });
 
-  redirect(next.startsWith("/app") && next !== "/app" ? next : "/app/overview");
+  if (user.roleKey === "super_admin" && (!next || next === "/app/overview")) {
+    redirect("/admin/settings");
+  }
+
+  redirect((next.startsWith("/app") || next.startsWith("/admin")) && next !== "/app" ? next : "/app/overview");
 }
 
 export async function signupAction(_previousState: AuthActionState, formData: FormData): Promise<AuthActionState> {
@@ -299,6 +305,36 @@ export async function requireAuth() {
   const session = await currentSession();
   if (!session) redirect("/app");
   return session;
+}
+
+export async function requirePlatformAdmin() {
+  const session = await requireAuth();
+  if (!["super_admin", "dso_admin"].includes(session.roleKey)) {
+    await auditAuth({
+      tenantId: session.tenantId,
+      userId: session.userId,
+      sessionId: session.id,
+      eventType: "ADMIN_ACCESS_DENIED",
+      outcome: "BLOCKED",
+      summary: "User attempted to access platform administration without a platform role.",
+      metadata: { roleKey: session.roleKey, phiStored: false },
+    });
+    redirect("/app/overview");
+  }
+  return session;
+}
+
+export async function hashNewPassword(password: string) {
+  const salt = randomBytes(16).toString("base64url");
+  return {
+    salt,
+    hash: await hashPassword(password, salt, passwordIterations),
+    iterations: passwordIterations,
+  };
+}
+
+export function hashLookupValue(value: string) {
+  return sha256(value.trim().toLowerCase());
 }
 
 export { sessionCookieName };

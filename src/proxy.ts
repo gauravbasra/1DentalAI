@@ -24,8 +24,9 @@ async function hasValidSignedCookie(request: NextRequest) {
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const protectedWorkspace = pathname.startsWith("/app/") && pathname !== "/app/";
+  const protectedAdmin = pathname.startsWith("/admin");
 
-  if (!protectedWorkspace) {
+  if (!protectedWorkspace && !protectedAdmin) {
     return NextResponse.next();
   }
 
@@ -40,5 +41,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/app/:path*"],
+  matcher: ["/app/:path*", "/admin/:path*"],
 };
