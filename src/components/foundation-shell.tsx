@@ -8,22 +8,22 @@ import {
 } from "@/lib/foundation-data";
 
 const appNav = [
-  { href: "/app/overview", label: "Overview" },
-  { href: "/app/huddle", label: "Huddle" },
-  { href: "/app/patient-finder", label: "Finder" },
-  { href: "/app/pms", label: "PMS" },
-  { href: "/app/rcm", label: "RCM" },
-  { href: "/app/phone", label: "Phone" },
-  { href: "/app/engagement", label: "Outreach" },
-  { href: "/app/reputation", label: "Reputation" },
-  { href: "/app/marketing", label: "Marketing" },
-  { href: "/app/connectors", label: "Connectors" },
-  { href: "/app/locations", label: "Locations" },
-  { href: "/app/team", label: "Team" },
-  { href: "/app/rooms", label: "Rooms" },
-  { href: "/app/modules", label: "Modules" },
-  { href: "/app/workflows", label: "Rules" },
-  { href: "/app/audit", label: "Audit" },
+  { href: "/app/overview", label: "Overview", group: "Practice" },
+  { href: "/app/huddle", label: "Morning huddle", group: "Practice" },
+  { href: "/app/patient-finder", label: "Patient finder", group: "Practice" },
+  { href: "/app/pms", label: "PMS", group: "Clinical ops" },
+  { href: "/app/rcm", label: "RCM", group: "Clinical ops" },
+  { href: "/app/phone", label: "Patient engagement", group: "Growth" },
+  { href: "/app/engagement", label: "Outreach", group: "Growth" },
+  { href: "/app/reputation", label: "Reputation", group: "Growth" },
+  { href: "/app/marketing", label: "Marketing", group: "Growth" },
+  { href: "/app/connectors", label: "Integrations", group: "Admin" },
+  { href: "/app/locations", label: "Locations", group: "Admin" },
+  { href: "/app/team", label: "Team", group: "Admin" },
+  { href: "/app/rooms", label: "Rooms", group: "Admin" },
+  { href: "/app/modules", label: "Modules", group: "Admin" },
+  { href: "/app/workflows", label: "Rules", group: "Admin" },
+  { href: "/app/audit", label: "Audit", group: "Admin" },
 ];
 
 export async function FoundationShell({
@@ -39,65 +39,100 @@ export async function FoundationShell({
   const role = getRole(roleKey);
   const roleParam = `role=${role.key}`;
   const modeLabel = foundationPractice.mode === "PRODUCTION_SETUP" ? "Production setup" : "Live";
+  const groups = Array.from(new Set(appNav.map((item) => item.group)));
 
   return (
-    <div className="app-shell min-h-screen bg-[#f3f4f6] text-neutral-950">
-      <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white/95 shadow-sm backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[1680px] flex-col gap-2 px-4 py-3 sm:px-6 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link href="/app/overview" className="shrink-0 text-base font-semibold tracking-tight text-neutral-950">
-              1DentalAI
-            </Link>
-            <p className="hidden min-w-0 truncate text-xs font-medium text-neutral-500 sm:block">
-              {foundationPractice.label}
-            </p>
-          </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="hidden max-w-52 truncate rounded-md bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-700 sm:inline-flex">
-              {session.displayName}
-            </span>
-            <span className="rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
-              {modeLabel}
-            </span>
-            <Link
-              href="/contact"
-              className="inline-flex min-h-8 items-center rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-semibold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
-            >
-              Support
-            </Link>
-            <form action="/logout" method="post" className="inline-flex">
-              <button
-                type="submit"
-                className="inline-flex min-h-8 items-center rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-semibold text-neutral-700 transition hover:border-rose-700 hover:text-rose-700"
-              >
-                Logout
-              </button>
-            </form>
-          </div>
+    <div className="app-shell min-h-screen bg-[#f6f7f8] text-neutral-950 lg:grid lg:grid-cols-[264px_minmax(0,1fr)]">
+      <aside className="sticky top-0 hidden h-screen overflow-y-auto border-r border-neutral-200 bg-white px-4 py-5 lg:block">
+        <Link href={`/app/overview?${roleParam}`} className="block text-xl font-semibold tracking-tight text-neutral-950">
+          1DentalAI
+        </Link>
+        <p className="mt-1 text-xs leading-5 text-neutral-500">{foundationPractice.label}</p>
+        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+          {modeLabel}
         </div>
-        <nav aria-label="Application navigation" className="app-scrollbar mx-auto flex max-w-[1680px] snap-x gap-1 overflow-x-auto px-4 pb-2 sm:px-6">
-          {appNav.map((item) => {
-            const selected = active === item.href || (item.href !== "/app/overview" && active.startsWith(`${item.href}/`));
-            return (
-              <Link
-                key={item.href}
-                href={`${item.href}?${roleParam}`}
-                className={`min-h-8 shrink-0 snap-start rounded-md px-3 py-1.5 text-xs font-semibold leading-5 transition ${
-                  selected
-                    ? "bg-neutral-950 text-white"
-                    : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950"
-                }`}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
+        <nav aria-label="Application navigation" className="mt-5 space-y-5">
+          {groups.map((group) => (
+            <div key={group}>
+              <p className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-400">{group}</p>
+              <div className="mt-2 space-y-1">
+                {appNav.filter((item) => item.group === group).map((item) => {
+                  const selected = active === item.href || (item.href !== "/app/overview" && active.startsWith(`${item.href}/`));
+                  return (
+                    <Link
+                      key={item.href}
+                      href={`${item.href}?${roleParam}`}
+                      className={`flex min-h-9 items-center rounded-md px-3 py-2 text-sm font-semibold leading-5 transition ${
+                        selected
+                          ? "bg-neutral-950 text-white"
+                          : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950"
+                      }`}
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
-      </header>
-      <main className="mx-auto min-w-0 max-w-[1680px] px-4 py-4 sm:px-6">{children}</main>
-      <footer className="mx-auto max-w-[1680px] px-4 pb-6 text-xs leading-5 text-neutral-500 sm:px-6">
-        Production setup environment. No live PHI, no vendor calls, no production writeback until connectors and approvals are enabled.
-      </footer>
+      </aside>
+
+      <div className="min-w-0">
+        <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white/95 shadow-sm backdrop-blur-xl">
+          <div className="flex min-w-0 items-center justify-between gap-3 px-4 py-3 sm:px-6">
+            <div className="min-w-0 lg:hidden">
+              <Link href={`/app/overview?${roleParam}`} className="text-base font-semibold tracking-tight text-neutral-950">
+                1DentalAI
+              </Link>
+            </div>
+            <div className="hidden min-w-0 lg:block">
+              <p className="truncate text-sm font-semibold text-neutral-950">{role.title}</p>
+              <p className="truncate text-xs text-neutral-500">{session.displayName}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="hidden rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200 sm:inline-flex lg:hidden">
+                {modeLabel}
+              </span>
+              <Link
+                href="/contact"
+                className="inline-flex min-h-9 items-center rounded-md border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
+              >
+                Support
+              </Link>
+              <form action="/logout" method="post" className="inline-flex">
+                <button
+                  type="submit"
+                  className="inline-flex min-h-9 items-center rounded-md border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-rose-700 hover:text-rose-700"
+                >
+                  Logout
+                </button>
+              </form>
+            </div>
+          </div>
+          <nav aria-label="Application navigation" className="app-scrollbar flex snap-x gap-1 overflow-x-auto px-4 pb-2 sm:px-6 lg:hidden">
+            {appNav.map((item) => {
+              const selected = active === item.href || (item.href !== "/app/overview" && active.startsWith(`${item.href}/`));
+              return (
+                <Link
+                  key={item.href}
+                  href={`${item.href}?${roleParam}`}
+                  className={`min-h-9 shrink-0 snap-start rounded-md px-3 py-2 text-xs font-semibold leading-5 transition ${
+                    selected
+                      ? "bg-neutral-950 text-white"
+                      : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+        </header>
+        <main className="min-w-0 px-4 py-5 sm:px-6 xl:px-8">
+          <div className="mx-auto max-w-[1420px]">{children}</div>
+        </main>
+      </div>
     </div>
   );
 }
@@ -145,12 +180,12 @@ export function PageHeader({
   body: string;
 }) {
   return (
-    <div className="mb-4 min-w-0 rounded-lg border border-neutral-200 bg-white px-4 py-3 shadow-sm">
+    <div className="mb-5 min-w-0 rounded-lg border border-neutral-200 bg-white px-5 py-4 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-700">{eyebrow}</p>
-      <h1 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-950 text-balance">
+      <h1 className="mt-1 max-w-4xl text-3xl font-semibold tracking-tight text-neutral-950 text-balance">
         {title}
       </h1>
-      <p className="mt-1 max-w-5xl text-sm leading-6 text-neutral-600">{body}</p>
+      <p className="mt-2 max-w-4xl text-sm leading-6 text-neutral-600">{body}</p>
     </div>
   );
 }

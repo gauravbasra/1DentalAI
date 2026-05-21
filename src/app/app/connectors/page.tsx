@@ -12,7 +12,17 @@ import { getRole, type RoleKey } from "@/lib/foundation-data";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = Promise<{ role?: string }>;
+type ConnectorView = "overview" | "credentials" | "installations" | "capabilities" | "tests" | "routes";
+type SearchParams = Promise<{ role?: string; view?: string }>;
+
+const connectorViews: Array<{ key: ConnectorView; label: string; description: string }> = [
+  { key: "overview", label: "Overview", description: "Readiness, blockers, and spend." },
+  { key: "credentials", label: "API keys", description: "Store and rotate encrypted provider keys." },
+  { key: "installations", label: "Installations", description: "Edit tenant/location connector gates." },
+  { key: "capabilities", label: "Capabilities", description: "Map workflows to connector abilities." },
+  { key: "tests", label: "Smoke tests", description: "Record webhook and credential evidence." },
+  { key: "routes", label: "Routing", description: "Create route decisions and fallback work." },
+];
 
 function value(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
@@ -100,6 +110,7 @@ function formatDate(value: string | Date | null | undefined) {
 export default async function ConnectorControlPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const role = getRole(params.role) ?? getRole("owner_dentist");
+  const activeView = connectorViews.some((view) => view.key === params.view) ? params.view as ConnectorView : "overview";
   const data = await getConnectorControlCenter();
   const metrics = data.metrics ?? {
     definitions: "0",
@@ -113,11 +124,15 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
     <FoundationShell active="/app/connectors" roleKey={role.key}>
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/connectors" />
       <PageHeader
-        eyebrow="Integration control plane"
-        title="Owned routing, capability maps, readiness, and cost telemetry"
-        body="This page controls how PMS, payer/clearinghouse, phone/SMS, reputation/listings, payments, email, AI/LLM, marketing, and engagement workflows decide whether to call a live connector, stage work for approval, or block external success until setup is real."
+        eyebrow="Integration settings"
+        title="Connectors, API keys, readiness, and routing"
+        body="Configure provider credentials, webhook checks, capability maps, routing policy, and manual fallback. Nothing here claims a real call, SMS, claim, payment, review post, or PMS writeback until the connector evidence passes."
       />
 
+      <ConnectorViewNav activeView={activeView} roleKey={role.key as RoleKey} />
+
+      {activeView === "overview" ? (
+      <>
       <div className="mb-4 grid gap-3 md:grid-cols-5">
         {[
           ["Connector definitions", metrics.definitions],
@@ -156,7 +171,14 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
           </div>
         ))}
       </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <CostTelemetry data={data} />
+        <FallbackQueue data={data} />
+      </div>
+      </>
+      ) : null}
 
+      {activeView === "credentials" ? (
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <PmsCard title="Credential vault intake" eyebrow="Twilio, NexHealth, Stedi keys">
           <form action={storeCredentialAction} className="grid gap-3">
@@ -226,7 +248,9 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
           </div>
         </PmsCard>
       </div>
+      ) : null}
 
+      {activeView === "installations" ? (
       <div className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <PmsCard title="Connector readiness by location" eyebrow="Setup gates">
           <div className="space-y-3">
@@ -346,7 +370,9 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
             </p>
         </PmsCard>
       </div>
+      ) : null}
 
+      {activeView === "capabilities" ? (
       <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <PmsCard title="Capability map" eyebrow="Workflow coverage">
           <div className="overflow-x-auto">
@@ -377,6 +403,27 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
           </div>
         </PmsCard>
 
+        <PmsCard title="Capability discipline" eyebrow="No connector shortcut">
+          <div className="space-y-3">
+            {data.domainReadiness.map((domain) => (
+              <div key={`${domain.category}-capability`} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{domain.category}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{domain.capabilities} capabilities · {domain.blockedCapabilities} blocked</p>
+                  </div>
+                  <StatusFor value={domain.readinessStatus} />
+                </div>
+                {domain.blockers.length ? <p className="mt-2 text-xs leading-5 text-amber-800">{domain.blockers.join(" | ")}</p> : null}
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </div>
+      ) : null}
+
+      {activeView === "tests" ? (
+      <div className="mt-4 grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
         <PmsCard title="Record smoke-test evidence" eyebrow="Credential and webhook checks">
           <form action={recordHealthCheckAction} className="space-y-3">
             <input type="hidden" name="actorRole" value={role.key} />
@@ -430,8 +477,11 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
             This stores readiness evidence. It does not call a PMS, payer, carrier, listing network, payment gateway, email provider, or AI model.
           </p>
         </PmsCard>
+        <HealthChecks data={data} />
       </div>
+      ) : null}
 
+      {activeView === "routes" ? (
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
         <PmsCard title="Route decisions" eyebrow="Audit-safe routing">
           <div className="space-y-3">
@@ -461,76 +511,113 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
           </div>
         </PmsCard>
 
-        <PmsCard title="Manual fallback queue" eyebrow="Blocked connector routes">
-          <div className="space-y-3">
-            {data.fallbackSummary.map((row) => (
-              <div key={`${row.workflowArea}-${row.fallbackRoute}`} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-neutral-950">{row.workflowArea}</p>
-                    <p className="mt-1 text-xs text-neutral-600">{row.fallbackRoute}</p>
-                  </div>
-                  <StatusFor value={Number(row.blockedCount ?? 0) ? "BLOCKED_CONNECTOR_REQUIRED" : "READY_FOR_CONNECTOR"} />
-                </div>
-                <p className="mt-2 text-xs text-neutral-600">
-                  {row.blockedCount} blocked of {row.routeCount} route decisions | last decision {formatDate(row.lastDecisionAt)}
-                </p>
-              </div>
-            ))}
-          </div>
-        </PmsCard>
+        <FallbackQueue data={data} />
       </div>
+      ) : null}
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <PmsCard title="Health checks" eyebrow="Connector smoke tests">
-          <div className="space-y-3">
-            {data.healthChecks.map((check) => (
-              <div key={check.id} className="rounded-lg border border-neutral-200 p-3">
-                <div className="flex flex-wrap justify-between gap-2">
-                  <p className="text-sm font-semibold text-neutral-950">{check.definitionName} - {check.checkType}</p>
-                  <StatusFor value={check.status} />
-                </div>
-                <p className="mt-2 text-sm leading-6 text-neutral-600">{check.resultSummary}</p>
-                <p className="mt-1 text-xs text-neutral-500">Checked {formatDate(check.checkedAt)} | latency {check.latencyMs ?? "n/a"} ms</p>
-              </div>
-            ))}
-          </div>
-        </PmsCard>
-
-        <PmsCard title="Cost telemetry" eyebrow="Avoid uncontrolled vendor spend">
-          <div className="mb-4 overflow-hidden rounded-md border border-neutral-200">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-neutral-50 text-xs uppercase tracking-[0.08em] text-neutral-500">
-                <tr><th className="px-3 py-2">Workflow</th><th className="px-3 py-2">Capability</th><th className="px-3 py-2 text-right">Estimated</th></tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-100">
-                {data.costSummary.map((row) => (
-                  <tr key={`${row.workflowArea}-${row.capabilityKey}`}>
-                    <td className="px-3 py-2 font-semibold text-neutral-950">{row.workflowArea}</td>
-                    <td className="px-3 py-2 text-neutral-600">{row.capabilityKey}</td>
-                    <td className="px-3 py-2 text-right font-semibold"><Money cents={row.estimatedCents} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="space-y-3">
-            {data.costs.map((cost) => (
-              <div key={cost.id} className="rounded-lg border border-neutral-200 p-3">
-                <div className="flex flex-wrap justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-neutral-950">{cost.capabilityKey}</p>
-                    <p className="mt-1 text-xs text-neutral-600">{cost.workflowArea} | {cost.definitionName ?? "Manual route"} | {cost.pricingUnit}</p>
-                  </div>
-                  <p className="text-sm font-semibold text-neutral-950"><Money cents={cost.costCents} /></p>
-                </div>
-                <p className="mt-2 text-xs text-neutral-600">{jsonLine(cost.metadata)}</p>
-              </div>
-            ))}
-          </div>
-        </PmsCard>
-      </div>
     </FoundationShell>
+  );
+}
+
+function ConnectorViewNav({ activeView, roleKey }: { activeView: ConnectorView; roleKey: RoleKey }) {
+  return (
+    <nav aria-label="Connector settings" className="mb-5 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+      {connectorViews.map((view) => (
+        <a
+          key={view.key}
+          href={`/app/connectors?role=${roleKey}&view=${view.key}`}
+          className={`rounded-lg border p-3 text-left transition ${
+            activeView === view.key
+              ? "border-neutral-950 bg-neutral-950 text-white shadow-sm"
+              : "border-neutral-200 bg-white text-neutral-700 hover:border-neutral-400 hover:text-neutral-950"
+          }`}
+        >
+          <span className="block text-sm font-semibold">{view.label}</span>
+          <span className={`mt-1 block text-xs leading-5 ${activeView === view.key ? "text-neutral-300" : "text-neutral-500"}`}>
+            {view.description}
+          </span>
+        </a>
+      ))}
+    </nav>
+  );
+}
+
+function FallbackQueue({ data }: { data: Awaited<ReturnType<typeof getConnectorControlCenter>> }) {
+  return (
+    <PmsCard title="Manual fallback queue" eyebrow="Blocked connector routes">
+      <div className="space-y-3">
+        {data.fallbackSummary.map((row) => (
+          <div key={`${row.workflowArea}-${row.fallbackRoute}`} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-neutral-950">{row.workflowArea}</p>
+                <p className="mt-1 text-xs text-neutral-600">{row.fallbackRoute}</p>
+              </div>
+              <StatusFor value={Number(row.blockedCount ?? 0) ? "BLOCKED_CONNECTOR_REQUIRED" : "READY_FOR_CONNECTOR"} />
+            </div>
+            <p className="mt-2 text-xs text-neutral-600">
+              {row.blockedCount} blocked of {row.routeCount} route decisions | last decision {formatDate(row.lastDecisionAt)}
+            </p>
+          </div>
+        ))}
+      </div>
+    </PmsCard>
+  );
+}
+
+function HealthChecks({ data }: { data: Awaited<ReturnType<typeof getConnectorControlCenter>> }) {
+  return (
+    <PmsCard title="Health checks" eyebrow="Connector smoke tests">
+      <div className="space-y-3">
+        {data.healthChecks.map((check) => (
+          <div key={check.id} className="rounded-lg border border-neutral-200 p-3">
+            <div className="flex flex-wrap justify-between gap-2">
+              <p className="text-sm font-semibold text-neutral-950">{check.definitionName} - {check.checkType}</p>
+              <StatusFor value={check.status} />
+            </div>
+            <p className="mt-2 text-sm leading-6 text-neutral-600">{check.resultSummary}</p>
+            <p className="mt-1 text-xs text-neutral-500">Checked {formatDate(check.checkedAt)} | latency {check.latencyMs ?? "n/a"} ms</p>
+          </div>
+        ))}
+      </div>
+    </PmsCard>
+  );
+}
+
+function CostTelemetry({ data }: { data: Awaited<ReturnType<typeof getConnectorControlCenter>> }) {
+  return (
+    <PmsCard title="Cost telemetry" eyebrow="Avoid uncontrolled vendor spend">
+      <div className="mb-4 overflow-hidden rounded-md border border-neutral-200">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-neutral-50 text-xs uppercase tracking-[0.08em] text-neutral-500">
+            <tr><th className="px-3 py-2">Workflow</th><th className="px-3 py-2">Capability</th><th className="px-3 py-2 text-right">Estimated</th></tr>
+          </thead>
+          <tbody className="divide-y divide-neutral-100">
+            {data.costSummary.map((row) => (
+              <tr key={`${row.workflowArea}-${row.capabilityKey}`}>
+                <td className="px-3 py-2 font-semibold text-neutral-950">{row.workflowArea}</td>
+                <td className="px-3 py-2 text-neutral-600">{row.capabilityKey}</td>
+                <td className="px-3 py-2 text-right font-semibold"><Money cents={row.estimatedCents} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="space-y-3">
+        {data.costs.map((cost) => (
+          <div key={cost.id} className="rounded-lg border border-neutral-200 p-3">
+            <div className="flex flex-wrap justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-neutral-950">{cost.capabilityKey}</p>
+                <p className="mt-1 text-xs text-neutral-600">{cost.workflowArea} | {cost.definitionName ?? "Manual route"} | {cost.pricingUnit}</p>
+              </div>
+              <p className="text-sm font-semibold text-neutral-950"><Money cents={cost.costCents} /></p>
+            </div>
+            <p className="mt-2 text-xs text-neutral-600">{jsonLine(cost.metadata)}</p>
+          </div>
+        ))}
+      </div>
+    </PmsCard>
   );
 }
 
