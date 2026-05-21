@@ -529,9 +529,13 @@ model PmsTreatmentPlan {
   patientId      String
   providerId     String?
   name           String
+  presentationNote String?
+  acceptedAt     DateTime?
+  signedAt       DateTime?
   status         String   @default("DRAFT")
   totalFeeCents  Int      @default(0)
   patientEstimateCents Int @default(0)
+  insuranceEstimateCents Int @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -543,10 +547,13 @@ model PmsTreatmentPlanItem {
   id              String   @id @default(cuid())
   treatmentPlanId String
   procedureCodeId String
+  phase           Int      @default(1)
   sequence        Int
   tooth           String?
   surface         String?
   feeCents        Int      @default(0)
+  insuranceEstimateCents Int @default(0)
+  patientEstimateCents Int @default(0)
   status          String   @default("PROPOSED")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

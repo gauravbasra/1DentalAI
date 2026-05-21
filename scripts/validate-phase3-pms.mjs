@@ -71,8 +71,9 @@ for (const token of ["Operatory day sheet", "Pinboard", "Recall", "Lab case", "A
 const patientsPage = fs.readFileSync("src/app/app/pms/patients/page.tsx", "utf8");
 const patientRecordPage = fs.readFileSync("src/app/app/pms/patients/[patientId]/page.tsx", "utf8");
 const chartPage = fs.readFileSync("src/app/app/pms/chart/[patientId]/page.tsx", "utf8");
-for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addToothCondition", "addProcedureLog"]) {
-  const haystack = `${schema}\n${patientsPage}\n${patientRecordPage}\n${chartPage}`;
+const treatmentPlanPage = fs.readFileSync("src/app/app/pms/treatment-plans/page.tsx", "utf8");
+for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addToothCondition", "addProcedureLog", "Treatment plan builder", "addTreatmentPlanItem", "updateTreatmentPlanStatus"]) {
+  const haystack = `${schema}\n${patientsPage}\n${patientRecordPage}\n${chartPage}\n${treatmentPlanPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS family/chart production token missing: ${token}`);
     process.exit(1);

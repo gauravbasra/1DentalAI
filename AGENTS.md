@@ -21,6 +21,8 @@
 ## Product Direction
 
 - 1DentalAI is a full dental AI operating system: phone, AI receptionist, AI chat, reputation, RCM, payer workflows, PMS/EHR/CRM connectivity, payments, scheduling, forms, AI scribing, AI charting, AI perio, analytics, DSO controls, and automation.
+- Product layers must remain distinct during planning and implementation: Layer 1 Core PMS, Layer 2 Patient Experience, Layer 3 RCM and Financial Operations, Layer 4 Clinical AI, Layer 5 Enterprise AI Operating System. The active build priority is Core PMS plus patient experience foundations before RCM, Clinical AI, or enterprise AI orchestration.
+- Core PMS means patient/family management, scheduling, charting, imaging, treatment planning, insurance, billing, claims, payments, reporting, and the required security/audit controls. Do not call adjacent communications, AI, or RCM surfaces "PMS" unless the true PMS workflow is complete.
 - NexHealth and Stedi are launch accelerators, not permanent product dependencies.
 - Product workflows must call 1DentalAI-owned routers and connector contracts, not vendor APIs directly.
 - Existing DentalRCM remains separate unless a phase plan explicitly approves shared code extraction.

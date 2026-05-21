@@ -594,14 +594,112 @@ export async function addPerioMeasure(patientId: string, input: { tooth: string;
 
 export async function listTreatmentPlans(tenantId = defaultTenantId) {
   return (await query(
-    `select tp.*, p."firstName", p."lastName", pr."displayName" as "providerName"
+    `select tp.*, p."firstName", p."lastName", p."chartNumber", pr."displayName" as "providerName",
+       coalesce(items.item_count, 0)::int as "itemCount",
+       coalesce(items.accepted_count, 0)::int as "acceptedItemCount"
      from "PmsTreatmentPlan" tp
      join "PmsPatient" p on p."id" = tp."patientId"
      left join "PmsProvider" pr on pr."id" = tp."providerId"
+     left join (
+       select "treatmentPlanId", count(*) as item_count, count(*) filter (where "status" = 'ACCEPTED') as accepted_count
+       from "PmsTreatmentPlanItem"
+       group by "treatmentPlanId"
+     ) items on items."treatmentPlanId" = tp."id"
      where tp."tenantId" = $1
      order by tp."updatedAt" desc`,
     [tenantId],
   )).rows;
+}
+
+export async function createTreatmentPlan(input: {
+  tenantId?: string;
+  patientId: string;
+  providerId?: string;
+  name: string;
+  presentationNote?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("txp");
+  const result = await query(
+    `insert into "PmsTreatmentPlan"
+       ("id", "tenantId", "patientId", "providerId", "name", "presentationNote", "status", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'DRAFT', current_timestamp)
+     returning *`,
+    [id, tenantId, input.patientId, input.providerId ?? null, input.name.trim(), input.presentationNote?.trim() || null],
+  );
+  await addAudit(tenantId, "treatment_coordinator", "TREATMENT_PLAN_CREATED", "PmsTreatmentPlan", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function addTreatmentPlanItem(input: {
+  treatmentPlanId: string;
+  procedureCodeId: string;
+  phase?: number;
+  sequence?: number;
+  tooth?: string;
+  surface?: string;
+}) {
+  const code = (await query<{ defaultFeeCents: number }>(`select "defaultFeeCents" from "PmsProcedureCode" where "id" = $1`, [input.procedureCodeId])).rows[0];
+  const feeCents = code?.defaultFeeCents ?? 0;
+  const insuranceEstimateCents = Math.round(feeCents * 0.5);
+  const patientEstimateCents = feeCents - insuranceEstimateCents;
+  const id = newId("txi");
+  const result = await query(
+    `insert into "PmsTreatmentPlanItem"
+       ("id", "treatmentPlanId", "procedureCodeId", "phase", "sequence", "tooth", "surface", "feeCents", "insuranceEstimateCents", "patientEstimateCents", "status", "updatedAt")
+     values ($1, $2, $3, $4, coalesce($5::int, (select coalesce(max("sequence"), 0) + 1 from "PmsTreatmentPlanItem" where "treatmentPlanId" = $2)), $6, $7, $8, $9, $10, 'PROPOSED', current_timestamp)
+     returning *`,
+    [id, input.treatmentPlanId, input.procedureCodeId, input.phase ?? 1, input.sequence ?? null, input.tooth ?? null, input.surface ?? null, feeCents, insuranceEstimateCents, patientEstimateCents],
+  );
+  await recalculateTreatmentPlan(input.treatmentPlanId);
+  return result.rows[0];
+}
+
+export async function updateTreatmentPlanStatus(treatmentPlanId: string, status: string) {
+  const accepted = status === "ACCEPTED";
+  const result = await query<{ id: string; tenantId: string; patientId: string }>(
+    `update "PmsTreatmentPlan"
+     set "status" = $2,
+         "acceptedAt" = case when $3::boolean then current_timestamp else "acceptedAt" end,
+         "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "id", "tenantId", "patientId"`,
+    [treatmentPlanId, status, accepted],
+  );
+  const plan = result.rows[0] ?? null;
+  if (plan) {
+    if (accepted) {
+      await query(`update "PmsTreatmentPlanItem" set "status" = 'ACCEPTED', "updatedAt" = current_timestamp where "treatmentPlanId" = $1`, [treatmentPlanId]);
+      await createTask({
+        tenantId: plan.tenantId,
+        patientId: plan.patientId,
+        ownerRoleKey: "treatment_coordinator",
+        title: "Schedule accepted treatment plan",
+        taskType: "TREATMENT_SCHEDULING",
+        priority: "HIGH",
+      });
+    }
+    await addAudit(plan.tenantId, "treatment_coordinator", "TREATMENT_PLAN_STATUS_UPDATED", "PmsTreatmentPlan", treatmentPlanId, "ALLOWED");
+  }
+  return plan;
+}
+
+async function recalculateTreatmentPlan(treatmentPlanId: string) {
+  await query(
+    `update "PmsTreatmentPlan" tp
+     set "totalFeeCents" = coalesce(items.total_fee, 0),
+         "insuranceEstimateCents" = coalesce(items.insurance_estimate, 0),
+         "patientEstimateCents" = coalesce(items.patient_estimate, 0),
+         "updatedAt" = current_timestamp
+     from (
+       select "treatmentPlanId", sum("feeCents") as total_fee, sum("insuranceEstimateCents") as insurance_estimate, sum("patientEstimateCents") as patient_estimate
+       from "PmsTreatmentPlanItem"
+       where "treatmentPlanId" = $1
+       group by "treatmentPlanId"
+     ) items
+     where tp."id" = items."treatmentPlanId"`,
+    [treatmentPlanId],
+  );
 }
 
 export async function listLedger(tenantId = defaultTenantId) {
