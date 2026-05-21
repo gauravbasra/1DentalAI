@@ -52,6 +52,7 @@ jobs:
           for i in 1 2 3; do
             rsync -az --delete \
               --exclude='.git' \
+              --exclude='.env' \
               --exclude='node_modules' \
               --exclude='.next/cache' \
               -e "ssh -p ${DEPLOY_PORT} -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" \
@@ -63,7 +64,7 @@ jobs:
       - name: Provision database and run migrations
         run: |
           for i in 1 2 3; do
-            timeout 180s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
+            timeout 600s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
             set -euo pipefail
             cd "${DEPLOY_PATH}"
             if [ ! -f .env ] || ! grep -q '^DB_PASSWORD_ENCODING=hex$' .env; then
