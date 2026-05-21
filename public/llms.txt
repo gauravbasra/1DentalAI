@@ -1,0 +1,48 @@
+# 1DentalAI
+
+1DentalAI is a dental AI operating system for practices and DSOs. It connects AI receptionist workflows, patient messaging, scheduling, insurance verification, RCM automation, clinical AI scribing, reputation management, practice analytics, and connector governance into one web platform.
+
+Primary site: https://app.1dentalai.com
+Sitemap: https://app.1dentalai.com/sitemap.xml
+Contact: https://app.1dentalai.com/contact
+
+## Company
+
+- Name: 1DentalAI
+- Founder and CEO: Gaurav Basra
+- Category: Dental software, dental AI, dental practice operations, DSO operations
+- Audience: Dental practices, DSOs, dentists, hygienists, front desk teams, billing teams, treatment coordinators, practice managers, and dental operations leaders
+
+## Important Pages
+
+- Home: https://app.1dentalai.com/
+- Product: https://app.1dentalai.com/product
+- Solutions: https://app.1dentalai.com/solutions
+- Features: https://app.1dentalai.com/features
+- Use cases: https://app.1dentalai.com/use-cases
+- Blog: https://app.1dentalai.com/blog
+- About: https://app.1dentalai.com/about
+- Contact: https://app.1dentalai.com/contact
+
+## Solution Pages
+
+- AI Receptionist for Dentists: https://app.1dentalai.com/solutions/ai-receptionist-for-dentists
+- Dental Insurance Verification AI: https://app.1dentalai.com/solutions/dental-insurance-verification-ai
+- Clinical AI Scribe for Dentistry: https://app.1dentalai.com/solutions/clinical-ai-scribe-dentistry
+- Dental RCM Automation: https://app.1dentalai.com/solutions/dental-rcm-automation
+- Dental Reputation Management AI: https://app.1dentalai.com/solutions/dental-reputation-management-ai
+- Dental Practice Analytics AI: https://app.1dentalai.com/solutions/dental-practice-analytics-ai
+- DSO Dental AI Platform: https://app.1dentalai.com/solutions/dso-dental-ai-platform
+
+## Blog And Education
+
+- What Is a Dental AI Operating System?: https://app.1dentalai.com/blog/dental-ai-operating-system
+- AI Receptionist for Dental Practices: https://app.1dentalai.com/blog/ai-receptionist-dental-practices
+- Dental Insurance Verification AI: https://app.1dentalai.com/blog/dental-insurance-verification-ai
+- Clinical AI Scribe for Dentistry: https://app.1dentalai.com/blog/clinical-ai-scribe-dentistry
+
+## Crawl Guidance
+
+Public marketing, product, solution, blog, about, and contact pages are intended for indexing and AI answer engines.
+
+Private application routes, admin routes, login/logout/signup routes, and API routes are not intended for indexing.
