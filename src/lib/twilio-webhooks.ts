@@ -32,11 +32,21 @@ export async function formPayload(request: Request) {
 
 export function publicWebhookUrl(request: Request) {
   const url = new URL(request.url);
+  const configuredBase = process.env.ONE_DENTAL_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.PUBLIC_APP_URL;
+  if (configuredBase) {
+    const base = new URL(configuredBase);
+    url.protocol = base.protocol;
+    url.host = base.host;
+    return url.toString();
+  }
   const forwardedHost = request.headers.get("x-forwarded-host");
   const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
   if (forwardedHost) {
     url.host = forwardedHost;
     url.protocol = `${forwardedProto}:`;
+  } else if (url.hostname === "app.1dentalai.com") {
+    url.protocol = "https:";
+    url.host = "app.1dentalai.com";
   }
   return url.toString();
 }
