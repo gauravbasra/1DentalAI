@@ -85,7 +85,7 @@ export default function ProductPage() {
                   href="/demos"
                   className="rounded-full bg-neutral-950 px-6 py-3 text-center text-sm font-semibold text-white transition hover:bg-cyan-700"
                 >
-                  View demo tracks
+                  View workflows
                 </Link>
                 <Link
                   href="/features"

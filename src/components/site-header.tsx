@@ -30,7 +30,7 @@ export function SiteHeader() {
             href="/contact"
             className="rounded-full bg-neutral-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-cyan-700"
           >
-            Early access
+            Request access
           </Link>
         </div>
       </nav>
