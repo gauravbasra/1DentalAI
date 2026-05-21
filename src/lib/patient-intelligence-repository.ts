@@ -215,7 +215,7 @@ async function getPerfectTimeSlotOpenings(tenantId: string) {
      )
      select d.day::text,
        greatest((select count(*) from "PmsOperatory" where "tenantId" = $1 and "status" = 'READY') * 8 - count(a."id"), 0)::text as openings,
-       coalesce(sum(a."productionCents"), 0)::text as scheduledProductionCents
+       coalesce(sum(a."productionCents"), 0)::text as "scheduledProductionCents"
      from days d
      left join "PmsAppointment" a on a."tenantId" = $1 and a."startsAt"::date = d.day and a."status" not in ('CANCELED','NO_SHOW','BROKEN')
      group by d.day
