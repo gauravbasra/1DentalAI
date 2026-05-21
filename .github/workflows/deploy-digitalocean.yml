@@ -58,12 +58,16 @@ jobs:
           ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF
             set -euo pipefail
             cd "${DEPLOY_PATH}"
-            if [ ! -f .env ]; then
-              DB_PASSWORD="\$(openssl rand -base64 36 | tr -d '\n')"
+            if [ ! -f .env ] || ! grep -q '^DB_PASSWORD_ENCODING=hex$' .env; then
+              docker compose -f docker-compose.yml -f docker-compose.public.yml stop postgres || true
+              docker compose -f docker-compose.yml -f docker-compose.public.yml rm -f postgres || true
+              docker volume rm 1dentalai_1dentalai-postgres-data || true
+              DB_PASSWORD="\$(openssl rand -hex 32)"
               {
                 echo "POSTGRES_DB=dentalai_prod"
                 echo "POSTGRES_USER=dentalai_app"
                 echo "POSTGRES_PASSWORD=\${DB_PASSWORD}"
+                echo "DB_PASSWORD_ENCODING=hex"
                 echo "DATABASE_URL=postgresql://dentalai_app:\${DB_PASSWORD}@postgres:5432/dentalai_prod?schema=public"
               } > .env
               chmod 600 .env
