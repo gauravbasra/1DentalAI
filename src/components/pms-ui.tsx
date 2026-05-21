@@ -4,6 +4,7 @@ import { StatusPill } from "@/components/foundation-shell";
 export const pmsNav = [
   { href: "/app/pms", label: "Command" },
   { href: "/app/pms/schedule", label: "Schedule" },
+  { href: "/app/pms/online-scheduling", label: "Online Booking" },
   { href: "/app/pms/patients", label: "Patients" },
   { href: "/app/pms/forms", label: "Forms" },
   { href: "/app/pms/imaging", label: "Imaging" },

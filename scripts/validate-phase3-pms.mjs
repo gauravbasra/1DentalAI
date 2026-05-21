@@ -3,6 +3,8 @@ import fs from "node:fs";
 const requiredFiles = [
   "src/app/app/pms/page.tsx",
   "src/app/app/pms/schedule/page.tsx",
+  "src/app/app/pms/online-scheduling/page.tsx",
+  "src/app/book/[slug]/page.tsx",
   "src/app/app/pms/patients/page.tsx",
   "src/app/app/pms/patients/[patientId]/page.tsx",
   "src/app/app/pms/forms/page.tsx",
@@ -33,6 +35,10 @@ const requiredSchemaModels = [
   "PmsAppointmentCategory",
   "PmsBlockout",
   "PmsAppointmentRequest",
+  "PmsOnlineSchedulingLink",
+  "PmsOnlineBooking",
+  "PmsSchedulingInviteCampaign",
+  "PmsSchedulingInviteRecipient",
   "PmsRecall",
   "PmsProcedureCode",
   "PmsPatientCommunicationPreference",
@@ -84,9 +90,19 @@ if (pmsPage.includes("workbenchAreas") || pmsPage.includes("getWorkbenchesForRol
 }
 
 const schedulePage = fs.readFileSync("src/app/app/pms/schedule/page.tsx", "utf8");
+const onlineSchedulingPage = fs.readFileSync("src/app/app/pms/online-scheduling/page.tsx", "utf8");
+const publicBookingPage = fs.readFileSync("src/app/book/[slug]/page.tsx", "utf8");
 for (const token of ["Operatory day sheet", "Pinboard", "Recall", "Lab case", "AppointmentCategory"]) {
   if (!schedulePage.includes(token) && !schema.includes(token)) {
     console.error(`Schedule PMS depth token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["PmsOnlineSchedulingLink", "PmsOnlineBooking", "PmsSchedulingInviteCampaign", "getOnlineSchedulingWorkbench", "getOnlineSchedulingAvailability", "submitOnlineBooking", "Booking links, availability, and PMS writeback", "Reserve appointment"]) {
+  const haystack = `${schema}\n${onlineSchedulingPage}\n${publicBookingPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+  if (!haystack.includes(token)) {
+    console.error(`PMS online scheduling token missing: ${token}`);
     process.exit(1);
   }
 }

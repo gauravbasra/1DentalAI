@@ -78,6 +78,40 @@ export type PmsScheduleBoard = {
   production: { scheduledCents: number; completedCents: number; unscheduledRequests: number; dueRecalls: number; labCaseRisks: number };
 };
 
+export type PmsOnlineSchedulingLinkRow = {
+  id: string;
+  tenantId: string;
+  slug: string;
+  title: string;
+  audience: string;
+  sourceChannel: string;
+  status: string;
+  appointmentCategoryId: string | null;
+  providerId: string | null;
+  locationId: string | null;
+  earliestBookingDays: number;
+  maxBookingDays: number;
+  slotIntervalMinutes: number;
+  reservationFeeCents: number;
+  requiresInsurance: boolean;
+  acceptedPayerNames: string[] | null;
+  notes: string | null;
+  categoryName: string | null;
+  defaultMinutes: number | null;
+  providerName: string | null;
+  bookingCount: number;
+  clickCount: number;
+};
+
+export type PmsOnlineSlot = {
+  startsAt: string;
+  endsAt: string;
+  providerId: string;
+  providerName: string;
+  operatoryId: string;
+  operatoryName: string;
+};
+
 export function cents(amount: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -974,6 +1008,398 @@ export async function updateAppointmentStatus(appointmentId: string, status: str
     await addAudit(row.tenantId, "front_desk", "APPOINTMENT_STATUS_UPDATED", "PmsAppointment", appointmentId, "ALLOWED");
   }
   return row;
+}
+
+export async function getOnlineSchedulingWorkbench(tenantId = defaultTenantId) {
+  const [links, bookings, campaigns, categories, providers, operatories, patientFinder] = await Promise.all([
+    query<PmsOnlineSchedulingLinkRow>(
+      `select l.*,
+        c."name" as "categoryName",
+        c."defaultMinutes",
+        pr."displayName" as "providerName",
+        coalesce(b.booking_count, 0)::int as "bookingCount",
+        coalesce(r.click_count, 0)::int as "clickCount"
+       from "PmsOnlineSchedulingLink" l
+       left join "PmsAppointmentCategory" c on c."id" = l."appointmentCategoryId"
+       left join "PmsProvider" pr on pr."id" = l."providerId"
+       left join (
+        select "linkId", count(*) as booking_count
+        from "PmsOnlineBooking"
+        where "tenantId" = $1
+        group by "linkId"
+       ) b on b."linkId" = l."id"
+       left join (
+        select c."linkId", count(r."id") filter (where r."clickedAt" is not null) as click_count
+        from "PmsSchedulingInviteCampaign" c
+        left join "PmsSchedulingInviteRecipient" r on r."campaignId" = c."id"
+        where c."tenantId" = $1
+        group by c."linkId"
+       ) r on r."linkId" = l."id"
+       where l."tenantId" = $1
+       order by l."status", l."sourceChannel", l."title"`,
+      [tenantId],
+    ),
+    query(
+      `select b.*, l."title" as "linkTitle", p."chartNumber"
+       from "PmsOnlineBooking" b
+       join "PmsOnlineSchedulingLink" l on l."id" = b."linkId"
+       left join "PmsPatient" p on p."id" = b."patientId"
+       where b."tenantId" = $1
+       order by b."createdAt" desc
+       limit 25`,
+      [tenantId],
+    ),
+    query(
+      `select c.*, l."title" as "linkTitle",
+        coalesce(r.recipients, 0)::int as recipients,
+        coalesce(r.clicked, 0)::int as clicked,
+        coalesce(r.booked, 0)::int as booked
+       from "PmsSchedulingInviteCampaign" c
+       join "PmsOnlineSchedulingLink" l on l."id" = c."linkId"
+       left join (
+        select "campaignId", count(*) as recipients,
+          count(*) filter (where "clickedAt" is not null) as clicked,
+          count(*) filter (where "bookedAt" is not null) as booked
+        from "PmsSchedulingInviteRecipient"
+        group by "campaignId"
+       ) r on r."campaignId" = c."id"
+       where c."tenantId" = $1
+       order by c."createdAt" desc`,
+      [tenantId],
+    ),
+    listAppointmentCategories(tenantId),
+    listProviders(tenantId),
+    listOperatories(tenantId),
+    getSchedulingPatientFinder(tenantId),
+  ]);
+
+  const slotsByLink = await Promise.all(links.rows.map(async (link) => [link.id, await getOnlineSchedulingAvailability(link.slug, tenantId)] as const));
+
+  return {
+    links: links.rows,
+    bookings: bookings.rows,
+    campaigns: campaigns.rows,
+    categories,
+    providers,
+    operatories,
+    patientFinder,
+    slotsByLink: Object.fromEntries(slotsByLink),
+  };
+}
+
+export async function getOnlineSchedulingLink(slug: string, tenantId = defaultTenantId) {
+  const result = await query<PmsOnlineSchedulingLinkRow>(
+    `select l.*,
+      c."name" as "categoryName",
+      c."defaultMinutes",
+      pr."displayName" as "providerName",
+      0::int as "bookingCount",
+      0::int as "clickCount"
+     from "PmsOnlineSchedulingLink" l
+     left join "PmsAppointmentCategory" c on c."id" = l."appointmentCategoryId"
+     left join "PmsProvider" pr on pr."id" = l."providerId"
+     where l."tenantId" = $1 and l."slug" = $2 and l."status" = 'ACTIVE'`,
+    [tenantId, slug],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getOnlineSchedulingAvailability(slug: string, tenantId = defaultTenantId): Promise<PmsOnlineSlot[]> {
+  const link = await getOnlineSchedulingLink(slug, tenantId);
+  if (!link) return [];
+  const durationMinutes = Number(link.defaultMinutes ?? 60);
+  const interval = Math.max(15, Number(link.slotIntervalMinutes || 30));
+  const startDay = new Date();
+  startDay.setHours(0, 0, 0, 0);
+  startDay.setDate(startDay.getDate() + Number(link.earliestBookingDays ?? 1));
+  const endDay = new Date();
+  endDay.setHours(23, 59, 59, 999);
+  endDay.setDate(endDay.getDate() + Number(link.maxBookingDays ?? 21));
+
+  const [providers, operatories, conflicts] = await Promise.all([
+    query<{ id: string; displayName: string }>(
+      `select "id", "displayName"
+       from "PmsProvider"
+       where "tenantId" = $1 and "status" = 'ACTIVE' and ($2::text is null or "id" = $2)
+       order by "displayName"`,
+      [tenantId, link.providerId],
+    ),
+    query<{ id: string; name: string }>(
+      `select "id", "name"
+       from "PmsOperatory"
+       where "tenantId" = $1 and "status" = 'READY'
+       order by "code"`,
+      [tenantId],
+    ),
+    query<{ providerId: string | null; operatoryId: string | null; startsAt: string; endsAt: string }>(
+      `select "providerId", "operatoryId", "startsAt"::text as "startsAt", "endsAt"::text as "endsAt"
+       from "PmsAppointment"
+       where "tenantId" = $1
+         and "startsAt" < $3::timestamp
+         and "endsAt" > $2::timestamp
+         and "status" not in ('CANCELED', 'NO_SHOW', 'BROKEN')`,
+      [tenantId, startDay.toISOString(), endDay.toISOString()],
+    ),
+  ]);
+
+  const slots: PmsOnlineSlot[] = [];
+  for (const provider of providers.rows) {
+    for (const operatory of operatories.rows) {
+      for (let dayOffset = Number(link.earliestBookingDays ?? 1); dayOffset <= Number(link.maxBookingDays ?? 21); dayOffset++) {
+        const day = new Date();
+        day.setHours(0, 0, 0, 0);
+        day.setDate(day.getDate() + dayOffset);
+        if ([0, 6].includes(day.getDay())) continue;
+        for (let minute = 8 * 60; minute <= 16 * 60; minute += interval) {
+          const startsAt = new Date(day);
+          startsAt.setMinutes(minute);
+          const endsAt = new Date(startsAt.getTime() + durationMinutes * 60 * 1000);
+          const overlaps = conflicts.rows.some((item) => {
+            if (item.providerId !== provider.id && item.operatoryId !== operatory.id) return false;
+            return new Date(item.startsAt) < endsAt && new Date(item.endsAt) > startsAt;
+          });
+          if (!overlaps) {
+            slots.push({
+              startsAt: startsAt.toISOString(),
+              endsAt: endsAt.toISOString(),
+              providerId: provider.id,
+              providerName: provider.displayName,
+              operatoryId: operatory.id,
+              operatoryName: operatory.name,
+            });
+          }
+          if (slots.length >= 60) return slots;
+        }
+      }
+    }
+  }
+  return slots;
+}
+
+export async function createOnlineSchedulingLink(input: {
+  tenantId?: string;
+  title: string;
+  slug: string;
+  audience: string;
+  sourceChannel: string;
+  appointmentCategoryId?: string;
+  providerId?: string;
+  locationId?: string;
+  earliestBookingDays?: number;
+  maxBookingDays?: number;
+  slotIntervalMinutes?: number;
+  reservationFeeCents?: number;
+  requiresInsurance?: boolean;
+  acceptedPayerNames?: string;
+  notes?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const slug = input.slug.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const result = await query(
+    `insert into "PmsOnlineSchedulingLink"
+       ("id", "tenantId", "slug", "title", "audience", "sourceChannel", "status", "appointmentCategoryId", "providerId", "locationId", "earliestBookingDays", "maxBookingDays", "slotIntervalMinutes", "reservationFeeCents", "requiresInsurance", "acceptedPayerNames", "notes", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'ACTIVE', $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, current_timestamp)
+     on conflict ("tenantId", "slug") do update set
+       "title" = excluded."title",
+       "audience" = excluded."audience",
+       "sourceChannel" = excluded."sourceChannel",
+       "appointmentCategoryId" = excluded."appointmentCategoryId",
+       "providerId" = excluded."providerId",
+       "locationId" = excluded."locationId",
+       "earliestBookingDays" = excluded."earliestBookingDays",
+       "maxBookingDays" = excluded."maxBookingDays",
+       "slotIntervalMinutes" = excluded."slotIntervalMinutes",
+       "reservationFeeCents" = excluded."reservationFeeCents",
+       "requiresInsurance" = excluded."requiresInsurance",
+       "acceptedPayerNames" = excluded."acceptedPayerNames",
+       "notes" = excluded."notes",
+       "updatedAt" = current_timestamp
+     returning *`,
+    [
+      newId("oslink"),
+      tenantId,
+      slug,
+      input.title.trim(),
+      input.audience,
+      input.sourceChannel,
+      input.appointmentCategoryId || null,
+      input.providerId || null,
+      input.locationId || "loc_primary",
+      input.earliestBookingDays ?? 1,
+      input.maxBookingDays ?? 21,
+      input.slotIntervalMinutes ?? 30,
+      input.reservationFeeCents ?? 0,
+      Boolean(input.requiresInsurance),
+      payerNamesJson(input.acceptedPayerNames),
+      input.notes?.trim() || null,
+    ],
+  );
+  await addAudit(tenantId, "front_desk", "ONLINE_SCHEDULING_LINK_UPSERTED", "PmsOnlineSchedulingLink", result.rows[0].id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function submitOnlineBooking(input: {
+  tenantId?: string;
+  slug: string;
+  startsAt: string;
+  providerId: string;
+  operatoryId: string;
+  firstName: string;
+  lastName: string;
+  dateOfBirth?: string;
+  phone?: string;
+  email?: string;
+  patientNote?: string;
+  insurancePayerName?: string;
+  subscriberId?: string;
+  utmSource?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const link = await getOnlineSchedulingLink(input.slug, tenantId);
+  if (!link) throw new Error("Scheduling link is not active");
+  const slots = await getOnlineSchedulingAvailability(input.slug, tenantId);
+  const selected = slots.find((slot) => slot.startsAt === input.startsAt && slot.providerId === input.providerId && slot.operatoryId === input.operatoryId);
+  if (!selected) throw new Error("Selected appointment time is no longer available");
+  const payerStatus = evaluatePayerPolicy(link.acceptedPayerNames, input.insurancePayerName);
+  if (link.requiresInsurance && payerStatus === "BLOCKED") throw new Error("Selected insurance is not accepted for this booking link");
+
+  const patient = await matchOrCreateOnlinePatient({
+    tenantId,
+    firstName: input.firstName,
+    lastName: input.lastName,
+    dateOfBirth: input.dateOfBirth,
+    phone: input.phone,
+    email: input.email,
+    referralSource: link.sourceChannel,
+  });
+  const categoryName = link.categoryName ?? "Online booking";
+  const appointmentId = newId("appt");
+  const bookingId = newId("osbook");
+  const appointmentStatus = link.reservationFeeCents > 0 ? "HELD" : "CONFIRMED";
+
+  await query(
+    `insert into "PmsAppointment"
+       ("id", "tenantId", "patientId", "providerId", "operatoryId", "startsAt", "endsAt", "status", "appointmentType", "productionCents", "readinessStatus", "notes", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6::timestamp, $7::timestamp, $8, $9, coalesce((select "defaultFeeCents" from "PmsProcedureCode" where "tenantId" = $2 and "code" = any((select "defaultProcedureCodes" from "PmsAppointmentCategory" where "id" = $10)) limit 1), 0), $11, $12, current_timestamp)`,
+    [
+      appointmentId,
+      tenantId,
+      patient.id,
+      selected.providerId,
+      selected.operatoryId,
+      selected.startsAt,
+      selected.endsAt,
+      appointmentStatus,
+      categoryName,
+      link.appointmentCategoryId,
+      payerStatus === "NEEDS_REVIEW" ? "NEEDS_REVIEW" : "READY",
+      onlineBookingNote(link, input.patientNote, payerStatus),
+    ],
+  );
+  await query(
+    `insert into "PmsAppointmentStatusHistory" ("id", "appointmentId", "status", "actorRole", "note")
+     values ($1, $2, $3, 'online_scheduling', $4)`,
+    [newId("apst"), appointmentId, appointmentStatus, `Booked from ${link.title}`],
+  );
+  await query(
+    `insert into "PmsOnlineBooking"
+       ("id", "tenantId", "linkId", "appointmentId", "patientId", "firstName", "lastName", "dateOfBirth", "phone", "email", "isReturningPatient", "appointmentCategoryId", "providerId", "operatoryId", "startsAt", "endsAt", "status", "patientNote", "insurancePayerName", "subscriberId", "eligibilityStatus", "reservationFeeCents", "reservationPaymentStatus", "sourceChannel", "utmSource", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, $9, $10, $11, $12, $13, $14, $15::timestamp, $16::timestamp, 'BOOKED', $17, $18, $19, $20, $21, $22, $23, $24, current_timestamp)
+     returning *`,
+    [
+      bookingId,
+      tenantId,
+      link.id,
+      appointmentId,
+      patient.id,
+      input.firstName.trim(),
+      input.lastName.trim(),
+      input.dateOfBirth || null,
+      input.phone?.trim() || null,
+      input.email?.trim() || null,
+      patient.isReturningPatient,
+      link.appointmentCategoryId,
+      selected.providerId,
+      selected.operatoryId,
+      selected.startsAt,
+      selected.endsAt,
+      input.patientNote?.trim() || null,
+      input.insurancePayerName?.trim() || null,
+      input.subscriberId?.trim() || null,
+      payerStatus,
+      link.reservationFeeCents,
+      link.reservationFeeCents > 0 ? "DUE" : "NOT_REQUIRED",
+      link.sourceChannel,
+      input.utmSource?.trim() || null,
+    ],
+  );
+  await addAudit(tenantId, "online_scheduling", "ONLINE_BOOKING_WRITTEN_TO_PMS", "PmsAppointment", appointmentId, "ALLOWED");
+  return { bookingId, appointmentId, patientId: patient.id, isReturningPatient: patient.isReturningPatient };
+}
+
+async function getSchedulingPatientFinder(tenantId: string) {
+  const result = await query<{ unscheduledHygiene: string; brokenAppointments: string; asapRequests: string; unscheduledTreatmentCents: string }>(
+    `select
+      (select count(*) from "PmsRecall" r join "PmsPatient" p on p."id" = r."patientId" where r."tenantId" = $1 and r."status" in ('DUE', 'OVERDUE') and p."status" = 'ACTIVE')::text as "unscheduledHygiene",
+      (select count(*) from "PmsAppointment" where "tenantId" = $1 and "status" in ('BROKEN', 'CANCELED', 'NO_SHOW') and "startsAt" >= current_date - interval '90 days')::text as "brokenAppointments",
+      (select count(*) from "PmsAppointmentRequest" where "tenantId" = $1 and "status" = 'OPEN')::text as "asapRequests",
+      (select coalesce(sum(tpi."feeCents"), 0) from "PmsTreatmentPlan" tp join "PmsTreatmentPlanItem" tpi on tpi."treatmentPlanId" = tp."id" where tp."tenantId" = $1 and tp."status" in ('PRESENTED', 'DRAFT'))::text as "unscheduledTreatmentCents"`,
+    [tenantId],
+  );
+  const row = result.rows[0];
+  return {
+    unscheduledHygiene: Number(row?.unscheduledHygiene ?? 0),
+    brokenAppointments: Number(row?.brokenAppointments ?? 0),
+    asapRequests: Number(row?.asapRequests ?? 0),
+    unscheduledTreatmentCents: Number(row?.unscheduledTreatmentCents ?? 0),
+  };
+}
+
+async function matchOrCreateOnlinePatient(input: { tenantId: string; firstName: string; lastName: string; dateOfBirth?: string; phone?: string; email?: string; referralSource: string }) {
+  const existing = await query<{ id: string }>(
+    `select "id"
+     from "PmsPatient"
+     where "tenantId" = $1
+       and (
+        (lower(coalesce("email", '')) = lower($2) and $2 <> '')
+        or (regexp_replace(coalesce("phone", ''), '[^0-9]', '', 'g') = regexp_replace($3, '[^0-9]', '', 'g') and $3 <> '')
+        or (lower("firstName") = lower($4) and lower("lastName") = lower($5) and "dateOfBirth"::date = $6::date)
+       )
+     order by "updatedAt" desc
+     limit 1`,
+    [input.tenantId, input.email?.trim() || "", input.phone?.trim() || "", input.firstName.trim(), input.lastName.trim(), input.dateOfBirth || null],
+  );
+  const found = existing.rows[0];
+  if (found) return { id: found.id, isReturningPatient: true };
+
+  const id = newId("pat");
+  const chartNumber = `NB${Date.now().toString().slice(-8)}`;
+  await query(
+    `insert into "PmsPatient"
+       ("id", "tenantId", "chartNumber", "firstName", "lastName", "dateOfBirth", "phone", "email", "responsibleParty", "referralSource", "status", "privacyLevel", "patientNote", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6::timestamp, $7, $8, 'SELF', $9, 'ACTIVE', 'STANDARD', 'Created from online scheduling after identity search found no existing chart.', current_timestamp)`,
+    [id, input.tenantId, chartNumber, input.firstName.trim(), input.lastName.trim(), input.dateOfBirth || null, input.phone?.trim() || null, input.email?.trim() || null, input.referralSource],
+  );
+  await addAudit(input.tenantId, "online_scheduling", "PATIENT_CREATED_FROM_ONLINE_BOOKING", "PmsPatient", id, "ALLOWED");
+  return { id, isReturningPatient: false };
+}
+
+function evaluatePayerPolicy(acceptedPayerNames: string[] | null, payerName?: string) {
+  if (!payerName?.trim()) return "NOT_CHECKED";
+  if (!acceptedPayerNames?.length) return "NEEDS_REVIEW";
+  return acceptedPayerNames.some((payer) => payer.toLowerCase() === payerName.trim().toLowerCase()) ? "ACCEPTED_BY_POLICY" : "BLOCKED";
+}
+
+function payerNamesJson(value?: string) {
+  const payers = value?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
+  return payers.length ? JSON.stringify(payers) : null;
+}
+
+function onlineBookingNote(link: PmsOnlineSchedulingLinkRow, patientNote: string | undefined, payerStatus: string) {
+  const parts = [`Online booking link: ${link.title}`, `Source: ${link.sourceChannel}`, `Payer policy: ${payerStatus}`];
+  if (link.reservationFeeCents > 0) parts.push(`Reservation fee due: ${cents(link.reservationFeeCents)}`);
+  if (patientNote?.trim()) parts.push(`Patient note: ${patientNote.trim()}`);
+  return parts.join(" | ");
 }
 
 export async function getChart(patientId: string) {
