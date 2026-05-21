@@ -622,13 +622,28 @@ export async function createPhoneRoutingRule(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("route");
+  const destination = input.destination.trim();
+  const failoverAction = input.failoverAction?.trim() || null;
+  const status =
+    destination && failoverAction
+      ? "READY_FOR_SMOKE_TEST"
+      : "BLOCKED_CONFIGURATION";
+  const validationSummary =
+    destination && failoverAction
+      ? "Route saved for smoke test. It is not live until provider webhooks and call routing tests pass."
+      : "Route cannot be activated until destination and failover action are configured.";
   await query(
     `insert into "PhoneRoutingRule"
-       ("id", "tenantId", "name", "triggerType", "destinationType", "destination", "priority", "failoverAction", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, $8, current_timestamp)`,
-    [id, tenantId, input.name.trim(), input.triggerType, input.destinationType, input.destination.trim(), input.priority, input.failoverAction?.trim() || null],
+       ("id", "tenantId", "name", "triggerType", "destinationType", "destination", "priority", "failoverAction", "status", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, current_timestamp)`,
+    [id, tenantId, input.name.trim(), input.triggerType, input.destinationType, destination, input.priority, failoverAction, status],
   );
-  await addAudit(tenantId, "practice_manager", "PHONE_ROUTING_RULE_CREATED", "PhoneRoutingRule", id);
+  await addAudit(tenantId, "practice_manager", "PHONE_ROUTING_RULE_CREATED", "PhoneRoutingRule", id, status === "BLOCKED_CONFIGURATION" ? "BLOCKED" : "ALLOWED", {
+    status,
+    validationSummary,
+    triggerType: input.triggerType,
+    destinationType: input.destinationType,
+  });
 }
 
 export async function createPhoneCallControlAction(input: {
