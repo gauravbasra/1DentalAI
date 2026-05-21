@@ -75,6 +75,9 @@ const requiredTables = [
   "MarketingCampaign",
   "MarketingLandingPage",
   "AiStudioAsset",
+  "PatientFinderSavedFilter",
+  "PatientFinderFollowUp",
+  "MorningHuddleSnapshot",
   "PmsAuditEvent",
 ];
 

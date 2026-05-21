@@ -1342,6 +1342,72 @@ model AiStudioAsset {
   @@index([tenantId, approvalStatus])
 }
 
+model PatientFinderSavedFilter {
+  id             String   @id @default(cuid())
+  tenantId       String
+  name           String
+  description    String?
+  goal           String
+  criteria       Json
+  defaultOwnerRoleKey String @default("front_desk")
+  status         String   @default("ACTIVE")
+  lastResultCount Int    @default(0)
+  lastRunAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, status, goal])
+  @@unique([tenantId, name])
+}
+
+model PatientFinderFollowUp {
+  id             String   @id @default(cuid())
+  tenantId       String
+  filterId       String?
+  patientId      String
+  appointmentId  String?
+  treatmentPlanId String?
+  claimId        String?
+  reason         String
+  sourceModule   String
+  priority       String   @default("NORMAL")
+  ownerRoleKey   String   @default("front_desk")
+  status         String   @default("OPEN")
+  recommendedChannel String @default("PHONE")
+  dueAt          DateTime?
+  attemptCount   Int      @default(0)
+  lastAttemptAt  DateTime?
+  lastAttemptOutcome String?
+  nextAction     String
+  opportunityCents Int    @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, status, dueAt])
+  @@index([patientId, status])
+  @@index([filterId, status])
+}
+
+model MorningHuddleSnapshot {
+  id             String   @id @default(cuid())
+  tenantId       String
+  huddleDate     DateTime
+  tab            String
+  metricKey      String
+  label          String
+  valueText      String
+  detailText     String?
+  sourceModule   String
+  drilldownRoute String?
+  ownerRoleKey   String?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, huddleDate, tab, metricKey])
+  @@index([tenantId, huddleDate, tab])
+}
+
 model PmsAuditEvent {
   id        String   @id @default(cuid())
   tenantId  String

@@ -23,6 +23,8 @@ const requiredFiles = [
   "src/app/app/phone/page.tsx",
   "src/app/app/reputation/page.tsx",
   "src/app/app/marketing/page.tsx",
+  "src/app/app/huddle/page.tsx",
+  "src/app/app/patient-finder/page.tsx",
   "src/app/api/pms/patients/route.ts",
   "src/app/api/pms/schedule/route.ts",
   "src/app/api/pms/chart/[patientId]/route.ts",
@@ -79,6 +81,9 @@ const requiredSchemaModels = [
   "MarketingCampaign",
   "MarketingLandingPage",
   "AiStudioAsset",
+  "PatientFinderSavedFilter",
+  "PatientFinderFollowUp",
+  "MorningHuddleSnapshot",
 ];
 
 const missingFiles = requiredFiles.filter((file) => !fs.existsSync(file));
@@ -207,6 +212,23 @@ for (const token of ["ReputationReviewWorkflow", "PatientSurvey", "getReputation
 for (const token of ["MarketingCampaign", "MarketingLandingPage", "AiStudioAsset", "getMarketingOperatingCenter", "Marketing, AI Studio, Local SEO, and AI SEO", "landing-page copy"]) {
   if (!`${schema}\n${marketingPage}\n${osRepository}`.includes(token)) {
     console.error(`Marketing operating-system token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+const huddlePage = fs.readFileSync("src/app/app/huddle/page.tsx", "utf8");
+const patientFinderPage = fs.readFileSync("src/app/app/patient-finder/page.tsx", "utf8");
+const patientIntelligenceRepository = fs.readFileSync("src/lib/patient-intelligence-repository.ts", "utf8");
+for (const token of ["MorningHuddleSnapshot", "getMorningHuddle", "Morning huddle", "Perfect Time Slot opening map", "Yesterday, today, and tomorrow operating plan"]) {
+  if (!`${schema}\n${huddlePage}\n${patientIntelligenceRepository}`.includes(token)) {
+    console.error(`Morning huddle token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["PatientFinderSavedFilter", "PatientFinderFollowUp", "getPatientFinderCenter", "Opportunity recipes", "Follow-up work queue", "unscheduled_treatment", "high_intent_phone"]) {
+  if (!`${schema}\n${patientFinderPage}\n${patientIntelligenceRepository}`.includes(token)) {
+    console.error(`Patient Finder token missing: ${token}`);
     process.exit(1);
   }
 }

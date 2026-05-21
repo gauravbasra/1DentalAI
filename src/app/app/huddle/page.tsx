@@ -1,0 +1,101 @@
+import Link from "next/link";
+import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
+import { Money, PmsCard } from "@/components/pms-ui";
+import { getRole, type RoleKey } from "@/lib/foundation-data";
+import { getMorningHuddle } from "@/lib/patient-intelligence-repository";
+
+export const dynamic = "force-dynamic";
+
+type SnapshotRow = { id: string; tab: string; label: string; valueText: string; detailText: string | null; sourceModule: string; drilldownRoute: string | null; ownerRoleKey: string | null };
+type DayMetrics = Record<string, string>;
+type OpeningRow = { day: string; openings: string; scheduledProductionCents: string };
+
+export default async function HuddlePage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
+  const params = await searchParams;
+  const role = getRole(params.role);
+  const huddle = await getMorningHuddle();
+  const snapshots = huddle.snapshots as SnapshotRow[];
+  const openings = huddle.openings as OpeningRow[];
+
+  return (
+    <FoundationShell active="/app/huddle" roleKey={role.key}>
+      <PageHeader
+        eyebrow="Morning huddle"
+        title="Yesterday, today, and tomorrow operating plan"
+        body="A Dental Intelligence-style huddle should not be a poster of numbers. It connects yesterday's outcomes, today's readiness, tomorrow's openings, Patient Finder opportunities, RCM blockers, and follow-up ownership into work the team can execute."
+      />
+      <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/huddle" />
+
+      <section className="grid gap-3 md:grid-cols-4">
+        <Metric label="Today scheduled" value={huddle.today.scheduledAppointments} detail={<Money cents={Number(huddle.today.scheduledProductionCents)} />} />
+        <Metric label="Readiness blockers" value={huddle.today.readinessBlocks} detail={`${huddle.today.formsDue} forms due`} />
+        <Metric label="Open follow-ups" value={huddle.followUps.openFollowUps} detail={`${huddle.followUps.highPriority} high priority`} />
+        <Metric label="Opportunity" value={<Money cents={Number(huddle.followUps.opportunityCents)} />} detail="Patient Finder open dollars" />
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-3">
+        <HuddleColumn title="Yesterday" rows={snapshots.filter((row) => row.tab === "YESTERDAY")} metrics={huddle.yesterday} />
+        <HuddleColumn title="Today" rows={snapshots.filter((row) => row.tab === "TODAY")} metrics={huddle.today} />
+        <HuddleColumn title="Tomorrow" rows={snapshots.filter((row) => row.tab === "TOMORROW")} metrics={huddle.tomorrow} />
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+        <PmsCard title="Perfect Time Slot opening map" eyebrow="Schedule fill intelligence">
+          <div className="grid gap-3">
+            {openings.map((row) => (
+              <div key={row.day} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                <p className="font-semibold text-neutral-950">{new Date(`${row.day}T12:00:00`).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}</p>
+                <p className="text-neutral-600">{row.openings} openings</p>
+                <p className="font-semibold text-neutral-950"><Money cents={Number(row.scheduledProductionCents)} /></p>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+        <PmsCard title="Daily handoff routes" eyebrow="Where the team works">
+          <div className="grid gap-2 md:grid-cols-2">
+            <RouteCard title="Patient Finder" href="/app/patient-finder" body="Build recare, treatment, AR, broken appointment, and high-intent phone follow-ups." />
+            <RouteCard title="Online Booking" href="/app/pms/online-scheduling" body="Review public booking links, open slots, and PMS writeback audit." />
+            <RouteCard title="RCM" href="/app/rcm" body="Clear eligibility, payer, attachment, denial, credentialing, and leakage blockers." />
+            <RouteCard title="Reputation" href="/app/reputation" body="Approve review asks, inspect surveys, and block poor-experience requests." />
+          </div>
+        </PmsCard>
+      </section>
+    </FoundationShell>
+  );
+}
+
+function HuddleColumn({ title, rows, metrics }: { title: string; rows: SnapshotRow[]; metrics: DayMetrics }) {
+  return (
+    <PmsCard title={title} eyebrow="Huddle tab">
+      <div className="grid gap-3">
+        <div className="grid gap-2 rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-600">
+          {Object.entries(metrics).map(([key, value]) => (
+            <div key={key} className="flex items-center justify-between gap-3">
+              <span>{key.replaceAll(/([A-Z])/g, " $1").toLowerCase()}</span>
+              <span className="font-semibold text-neutral-950">{String(value)}</span>
+            </div>
+          ))}
+        </div>
+        {rows.map((row) => (
+          <div key={row.id} className="rounded-md border border-neutral-200 bg-white p-3">
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-sm font-semibold text-neutral-950">{row.label}</p>
+              <span className="rounded-md bg-cyan-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-cyan-800">{row.sourceModule}</span>
+            </div>
+            <p className="mt-1 text-xl font-semibold text-neutral-950">{row.valueText}</p>
+            {row.detailText ? <p className="mt-1 text-xs leading-5 text-neutral-600">{row.detailText}</p> : null}
+            {row.drilldownRoute ? <Link href={row.drilldownRoute} className="mt-3 inline-flex rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Open work</Link> : null}
+          </div>
+        ))}
+      </div>
+    </PmsCard>
+  );
+}
+
+function RouteCard({ title, href, body }: { title: string; href: string; body: string }) {
+  return <Link href={href} className="rounded-md border border-neutral-200 bg-neutral-50 p-3 transition hover:border-neutral-400"><p className="text-sm font-semibold text-neutral-950">{title}</p><p className="mt-1 text-xs leading-5 text-neutral-600">{body}</p></Link>;
+}
+
+function Metric({ label, value, detail }: { label: string; value: React.ReactNode; detail: React.ReactNode }) {
+  return <div className="rounded-lg border border-neutral-200 bg-white px-4 py-3 shadow-sm"><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p><p className="mt-1 text-2xl font-semibold text-neutral-950">{value}</p><p className="mt-1 text-xs text-neutral-500">{detail}</p></div>;
+}
