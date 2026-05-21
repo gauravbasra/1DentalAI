@@ -47,7 +47,7 @@ export function PmsCard({
   action?: React.ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white shadow-sm">
+    <section className="min-w-0 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
       <div className="flex items-start justify-between gap-3 border-b border-neutral-100 px-4 py-3">
         <div>
           {eyebrow ? <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cyan-700">{eyebrow}</p> : null}
@@ -55,7 +55,7 @@ export function PmsCard({
         </div>
         {action}
       </div>
-      <div className="p-4">{children}</div>
+      <div className="min-w-0 p-4">{children}</div>
     </section>
   );
 }

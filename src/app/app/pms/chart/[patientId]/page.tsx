@@ -61,17 +61,17 @@ export default async function ChartPage({ params, searchParams }: { params: Prom
       <RoleSwitcher activeRole={role.key as RoleKey} basePath={`/app/pms/chart/${patient.id}`} />
       <PmsSectionNav active="/app/pms/patients" roleKey={role.key} />
 
-      <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+      <section className="grid min-w-0 gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <PmsCard title="Odontogram" eyebrow="Tooth and surface charting">
-          <div className="grid grid-cols-8 gap-2">
+          <div className="grid min-w-0 grid-cols-4 gap-2 sm:grid-cols-8">
             {toothNumbers.map((tooth) => {
               const toothConditions = conditions.filter((item) => item.tooth === String(tooth));
               return (
-                <div key={tooth} className={`min-h-24 rounded-2xl border p-2 ${toothConditions.length ? "border-cyan-300 bg-cyan-50" : "border-neutral-200 bg-neutral-50"}`}>
+                <div key={tooth} className={`min-h-20 min-w-0 rounded-md border p-2 ${toothConditions.length ? "border-cyan-300 bg-cyan-50" : "border-neutral-200 bg-neutral-50"}`}>
                   <p className="text-sm font-semibold text-neutral-950">{tooth}</p>
                   <div className="mt-2 space-y-1">
                     {toothConditions.slice(0, 3).map((item) => (
-                      <p key={item.id} className="rounded-lg bg-white px-2 py-1 text-[11px] font-semibold text-neutral-700">{item.surface ?? "all"} · {item.condition}</p>
+                      <p key={item.id} className="truncate rounded-md bg-white px-2 py-1 text-[11px] font-semibold text-neutral-700">{item.surface ?? "all"} · {item.condition}</p>
                     ))}
                   </div>
                 </div>
@@ -87,55 +87,55 @@ export default async function ChartPage({ params, searchParams }: { params: Prom
         </PmsCard>
       </section>
 
-      <section className="mt-6 grid gap-6 xl:grid-cols-3">
+      <section className="mt-4 grid min-w-0 gap-4 xl:grid-cols-3">
         <PmsCard title="Add tooth condition" eyebrow="Diagnosis">
-          <form action={addConditionAction} className="grid gap-3">
+          <form action={addConditionAction} className="grid min-w-0 gap-3">
             <input type="hidden" name="patientId" value={patient.id} />
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
               <Input name="tooth" label="Tooth" required />
               <Input name="surface" label="Surface" />
             </div>
             <Input name="condition" label="Condition" required />
-            <label className="grid gap-1 text-sm font-semibold text-neutral-700">Status<select name="status" className="rounded-2xl border border-neutral-300 px-4 py-3"><option>ACTIVE</option><option>WATCH</option><option>RESOLVED</option></select></label>
-            <button className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white">Save condition</button>
+            <label className="grid min-w-0 gap-1 text-sm font-semibold text-neutral-700">Status<select name="status" className={controlClass}><option>ACTIVE</option><option>WATCH</option><option>RESOLVED</option></select></label>
+            <button className={buttonClass}>Save condition</button>
           </form>
         </PmsCard>
 
         <PmsCard title="Add procedure" eyebrow="Procedure log">
-          <form action={addProcedureAction} className="grid gap-3">
+          <form action={addProcedureAction} className="grid min-w-0 gap-3">
             <input type="hidden" name="patientId" value={patient.id} />
-            <label className="grid gap-1 text-sm font-semibold text-neutral-700">Procedure<select name="procedureCodeId" required className="rounded-2xl border border-neutral-300 px-4 py-3">{procedureCodes.map((code) => <option key={code.id} value={code.id}>{code.code} · {code.description}</option>)}</select></label>
-            <div className="grid grid-cols-2 gap-3">
+            <label className="grid min-w-0 gap-1 text-sm font-semibold text-neutral-700">Procedure<select name="procedureCodeId" required className={controlClass}>{procedureCodes.map((code) => <option key={code.id} value={code.id}>{code.code} · {code.description}</option>)}</select></label>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
               <Input name="tooth" label="Tooth" />
               <Input name="surface" label="Surface" />
             </div>
-            <label className="grid gap-1 text-sm font-semibold text-neutral-700">Status<select name="status" className="rounded-2xl border border-neutral-300 px-4 py-3"><option>TREATMENT_PLANNED</option><option>REFERRED</option><option>COMPLETED</option><option>EXISTING_OTHER</option></select></label>
-            <button className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white">Save procedure</button>
+            <label className="grid min-w-0 gap-1 text-sm font-semibold text-neutral-700">Status<select name="status" className={controlClass}><option>TREATMENT_PLANNED</option><option>REFERRED</option><option>COMPLETED</option><option>EXISTING_OTHER</option></select></label>
+            <button className={buttonClass}>Save procedure</button>
           </form>
         </PmsCard>
 
         <PmsCard title="New clinical note" eyebrow="Provider documentation">
-          <form action={addNoteAction} className="grid gap-3">
+          <form action={addNoteAction} className="grid min-w-0 gap-3">
             <input type="hidden" name="patientId" value={patient.id} />
-            <label className="grid gap-1 text-sm font-semibold text-neutral-700">
+            <label className="grid min-w-0 gap-1 text-sm font-semibold text-neutral-700">
               Note type
-              <select name="noteType" className="rounded-2xl border border-neutral-300 px-4 py-3">
+              <select name="noteType" className={controlClass}>
                 <option value="PROGRESS">Progress</option>
                 <option value="EXAM">Exam</option>
                 <option value="EMERGENCY">Emergency</option>
                 <option value="PHONE">Phone note</option>
               </select>
             </label>
-            <label className="grid gap-1 text-sm font-semibold text-neutral-700">
+            <label className="grid min-w-0 gap-1 text-sm font-semibold text-neutral-700">
               Note
-              <textarea name="body" required rows={8} className="rounded-2xl border border-neutral-300 px-4 py-3" />
+              <textarea name="body" required rows={8} className={controlClass} />
             </label>
-            <button className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white">Save note</button>
+            <button className={buttonClass}>Save note</button>
           </form>
         </PmsCard>
       </section>
 
-      <section className="mt-6 grid gap-6 xl:grid-cols-2">
+      <section className="mt-4 grid min-w-0 gap-4 xl:grid-cols-2">
         <PmsCard title="Procedure history" eyebrow="Clinical ledger">
           {chart.procedures.length ? (chart.procedures as ChartProcedure[]).map((proc) => (
             <div key={proc.id} className="mb-3 rounded-2xl bg-neutral-50 p-4">
@@ -173,11 +173,14 @@ function ClinicalList({ title, items }: { title: string; items: string[] }) {
 
 function Input({ label, name, required = false }: { label: string; name: string; required?: boolean }) {
   return (
-    <label className="grid gap-1 text-sm font-semibold text-neutral-700">
+    <label className="grid min-w-0 gap-1 text-sm font-semibold text-neutral-700">
       {label}
-      <input name={name} required={required} className="rounded-2xl border border-neutral-300 px-4 py-3" />
+      <input name={name} required={required} className={controlClass} />
     </label>
   );
 }
+
+const controlClass = "min-w-0 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-950 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100";
+const buttonClass = "w-full rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-neutral-800";
 
 const toothNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17];
