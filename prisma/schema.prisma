@@ -855,6 +855,50 @@ model PmsTask {
   @@index([tenantId, dueAt])
 }
 
+model PatientEngagementEvent {
+  id             String   @id @default(cuid())
+  tenantId       String
+  patientId      String
+  appointmentId  String?
+  procedureLogId String?
+  sourceModule   String
+  eventType      String
+  channel        String
+  status         String   @default("DRAFT")
+  triggerReason  String
+  messageBody    String
+  approvalStatus String   @default("NEEDS_REVIEW")
+  scheduledFor   DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, status, scheduledFor])
+  @@index([patientId, eventType])
+  @@index([appointmentId])
+}
+
+model ReputationRecoveryCase {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  patientId            String
+  appointmentId         String?
+  sourceEventId         String?
+  sentiment             String
+  status                String   @default("OPEN")
+  ownerRoleKey          String   @default("practice_manager")
+  reason                String
+  recoveryNote          String?
+  reviewRequestBlocked  Boolean  @default(true)
+  dueAt                 DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([tenantId, status, dueAt])
+  @@index([patientId, status])
+  @@index([sourceEventId])
+}
+
 model PmsAuditEvent {
   id        String   @id @default(cuid())
   tenantId  String

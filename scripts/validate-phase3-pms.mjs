@@ -15,6 +15,7 @@ const requiredFiles = [
   "src/app/app/pms/documents/page.tsx",
   "src/app/app/pms/reports/page.tsx",
   "src/app/app/pms/tasks/page.tsx",
+  "src/app/app/engagement/page.tsx",
   "src/app/api/pms/patients/route.ts",
   "src/app/api/pms/schedule/route.ts",
   "src/app/api/pms/chart/[patientId]/route.ts",
@@ -47,6 +48,8 @@ const requiredSchemaModels = [
   "PmsReferral",
   "PmsLabCase",
   "PmsTask",
+  "PatientEngagementEvent",
+  "ReputationRecoveryCase",
 ];
 
 const missingFiles = requiredFiles.filter((file) => !fs.existsSync(file));
@@ -106,6 +109,15 @@ for (const token of ["createImagingStudy", "createLabCase", "createDocument", "c
   const haystack = `${schema}\n${imagingPage}\n${labsPage}\n${documentsPage}\n${reportsPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS completion workflow token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+const engagementPage = fs.readFileSync("src/app/app/engagement/page.tsx", "utf8");
+for (const token of ["PatientEngagementEvent", "ReputationRecoveryCase", "stageEngagementEvent", "updateEngagementEventStatus", "PMS operating graph", "Post-visit review", "Service recovery before review requests"]) {
+  const haystack = `${schema}\n${engagementPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+  if (!haystack.includes(token)) {
+    console.error(`PMS-connected engagement token missing: ${token}`);
     process.exit(1);
   }
 }

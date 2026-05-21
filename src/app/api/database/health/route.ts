@@ -51,6 +51,8 @@ const requiredTables = [
   "PmsReferral",
   "PmsLabCase",
   "PmsTask",
+  "PatientEngagementEvent",
+  "ReputationRecoveryCase",
   "PmsAuditEvent",
 ];
 

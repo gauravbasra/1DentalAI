@@ -1395,6 +1395,172 @@ export async function createTask(input: { tenantId?: string; patientId?: string;
   return result.rows[0];
 }
 
+export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
+  const [events, recoveryCases, sourceSignals, patients] = await Promise.all([
+    query(
+      `select e.*, p."firstName", p."lastName", p."chartNumber", p."phone", p."email",
+        a."appointmentType", a."startsAt", a."readinessStatus",
+        pc."code" as "procedureCode", pc."description" as "procedureDescription"
+       from "PatientEngagementEvent" e
+       join "PmsPatient" p on p."id" = e."patientId"
+       left join "PmsAppointment" a on a."id" = e."appointmentId"
+       left join "PmsProcedureLog" pl on pl."id" = e."procedureLogId"
+       left join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
+       where e."tenantId" = $1
+       order by
+        case e."status"
+          when 'NEEDS_REVIEW' then 1
+          when 'READY_FOR_APPROVAL' then 2
+          when 'DRAFT' then 3
+          when 'APPROVED_TO_SEND' then 4
+          else 5
+        end,
+        e."scheduledFor" asc nulls last,
+        e."createdAt" desc`,
+      [tenantId],
+    ),
+    query(
+      `select r.*, p."firstName", p."lastName", p."chartNumber", a."appointmentType", a."startsAt"
+       from "ReputationRecoveryCase" r
+       join "PmsPatient" p on p."id" = r."patientId"
+       left join "PmsAppointment" a on a."id" = r."appointmentId"
+       where r."tenantId" = $1
+       order by r."dueAt" asc nulls last, r."createdAt" desc`,
+      [tenantId],
+    ),
+    query(
+      `select 'completed_procedures' as key, count(*)::int as value
+       from "PmsProcedureLog" pl
+       join "PmsPatient" p on p."id" = pl."patientId"
+       where p."tenantId" = $1 and pl."status" = 'COMPLETED'
+       union all
+       select 'due_recalls' as key, count(*)::int as value
+       from "PmsRecall" where "tenantId" = $1 and "status" in ('DUE', 'OVERDUE')
+       union all
+       select 'open_balances' as key, count(distinct "patientId")::int as value
+       from "PmsLedgerEntry" where "tenantId" = $1 and "balanceCents" > 0
+       union all
+       select 'readiness_blocks' as key, count(*)::int as value
+       from "PmsAppointment" where "tenantId" = $1 and "readinessStatus" <> 'READY'`,
+      [tenantId],
+    ),
+    listPatients(tenantId),
+  ]);
+
+  return {
+    events: events.rows,
+    recoveryCases: recoveryCases.rows,
+    sourceSignals: sourceSignals.rows,
+    patients,
+  };
+}
+
+export async function stageEngagementEvent(input: {
+  tenantId?: string;
+  patientId: string;
+  appointmentId?: string;
+  procedureLogId?: string;
+  sourceModule: string;
+  eventType: string;
+  channel: string;
+  triggerReason: string;
+  messageBody: string;
+  scheduledFor?: string;
+  actorRole?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("eng");
+  const result = await query(
+    `insert into "PatientEngagementEvent"
+       ("id", "tenantId", "patientId", "appointmentId", "procedureLogId", "sourceModule", "eventType", "channel", "status", "triggerReason", "messageBody", "approvalStatus", "scheduledFor", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, 'NEEDS_REVIEW', $9, $10, 'NEEDS_REVIEW', $11::timestamp, current_timestamp)
+     returning *`,
+    [
+      id,
+      tenantId,
+      input.patientId,
+      input.appointmentId?.trim() || null,
+      input.procedureLogId?.trim() || null,
+      input.sourceModule.trim(),
+      input.eventType.trim(),
+      input.channel.trim(),
+      input.triggerReason.trim(),
+      input.messageBody.trim(),
+      input.scheduledFor || null,
+    ],
+  );
+  await addAudit(tenantId, input.actorRole ?? "marketing_growth", "ENGAGEMENT_EVENT_STAGED", "PatientEngagementEvent", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function updateEngagementEventStatus(input: {
+  tenantId?: string;
+  eventId: string;
+  status: string;
+  actorRole?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const approvalStatus = input.status === "APPROVED_TO_SEND" ? "APPROVED" : input.status === "BLOCKED_SERVICE_RECOVERY" ? "BLOCKED" : "NEEDS_REVIEW";
+  const result = await query(
+    `update "PatientEngagementEvent"
+     set "status" = $1,
+       "approvalStatus" = $2,
+       "completedAt" = case when $1 = 'COMPLETED' then current_timestamp else "completedAt" end,
+       "updatedAt" = current_timestamp
+     where "tenantId" = $3 and "id" = $4
+     returning *`,
+    [input.status, approvalStatus, tenantId, input.eventId],
+  );
+  await addAudit(tenantId, input.actorRole ?? "marketing_growth", "ENGAGEMENT_EVENT_STATUS_UPDATED", "PatientEngagementEvent", input.eventId, result.rowCount ? "ALLOWED" : "BLOCKED");
+  return result.rows[0] ?? null;
+}
+
+export async function createReputationRecoveryCase(input: {
+  tenantId?: string;
+  patientId: string;
+  appointmentId?: string;
+  sourceEventId?: string;
+  sentiment: string;
+  reason: string;
+  recoveryNote?: string;
+  ownerRoleKey?: string;
+  dueAt?: string;
+  actorRole?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("rep");
+  const ownerRoleKey = input.ownerRoleKey ?? "practice_manager";
+  const result = await query(
+    `insert into "ReputationRecoveryCase"
+       ("id", "tenantId", "patientId", "appointmentId", "sourceEventId", "sentiment", "status", "ownerRoleKey", "reason", "recoveryNote", "reviewRequestBlocked", "dueAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'OPEN', $7, $8, $9, true, $10::timestamp, current_timestamp)
+     returning *`,
+    [
+      id,
+      tenantId,
+      input.patientId,
+      input.appointmentId?.trim() || null,
+      input.sourceEventId?.trim() || null,
+      input.sentiment.trim(),
+      ownerRoleKey,
+      input.reason.trim(),
+      input.recoveryNote?.trim() || null,
+      input.dueAt || null,
+    ],
+  );
+  await createTask({
+    tenantId,
+    patientId: input.patientId,
+    ownerRoleKey,
+    title: "Resolve service recovery before public review request",
+    taskType: "REPUTATION_RECOVERY",
+    priority: "HIGH",
+    dueAt: input.dueAt,
+  });
+  await addAudit(tenantId, input.actorRole ?? "practice_manager", "REPUTATION_RECOVERY_CREATED", "ReputationRecoveryCase", id, "ALLOWED");
+  return result.rows[0];
+}
+
 async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string, outcome: string) {
   await query(
     `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome")
