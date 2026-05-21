@@ -223,9 +223,10 @@ async function referralStatusAction(formData: FormData) {
   revalidatePath("/app/reputation");
 }
 
-export default async function ReputationPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
+export default async function ReputationPage({ searchParams }: { searchParams: Promise<{ role?: string; view?: string }> }) {
   const params = await searchParams;
   const role = getRole(params.role);
+  const view = ["today", "reviews", "responses", "surveys", "listings", "rules", "referrals"].includes(params.view ?? "") ? String(params.view) : "today";
   const center = await getReputationOperatingCenter();
   const metrics = center.metrics as Metrics;
   const reviews = center.reviews as ReviewRow[];
@@ -246,6 +247,7 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
         body="Public review requests, private surveys, service recovery, listing accuracy, response approvals, referrals, and testimonials are tied to PMS visits, consent, provider context, billing holds, and phone sentiment."
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/reputation" />
+      <ReputationViewNav active={view} roleKey={role.key} />
 
       <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Metric label="Average rating" value={metrics.averageRating} />
@@ -257,7 +259,7 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
         <Metric label="Blocked asks" value={metrics.blockedRequests} />
       </section>
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
+      {(view === "today" || view === "reviews") ? <section className="mt-4 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <PmsCard title="PMS-triggered review queue" eyebrow="Eligibility, suppression, response context">
           <div className="grid gap-3">
             {reviews.map((review) => (
@@ -309,9 +311,10 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
             <button className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white">Create reputation work</button>
           </form>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-2">
+      {(view === "today" || view === "responses" || view === "surveys") ? <section className="mt-4 grid gap-4 xl:grid-cols-2">
+        {view === "surveys" ? null : (
         <PmsCard title="Review response approvals" eyebrow="AI draft, human approval, connector-gated publishing">
           <div className="grid gap-3">
             {responses.map((response) => (
@@ -339,8 +342,9 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
             ))}
           </div>
         </PmsCard>
+        )}
 
-        <PmsCard title="Survey and service recovery" eyebrow="Private feedback before public asks">
+        {view === "responses" ? null : <PmsCard title="Survey and service recovery" eyebrow="Private feedback before public asks">
           <div className="grid gap-3">
             {surveys.map((survey) => (
               <div key={survey.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
@@ -373,10 +377,10 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
               </div>
             ))}
           </div>
-        </PmsCard>
-      </section>
+        </PmsCard>}
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+      {view === "listings" ? <section className="mt-4 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
         <PmsCard title="Listing accuracy and review sources" eyebrow="Local-search profile operations">
           <div className="grid gap-3">
             {listings.map((listing) => (
@@ -436,9 +440,9 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
             {!listingIssueQueue.length ? <p className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">No open listing or Local SEO issues.</p> : null}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4">
+      {view === "rules" ? <section className="mt-4">
         <PmsCard title="Campaign rules and suppression logic" eyebrow="Automated review, referral, and survey requests">
           <form action={ruleAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -476,9 +480,9 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[0.75fr_1.25fr]">
+      {view === "referrals" ? <section className="mt-4 grid gap-4 xl:grid-cols-[0.75fr_1.25fr]">
         <PmsCard title="Create referral or testimonial request" eyebrow="Growth loop after good care">
           <form action={referralCreateAction} className="grid gap-3">
             <label className="grid gap-1 text-xs font-semibold text-neutral-700">Patient<select name="patientId" className="rounded-md border border-neutral-300 px-3 py-2 text-sm"><option value="">Practice-level</option>{patients.map((p) => <option key={p.id} value={p.id}>{p.lastName}, {p.firstName} - {p.chartNumber}</option>)}</select></label>
@@ -522,13 +526,40 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
             ))}
           </div>
         </PmsCard>
-      </section>
+      </section> : null}
     </FoundationShell>
   );
 }
 
 function ReviewStatusButton({ id, requestStatus, label }: { id: string; requestStatus: string; label: string }) {
   return <form action={reviewStatusAction}><input type="hidden" name="id" value={id} /><input type="hidden" name="requestStatus" value={requestStatus} /><Button>{label}</Button></form>;
+}
+
+function ReputationViewNav({ active, roleKey }: { active: string; roleKey: string }) {
+  const items = [
+    { key: "today", label: "Today" },
+    { key: "reviews", label: "Review Requests" },
+    { key: "responses", label: "Responses" },
+    { key: "surveys", label: "Surveys & Recovery" },
+    { key: "listings", label: "Listings" },
+    { key: "rules", label: "Rules" },
+    { key: "referrals", label: "Referrals" },
+  ];
+  return (
+    <div className="mb-4 flex gap-1 overflow-x-auto rounded-lg border border-neutral-200 bg-white p-1 shadow-sm">
+      {items.map((item) => (
+        <a
+          key={item.key}
+          href={`/app/reputation?role=${roleKey}&view=${item.key}`}
+          className={`shrink-0 rounded-md px-3 py-2 text-xs font-semibold transition ${
+            active === item.key ? "bg-neutral-950 text-white" : "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950"
+          }`}
+        >
+          {item.label}
+        </a>
+      ))}
+    </div>
+  );
 }
 
 function ResponseButton({ id, approvalStatus, label }: { id: string; approvalStatus: string; label: string }) {
