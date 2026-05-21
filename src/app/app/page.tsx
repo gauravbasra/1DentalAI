@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { LoginForm } from "@/components/auth-forms";
+import { currentSession } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
 const accessOptions = [
   "Owner dentist",
@@ -15,6 +17,10 @@ export default async function AppLogin({
 }) {
   const params = await searchParams;
   const next = params.next && (params.next.startsWith("/app") || params.next.startsWith("/admin")) ? params.next : "/app/overview";
+  const session = await currentSession();
+  if (session) {
+    redirect(next);
+  }
 
   return (
     <main className="min-h-screen bg-[#f3f4f6] text-neutral-950">
