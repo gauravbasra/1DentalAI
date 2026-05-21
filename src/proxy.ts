@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-const sessionCookieNames = ["__Secure-1dentalai_session", "__Host-1dentalai_session", "1dentalai_session"];
+const sessionCookieNames = [
+  "__Secure-1dentalai_app_session",
+  "1dentalai_session",
+  "__Secure-1dentalai_session",
+  "__Host-1dentalai_session",
+];
 function canonicalizeHost(request: NextRequest) {
   const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || "";
   const hostname = host.split(":")[0]?.toLowerCase();

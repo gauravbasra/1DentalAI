@@ -8,9 +8,16 @@ import { query, newId } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
 
 const pbkdf2 = promisify(pbkdf2Callback);
-const sessionCookieName = "__Secure-1dentalai_session";
+const sessionCookieName = "__Secure-1dentalai_app_session";
+const deprecatedSecureSessionCookieName = "__Secure-1dentalai_session";
 const legacySessionCookieName = "__Host-1dentalai_session";
 const ipFallbackSessionCookieName = "1dentalai_session";
+const readableSessionCookieNames = [
+  sessionCookieName,
+  ipFallbackSessionCookieName,
+  deprecatedSecureSessionCookieName,
+  legacySessionCookieName,
+];
 const sessionMaxAgeSeconds = 60 * 60 * 8;
 const passwordIterations = 310_000;
 
@@ -99,6 +106,39 @@ function requestHostDomain(headerList: Awaited<ReturnType<typeof headers>>) {
 function requestIsIpFallback(headerList: Awaited<ReturnType<typeof headers>>) {
   const host = (headerList.get("x-forwarded-host") || headerList.get("host") || "").split(":")[0]?.toLowerCase();
   return host === "162.243.186.191";
+}
+
+function readSessionToken(cookieStore: Awaited<ReturnType<typeof cookies>>) {
+  for (const cookieName of readableSessionCookieNames) {
+    const token = readSignedToken(cookieStore.get(cookieName)?.value);
+    if (token) return token;
+  }
+  return null;
+}
+
+function expireCookie(
+  cookieStore: Awaited<ReturnType<typeof cookies>>,
+  name: string,
+  options?: { domain?: string; secure?: boolean },
+) {
+  cookieStore.set(name, "", {
+    httpOnly: true,
+    secure: options?.secure ?? name !== ipFallbackSessionCookieName,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+    ...(options?.domain && !name.startsWith("__Host-") ? { domain: options.domain } : {}),
+  });
+}
+
+function clearBrowserSessionCookies(cookieStore: Awaited<ReturnType<typeof cookies>>, cookieDomain?: string) {
+  for (const cookieName of readableSessionCookieNames) {
+    cookieStore.delete(cookieName);
+    expireCookie(cookieStore, cookieName);
+    if (cookieDomain) {
+      expireCookie(cookieStore, cookieName, { domain: cookieDomain, secure: cookieName !== ipFallbackSessionCookieName });
+    }
+  }
 }
 
 async function hashPassword(password: string, salt: string, iterations = passwordIterations) {
@@ -211,15 +251,14 @@ export async function loginWithPassword(formData: FormData): Promise<LoginResult
   const headerList = await headers();
   const cookieDomain = requestHostDomain(headerList);
   const isIpFallback = requestIsIpFallback(headerList);
+  clearBrowserSessionCookies(cookieStore, cookieDomain);
   cookieStore.set(isIpFallback ? ipFallbackSessionCookieName : sessionCookieName, signToken(rawToken), {
     httpOnly: true,
     secure: !isIpFallback,
     sameSite: "lax",
     path: "/",
     maxAge: sessionMaxAgeSeconds,
-    ...(!isIpFallback && cookieDomain ? { domain: cookieDomain } : {}),
   });
-  cookieStore.delete(legacySessionCookieName);
   await auditAuth({
     tenantId: user.tenantId,
     userId: user.id,
@@ -285,10 +324,7 @@ export async function signupAction(_previousState: AuthActionState, formData: Fo
 
 export async function logout() {
   const cookieStore = await cookies();
-  const token =
-    readSignedToken(cookieStore.get(sessionCookieName)?.value) ??
-    readSignedToken(cookieStore.get(legacySessionCookieName)?.value) ??
-    readSignedToken(cookieStore.get(ipFallbackSessionCookieName)?.value);
+  const token = readSessionToken(cookieStore);
   if (token) {
     const result = await query<{ id: string; tenantId: string; userId: string }>(
       `update "AuthSession"
@@ -311,27 +347,12 @@ export async function logout() {
   }
   const headerList = await headers();
   const cookieDomain = requestHostDomain(headerList);
-  cookieStore.delete(sessionCookieName);
-  cookieStore.delete(legacySessionCookieName);
-  cookieStore.delete(ipFallbackSessionCookieName);
-  if (cookieDomain) {
-    cookieStore.set(sessionCookieName, "", {
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-      path: "/",
-      domain: cookieDomain,
-      maxAge: 0,
-    });
-  }
+  clearBrowserSessionCookies(cookieStore, cookieDomain);
 }
 
 export async function currentSession() {
   const cookieStore = await cookies();
-  const token =
-    readSignedToken(cookieStore.get(sessionCookieName)?.value) ??
-    readSignedToken(cookieStore.get(legacySessionCookieName)?.value) ??
-    readSignedToken(cookieStore.get(ipFallbackSessionCookieName)?.value);
+  const token = readSessionToken(cookieStore);
   if (!token) return null;
 
   const result = await query<AuthSessionRow>(
