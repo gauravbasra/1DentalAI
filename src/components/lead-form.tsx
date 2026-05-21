@@ -15,6 +15,18 @@ export function LeadForm() {
 
     const form = event.currentTarget;
     const formData = new FormData(form);
+    const params = new URLSearchParams(window.location.search);
+    for (const [key, value] of [
+      ["utmSource", params.get("utm_source")],
+      ["utmMedium", params.get("utm_medium")],
+      ["utmCampaign", params.get("utm_campaign")],
+      ["utmContent", params.get("utm_content")],
+      ["utmTerm", params.get("utm_term")],
+    ] as const) {
+      if (value && !formData.get(key)) {
+        formData.set(key, value);
+      }
+    }
     const payload = Object.fromEntries(formData.entries());
 
     const response = await fetch("/api/leads", {
@@ -39,6 +51,12 @@ export function LeadForm() {
   return (
     <form onSubmit={submitLead} className="rounded-[2rem] bg-white p-7 shadow-sm">
       <div className="grid gap-4 md:grid-cols-2">
+        <input name="source" type="hidden" value="contact_page" />
+        <input name="utmSource" type="hidden" />
+        <input name="utmMedium" type="hidden" />
+        <input name="utmCampaign" type="hidden" />
+        <input name="utmContent" type="hidden" />
+        <input name="utmTerm" type="hidden" />
         <Field name="practiceName" label="Practice name" required />
         <Field name="contactName" label="Your name" required />
         <Field name="email" label="Work email" type="email" required />

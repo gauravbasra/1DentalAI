@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { MarketingShell, PageHero } from "@/components/marketing-shell";
 import { resources } from "@/lib/site-data";
 import type { Metadata } from "next";
@@ -45,6 +46,17 @@ export default function ResourcesPage() {
               ))}
             </div>
           </div>
+        </section>
+        <section className="bg-neutral-950 px-6 py-20 text-center text-white sm:px-8">
+          <h2 className="mx-auto max-w-4xl text-4xl font-semibold tracking-tight sm:text-6xl">
+            Start with the Dental AI Readiness Score.
+          </h2>
+          <p className="mx-auto mt-5 max-w-3xl text-base leading-8 text-neutral-300">
+            Score the workflows that decide where AI will create the fastest operational lift.
+          </p>
+          <Link href="/readiness-score" className="mt-8 inline-flex rounded-full bg-white px-6 py-3 text-sm font-semibold text-neutral-950 transition hover:bg-cyan-100">
+            Take the scorecard
+          </Link>
         </section>
       </main>
     </MarketingShell>

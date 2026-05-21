@@ -116,6 +116,16 @@ export const resources = [
     type: "Worksheet",
     body: "Estimate time lost to missed calls, insurance checks, review requests, recalls, no-shows, and claim rework.",
   },
+  {
+    title: "Dental AI Readiness Score",
+    type: "Assessment",
+    body: "Score patient access, insurance, RCM, clinical documentation, reputation, analytics, and connector readiness before choosing what to automate first.",
+  },
+  {
+    title: "Partner workflow review kit",
+    type: "Partner resource",
+    body: "A co-marketing framework for consultants, vendors, and dental operators who want to bring AI workflow reviews to their audience.",
+  },
 ];
 
 export const stats = [

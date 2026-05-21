@@ -19,6 +19,8 @@ export default function robots(): MetadataRoute.Robots {
           "/resources",
           "/blog",
           "/about",
+          "/partners",
+          "/readiness-score",
           "/contact",
           ...blogPosts.map((post) => `/blog/${post.slug}`),
         ],

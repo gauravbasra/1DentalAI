@@ -140,6 +140,24 @@ export default function Home() {
           </div>
         </section>
 
+        <section className="bg-neutral-950 px-6 py-20 text-center text-white sm:px-8">
+          <p className="text-sm font-semibold text-cyan-300">Organic growth offer</p>
+          <h2 className="mx-auto mt-4 max-w-4xl text-4xl font-semibold tracking-tight sm:text-6xl">
+            Score your dental AI readiness before you buy another tool.
+          </h2>
+          <p className="mx-auto mt-5 max-w-3xl text-base leading-8 text-neutral-300">
+            The scorecard identifies the workflow gaps across patient access, insurance, RCM, clinical AI, reputation, analytics, and connectors.
+          </p>
+          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+            <Link href="/readiness-score" className="rounded-full bg-white px-6 py-3 text-sm font-semibold text-neutral-950 transition hover:bg-cyan-100">
+              Take the readiness score
+            </Link>
+            <Link href="/partners" className="rounded-full border border-white/25 px-6 py-3 text-sm font-semibold text-white transition hover:border-cyan-300 hover:text-cyan-100">
+              Partner with 1DentalAI
+            </Link>
+          </div>
+        </section>
+
         <section className="bg-[#f5f5f7] px-6 py-24 sm:px-8">
           <SectionIntro
             eyebrow="Dental AI education"

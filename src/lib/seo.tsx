@@ -15,6 +15,8 @@ export const publicRoutes = [
   "/resources",
   "/blog",
   "/about",
+  "/partners",
+  "/readiness-score",
   "/contact",
 ];
 
