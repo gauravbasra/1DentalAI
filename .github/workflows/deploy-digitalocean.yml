@@ -106,6 +106,31 @@ jobs:
           done
           exit 1
 
+      - name: Install public domain proxy
+        run: |
+          for i in 1 2 3; do
+            timeout 240s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
+            set -euo pipefail
+            cd "${DEPLOY_PATH}"
+            sudo apt-get update
+            sudo apt-get install -y nginx certbot python3-certbot-nginx
+            sudo cp ops/nginx/1dentalai.conf /etc/nginx/sites-available/1dentalai.conf
+            sudo ln -sf /etc/nginx/sites-available/1dentalai.conf /etc/nginx/sites-enabled/1dentalai.conf
+            sudo rm -f /etc/nginx/sites-enabled/default
+            sudo nginx -t
+            sudo systemctl reload nginx
+            if getent ahosts 1dentalai.com www.1dentalai.com app.1dentalai.com | awk '{print \$1}' | grep -Eq '^(162\.243\.186\.191|2604:a880:800:14:0:2:eca0:e000)$'; then
+              sudo certbot --nginx --non-interactive --agree-tos --redirect \
+                -m hello@1dentalai.com \
+                -d 1dentalai.com -d www.1dentalai.com -d app.1dentalai.com || true
+              sudo nginx -t
+              sudo systemctl reload nginx
+            fi
+          EOF
+            sleep 10
+          done
+          exit 1
+
       - name: Verify public health
         run: |
           for i in 1 2 3 4 5; do

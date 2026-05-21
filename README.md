@@ -30,7 +30,9 @@ PORT=3001 npm run start
 
 Target:
 
-- Public app URL: `http://162.243.186.191/`
+- Public app URL: `https://1dentalai.com/`
+- Product app URL: `https://app.1dentalai.com/app`
+- Direct droplet fallback: `http://162.243.186.191/`
 - 1DentalAI service: `127.0.0.1:3001`
 - Existing DentalRCM service: `http://162.243.186.191:3000/`
 

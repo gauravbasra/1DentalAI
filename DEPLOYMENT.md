@@ -8,7 +8,7 @@ Expected process layout:
 
 - DentalRCM: existing process on port `3000`
 - 1DentalAI: Docker Compose service on `127.0.0.1:3001`
-- Nginx: proxies `http://162.243.186.191/` to `127.0.0.1:3001`
+- Nginx: proxies `https://1dentalai.com/`, `https://www.1dentalai.com/`, `https://app.1dentalai.com/`, and the direct droplet fallback `http://162.243.186.191/` to `127.0.0.1:3001`
 
 ## Docker Service
 
@@ -28,6 +28,7 @@ docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build
 
 ```bash
 curl -fsS http://127.0.0.1:3001/api/health
+curl -fsS https://1dentalai.com/api/health
 curl -fsS http://162.243.186.191/api/health
 ```
 

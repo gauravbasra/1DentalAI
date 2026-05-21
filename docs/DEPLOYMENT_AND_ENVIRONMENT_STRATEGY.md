@@ -7,7 +7,8 @@ Date: 2026-05-20
 
 | App | URL | Rule |
 | --- | --- | --- |
-| 1DentalAI | `http://162.243.186.191/` | Public marketing site and future 1DentalAI product root. |
+| 1DentalAI | `https://1dentalai.com/` | Public marketing site and 1DentalAI product root. Direct droplet fallback remains `http://162.243.186.191/`. |
+| 1DentalAI App | `https://app.1dentalai.com/app` | Authenticated product workspace. |
 | DentalRCM | `http://162.243.186.191:3000/` | Must remain untouched unless an approved phase explicitly changes it. |
 
 ## Deployment Principles
