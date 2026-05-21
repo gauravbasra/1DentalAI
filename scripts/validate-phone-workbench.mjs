@@ -2,6 +2,7 @@ import fs from "node:fs";
 
 const page = fs.readFileSync("src/app/app/phone/page.tsx", "utf8");
 const repository = fs.readFileSync("src/lib/operating-system-repository.ts", "utf8");
+const twilioWebhooks = fs.readFileSync("src/lib/twilio-webhooks.ts", "utf8");
 const schema = fs.readFileSync("prisma/schema.prisma", "utf8");
 
 const requiredSchemaModels = [
@@ -41,6 +42,12 @@ const requiredTokens = [
   "STIR/SHAKEN and carrier compliance",
   "FreeSWITCH is the PBX/media layer, not the carrier replacement",
   "deployed FreeSWITCH/PBX media layer with verified Event Socket or webhook bridge",
+  "TWILIO_INBOUND_REVIEW",
+  "TWILIO_SMS_REPLY_REVIEW",
+  "TWILIO_RECORDING_RECEIVED",
+  "TWILIO_TRANSCRIPTION_RECEIVED",
+  "TWILIO_WEBHOOK_VALIDATION_REQUIRED",
+  "x-twilio-signature",
 ];
 
 const failures = [];
@@ -48,7 +55,7 @@ for (const model of requiredSchemaModels) {
   if (!schema.includes(`model ${model}`)) failures.push(`Missing phone Prisma model: ${model}`);
 }
 
-const haystack = `${page}\n${repository}`;
+const haystack = `${page}\n${repository}\n${twilioWebhooks}`;
 for (const token of requiredTokens) {
   if (!haystack.includes(token)) failures.push(`Missing phone workbench token: ${token}`);
 }
