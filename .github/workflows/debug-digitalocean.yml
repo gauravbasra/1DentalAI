@@ -1,0 +1,26 @@
+name: Debug DigitalOcean 1DentalAI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_PATH: ${{ secrets.DO_DEPLOY_PATH != '' && secrets.DO_DEPLOY_PATH || '/var/www/1DentalAI' }}
+      DEPLOY_PORT: ${{ secrets.DO_SSH_PORT != '' && secrets.DO_SSH_PORT || '22' }}
+    steps:
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DO_SSH_PRIVATE_KEY }}" > ~/.ssh/do_deploy_key
+          chmod 600 ~/.ssh/do_deploy_key
+          ssh-keyscan -p "${DEPLOY_PORT}" -H "${{ secrets.DO_SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Print app logs
+        run: |
+          ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" <<EOF
+            set -e
+            cd "${DEPLOY_PATH}"
+            docker compose -f docker-compose.yml -f docker-compose.public.yml logs --tail=120 app
+          EOF
