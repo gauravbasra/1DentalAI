@@ -114,17 +114,23 @@ jobs:
             cd "${DEPLOY_PATH}"
             sudo apt-get update
             sudo apt-get install -y nginx certbot python3-certbot-nginx
-            sudo cp ops/nginx/1dentalai.conf /etc/nginx/sites-available/1dentalai.conf
-            sudo ln -sf /etc/nginx/sites-available/1dentalai.conf /etc/nginx/sites-enabled/1dentalai.conf
-            sudo rm -f /etc/nginx/sites-enabled/default
-            sudo nginx -t
-            sudo systemctl reload nginx
-            if getent ahosts 1dentalai.com www.1dentalai.com app.1dentalai.com | awk '{print \$1}' | grep -Eq '^(162\.243\.186\.191|2604:a880:800:14:0:2:eca0:e000)$'; then
-              sudo certbot --nginx --non-interactive --agree-tos --redirect \
-                -m hello@1dentalai.com \
-                -d 1dentalai.com -d www.1dentalai.com -d app.1dentalai.com || true
+            if sudo systemctl is-active --quiet nginx || ! sudo ss -ltnp | grep -q ':80 '; then
+              sudo cp ops/nginx/1dentalai.conf /etc/nginx/sites-available/1dentalai.conf
+              sudo ln -sf /etc/nginx/sites-available/1dentalai.conf /etc/nginx/sites-enabled/1dentalai.conf
+              sudo rm -f /etc/nginx/sites-enabled/default
               sudo nginx -t
-              sudo systemctl reload nginx
+              sudo systemctl enable --now nginx || true
+              sudo systemctl reload nginx || sudo nginx -s reload || true
+              if sudo systemctl is-active --quiet nginx && getent ahosts 1dentalai.com www.1dentalai.com app.1dentalai.com | awk '{print \$1}' | grep -Eq '^(162\.243\.186\.191|2604:a880:800:14:0:2:eca0:e000)$'; then
+                sudo certbot --nginx --non-interactive --agree-tos --redirect \
+                  -m hello@1dentalai.com \
+                  -d 1dentalai.com -d www.1dentalai.com -d app.1dentalai.com || true
+                sudo nginx -t
+                sudo systemctl reload nginx || true
+              fi
+            else
+              echo "Port 80 is already handled by an existing proxy; leaving it in place."
+              sudo ss -ltnp | grep ':80 ' || true
             fi
           EOF
             sleep 10
