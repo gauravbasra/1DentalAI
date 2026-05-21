@@ -19,6 +19,10 @@ const requiredFiles = [
   "src/app/app/pms/reports/page.tsx",
   "src/app/app/pms/tasks/page.tsx",
   "src/app/app/engagement/page.tsx",
+  "src/app/app/rcm/page.tsx",
+  "src/app/app/phone/page.tsx",
+  "src/app/app/reputation/page.tsx",
+  "src/app/app/marketing/page.tsx",
   "src/app/api/pms/patients/route.ts",
   "src/app/api/pms/schedule/route.ts",
   "src/app/api/pms/chart/[patientId]/route.ts",
@@ -68,6 +72,13 @@ const requiredSchemaModels = [
   "PmsTask",
   "PatientEngagementEvent",
   "ReputationRecoveryCase",
+  "RcmWorkItem",
+  "PhoneConversation",
+  "ReputationReviewWorkflow",
+  "PatientSurvey",
+  "MarketingCampaign",
+  "MarketingLandingPage",
+  "AiStudioAsset",
 ];
 
 const missingFiles = requiredFiles.filter((file) => !fs.existsSync(file));
@@ -163,6 +174,39 @@ for (const token of ["PatientEngagementEvent", "ReputationRecoveryCase", "stageE
   const haystack = `${schema}\n${engagementPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS-connected engagement token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+const rcmPage = fs.readFileSync("src/app/app/rcm/page.tsx", "utf8");
+const phonePage = fs.readFileSync("src/app/app/phone/page.tsx", "utf8");
+const reputationPage = fs.readFileSync("src/app/app/reputation/page.tsx", "utf8");
+const marketingPage = fs.readFileSync("src/app/app/marketing/page.tsx", "utf8");
+const osRepository = fs.readFileSync("src/lib/operating-system-repository.ts", "utf8");
+for (const token of ["RcmWorkItem", "getRcmOperatingCenter", "Revenue cycle command center", "ELIGIBILITY_AND_BENEFITS", "REVENUE_INTEGRITY", "CREDENTIALING"]) {
+  if (!`${schema}\n${rcmPage}\n${osRepository}`.includes(token)) {
+    console.error(`RCM operating-system token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["PhoneConversation", "getPhoneOperatingCenter", "AI phone and communications", "MISSED_CALL", "AI_VOICE_REVIEW"]) {
+  if (!`${schema}\n${phonePage}\n${osRepository}`.includes(token)) {
+    console.error(`Phone operating-system token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["ReputationReviewWorkflow", "PatientSurvey", "getReputationOperatingCenter", "Reviews, surveys, and service recovery", "BLOCKED_SERVICE_RECOVERY"]) {
+  if (!`${schema}\n${reputationPage}\n${osRepository}`.includes(token)) {
+    console.error(`Reputation operating-system token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["MarketingCampaign", "MarketingLandingPage", "AiStudioAsset", "getMarketingOperatingCenter", "Marketing, AI Studio, Local SEO, and AI SEO", "landing-page copy"]) {
+  if (!`${schema}\n${marketingPage}\n${osRepository}`.includes(token)) {
+    console.error(`Marketing operating-system token missing: ${token}`);
     process.exit(1);
   }
 }

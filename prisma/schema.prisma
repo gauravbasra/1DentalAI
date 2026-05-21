@@ -1174,6 +1174,174 @@ model ReputationRecoveryCase {
   @@index([sourceEventId])
 }
 
+model RcmWorkItem {
+  id             String   @id @default(cuid())
+  tenantId       String
+  patientId      String?
+  appointmentId  String?
+  claimId        String?
+  workType       String
+  stage          String
+  priority       String   @default("NORMAL")
+  status         String   @default("OPEN")
+  payerName      String?
+  amountCents    Int      @default(0)
+  ownerRoleKey   String   @default("billing_rcm")
+  sourceRecord   String?
+  blockerReason  String?
+  nextAction     String
+  dueAt          DateTime?
+  completedAt    DateTime?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, status, priority])
+  @@index([tenantId, stage, dueAt])
+  @@index([patientId])
+  @@index([claimId])
+}
+
+model PhoneConversation {
+  id              String   @id @default(cuid())
+  tenantId        String
+  patientId       String?
+  appointmentId   String?
+  direction       String
+  channel         String   @default("VOICE")
+  status          String   @default("OPEN")
+  callerNumber    String?
+  practiceNumber  String?
+  callerName      String?
+  aiIntent        String?
+  aiSentiment     String?
+  transcriptSummary String?
+  followUpStatus  String   @default("NEEDS_REVIEW")
+  outcome         String?
+  startedAt       DateTime @default(now())
+  durationSeconds Int?
+  recordingUrl    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, startedAt])
+  @@index([patientId, startedAt])
+  @@index([tenantId, aiIntent])
+}
+
+model ReputationReviewWorkflow {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  patientId           String?
+  appointmentId        String?
+  providerId           String?
+  locationId           String?
+  sourceEventId        String?
+  status              String   @default("OPEN")
+  serviceLine         String?
+  reviewSite          String   @default("GOOGLE")
+  requestChannel      String   @default("SMS")
+  requestStatus       String   @default("READY_FOR_APPROVAL")
+  rating              Int?
+  sentiment           String?
+  publicReviewText    String?
+  responseDraft       String?
+  recoveryStatus      String   @default("NOT_REQUIRED")
+  dueAt               DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([tenantId, status, dueAt])
+  @@index([patientId, status])
+  @@index([locationId, reviewSite])
+}
+
+model PatientSurvey {
+  id               String   @id @default(cuid())
+  tenantId         String
+  patientId        String?
+  appointmentId    String?
+  surveyType       String
+  status           String   @default("DRAFT")
+  score            Int?
+  nps              Int?
+  responseText     String?
+  recoveryRequired Boolean  @default(false)
+  ownerRoleKey     String   @default("marketing_growth")
+  dueAt            DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantId, status, dueAt])
+  @@index([patientId, surveyType])
+}
+
+model MarketingLandingPage {
+  id               String   @id @default(cuid())
+  tenantId         String
+  slug             String
+  title            String
+  serviceLine      String
+  status           String   @default("DRAFT")
+  offerSummary     String?
+  seoTitle         String?
+  seoDescription   String?
+  primaryCta       String
+  complianceStatus String   @default("NEEDS_REVIEW")
+  publishedUrl     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, status, serviceLine])
+}
+
+model MarketingCampaign {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  landingPageId         String?
+  name                  String
+  campaignType          String
+  status                String   @default("DRAFT")
+  audienceDefinition    String
+  primaryGoal           String
+  channelMix            String[]
+  aiStudioBrief         String?
+  complianceStatus      String   @default("NEEDS_REVIEW")
+  estimatedAudience     Int      @default(0)
+  attributedBookings    Int      @default(0)
+  attributedProductionCents Int   @default(0)
+  startsAt              DateTime?
+  endsAt                DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([tenantId, status, campaignType])
+  @@index([landingPageId])
+}
+
+model AiStudioAsset {
+  id              String   @id @default(cuid())
+  tenantId        String
+  sourceModule    String
+  sourceRecordId  String?
+  assetType       String
+  title           String
+  promptInput     String
+  generatedDraft  String
+  status          String   @default("DRAFT")
+  approvalStatus  String   @default("NEEDS_REVIEW")
+  complianceNotes String?
+  ownerRoleKey    String   @default("marketing_growth")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, sourceModule, assetType])
+  @@index([tenantId, approvalStatus])
+}
+
 model PmsAuditEvent {
   id        String   @id @default(cuid())
   tenantId  String

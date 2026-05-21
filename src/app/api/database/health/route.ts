@@ -68,6 +68,13 @@ const requiredTables = [
   "PmsTask",
   "PatientEngagementEvent",
   "ReputationRecoveryCase",
+  "RcmWorkItem",
+  "PhoneConversation",
+  "ReputationReviewWorkflow",
+  "PatientSurvey",
+  "MarketingCampaign",
+  "MarketingLandingPage",
+  "AiStudioAsset",
   "PmsAuditEvent",
 ];
 
