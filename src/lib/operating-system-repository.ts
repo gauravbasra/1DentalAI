@@ -819,21 +819,56 @@ export async function createReviewWorkflow(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("rep");
+  const eligibility = input.patientId
+    ? await query<{ openRecovery: string; optedOut: string }>(
+        `select
+           (select count(*) from "ReputationRecoveryCase" where "tenantId" = $1 and "patientId" = $2 and "status" not in ('COMPLETED','CLOSED'))::text as "openRecovery",
+           (select count(*) from "PmsPatientCommunicationPreference" where "patientId" = $2 and "channel" = $3 and "status" in ('OPTED_OUT','DO_NOT_CONTACT'))::text as "optedOut"`,
+        [tenantId, input.patientId, input.requestChannel],
+      )
+    : { rows: [{ openRecovery: "0", optedOut: "0" }] };
+  const blockedReasons = [
+    Number(eligibility.rows[0]?.openRecovery ?? 0) > 0 ? "open service recovery case" : null,
+    Number(eligibility.rows[0]?.optedOut ?? 0) > 0 ? "patient channel opt-out" : null,
+  ].filter(Boolean);
+  const requestStatus = blockedReasons.length ? "BLOCKED_ELIGIBILITY" : "READY_FOR_APPROVAL";
+  const recoveryStatus = Number(eligibility.rows[0]?.openRecovery ?? 0) > 0 ? "REQUIRED" : "NOT_REQUIRED";
   await query(
     `insert into "ReputationReviewWorkflow"
-       ("id", "tenantId", "patientId", "locationId", "status", "serviceLine", "reviewSite", "requestChannel", "requestStatus", "responseDraft", "dueAt", "updatedAt")
-     values ($1, $2, $3, 'loc_primary', 'OPEN', $4, $5, $6, 'READY_FOR_APPROVAL', $7, current_timestamp + interval '1 day', current_timestamp)`,
-    [id, tenantId, input.patientId || null, input.serviceLine, input.reviewSite, input.requestChannel, input.responseDraft || null],
+       ("id", "tenantId", "patientId", "locationId", "status", "serviceLine", "reviewSite", "requestChannel", "requestStatus", "responseDraft", "recoveryStatus", "dueAt", "updatedAt")
+     values ($1, $2, $3, 'loc_primary', 'OPEN', $4, $5, $6, $7, $8, $9, current_timestamp + interval '1 day', current_timestamp)`,
+    [id, tenantId, input.patientId || null, input.serviceLine, input.reviewSite, input.requestChannel, requestStatus, input.responseDraft || (blockedReasons.length ? `Blocked: ${blockedReasons.join(", ")}.` : null), recoveryStatus],
   );
-  await addAudit(tenantId, "marketing_growth", "REPUTATION_WORKFLOW_CREATED", "ReputationReviewWorkflow", id);
+  await addAudit(tenantId, "marketing_growth", "REPUTATION_WORKFLOW_CREATED", "ReputationReviewWorkflow", id, blockedReasons.length ? "BLOCKED" : "ALLOWED", {
+    requestStatus,
+    blockedReasons,
+    requestChannel: input.requestChannel,
+    reviewSite: input.reviewSite,
+  });
 }
 
 export async function updateReviewWorkflowStatus(id: string, requestStatus: string) {
-  const result = await query<{ tenantId: string }>(
-    `update "ReputationReviewWorkflow" set "requestStatus" = $2, "status" = case when $2 = 'COMPLETED' then 'COMPLETED' else "status" end, "completedAt" = case when $2 = 'COMPLETED' then current_timestamp else "completedAt" end, "updatedAt" = current_timestamp where "id" = $1 returning "tenantId"`,
+  const result = await query<{ tenantId: string; appliedStatus: string; recoveryStatus: string }>(
+    `update "ReputationReviewWorkflow"
+     set "requestStatus" = case
+         when $2 in ('APPROVED_STAGED','READY_FOR_APPROVAL') and "recoveryStatus" in ('REQUIRED','OPEN') then 'BLOCKED_SERVICE_RECOVERY'
+         else $2
+       end,
+       "status" = case when $2 = 'COMPLETED' then 'COMPLETED' else "status" end,
+       "completedAt" = case when $2 = 'COMPLETED' then current_timestamp else "completedAt" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId", "requestStatus" as "appliedStatus", "recoveryStatus"`,
     [id, requestStatus],
   );
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "REPUTATION_STATUS_UPDATED", "ReputationReviewWorkflow", id, "ALLOWED", { requestStatus });
+  if (result.rows[0]) {
+    const row = result.rows[0];
+    await addAudit(row.tenantId, "marketing_growth", "REPUTATION_STATUS_UPDATED", "ReputationReviewWorkflow", id, row.appliedStatus.startsWith("BLOCKED") ? "BLOCKED" : "ALLOWED", {
+      requestedStatus: requestStatus,
+      appliedStatus: row.appliedStatus,
+      recoveryStatus: row.recoveryStatus,
+    });
+  }
 }
 
 export async function updateReviewResponseApproval(id: string, approvalStatus: string) {
