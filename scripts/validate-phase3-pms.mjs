@@ -68,4 +68,15 @@ for (const token of ["Operatory day sheet", "Pinboard", "Recall", "Lab case", "A
   }
 }
 
+const patientsPage = fs.readFileSync("src/app/app/pms/patients/page.tsx", "utf8");
+const patientRecordPage = fs.readFileSync("src/app/app/pms/patients/[patientId]/page.tsx", "utf8");
+const chartPage = fs.readFileSync("src/app/app/pms/chart/[patientId]/page.tsx", "utf8");
+for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addToothCondition", "addProcedureLog"]) {
+  const haystack = `${schema}\n${patientsPage}\n${patientRecordPage}\n${chartPage}`;
+  if (!haystack.includes(token)) {
+    console.error(`PMS family/chart production token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
 console.log("Phase 3 PMS validation passed: bespoke routes, APIs, schema, and database migration exist.");

@@ -196,7 +196,17 @@ model PmsFamilyAccount {
   tenantId      String
   accountNumber String
   displayName   String
+  guarantorPatientId String?
+  billingType   String   @default("STANDARD")
   billingStatus String   @default("CURRENT")
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  state         String?
+  postalCode    String?
+  phone         String?
+  email         String?
+  financialNote String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -215,8 +225,17 @@ model PmsPatient {
   dateOfBirth     DateTime?
   phone           String?
   email           String?
+  sex             String?
+  genderIdentity  String?
+  preferredProviderId String?
+  primaryLocationId String?
+  responsibleParty String?
+  emergencyContactName String?
+  emergencyContactPhone String?
+  referralSource  String?
   status          String    @default("ACTIVE")
   privacyLevel    String    @default("STANDARD")
+  patientNote     String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

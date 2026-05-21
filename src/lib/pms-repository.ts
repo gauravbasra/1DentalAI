@@ -13,8 +13,28 @@ export type PmsPatientSummary = {
   email: string | null;
   status: string;
   privacyLevel: string;
+  familyAccountId: string | null;
+  responsibleParty: string | null;
+  patientNote: string | null;
   openTasks: number;
   balanceCents: number;
+};
+
+export type PmsFamilyAccountRow = {
+  id: string;
+  accountNumber: string;
+  displayName: string;
+  guarantorPatientId: string | null;
+  billingType: string;
+  billingStatus: string;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  phone: string | null;
+  email: string | null;
+  financialNote: string | null;
 };
 
 export type PmsAppointmentRow = {
@@ -112,6 +132,9 @@ export async function listPatients(tenantId = defaultTenantId, search = "") {
       p."email",
       p."status",
       p."privacyLevel",
+      p."familyAccountId",
+      p."responsibleParty",
+      p."patientNote",
       coalesce(t.open_tasks, 0)::int as "openTasks",
       coalesce(l.balance_cents, 0)::int as "balanceCents"
      from "PmsPatient" p
@@ -144,6 +167,14 @@ export async function createPatient(input: {
   dateOfBirth?: string;
   phone?: string;
   email?: string;
+  sex?: string;
+  responsibleParty?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  referralSource?: string;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const chart = await query<{ next: string }>(
@@ -153,17 +184,42 @@ export async function createPatient(input: {
     [tenantId],
   );
   const id = newId("pat");
+  const familyId = newId("fam");
   const chartNumber = chart.rows[0]?.next ?? "P000001";
+  const accountNumber = `F${chartNumber.slice(1)}`;
+
+  await query(
+    `insert into "PmsFamilyAccount"
+       ("id", "tenantId", "accountNumber", "displayName", "guarantorPatientId", "billingType", "billingStatus",
+        "addressLine1", "addressLine2", "city", "state", "postalCode", "phone", "email", "updatedAt")
+     values ($1, $2, $3, $4, $5, 'STANDARD', 'CURRENT', $6, $7, $8, $9, $10, $11, $12, current_timestamp)`,
+    [
+      familyId,
+      tenantId,
+      accountNumber,
+      `${input.lastName.trim()} family`,
+      id,
+      input.addressLine1?.trim() || null,
+      input.addressLine2?.trim() || null,
+      input.city?.trim() || null,
+      input.state?.trim() || null,
+      input.postalCode?.trim() || null,
+      input.phone?.trim() || null,
+      input.email?.trim() || null,
+    ],
+  );
 
   const result = await query<PmsPatientSummary>(
     `insert into "PmsPatient"
-       ("id", "tenantId", "chartNumber", "firstName", "lastName", "preferredName", "dateOfBirth", "phone", "email", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7::timestamp, $8, $9, current_timestamp)
+       ("id", "tenantId", "familyAccountId", "chartNumber", "firstName", "lastName", "preferredName", "dateOfBirth", "phone", "email",
+        "sex", "responsibleParty", "referralSource", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, $9, $10, $11, $12, $13, current_timestamp)
      returning "id", "chartNumber", "firstName", "lastName", "preferredName", "dateOfBirth"::text as "dateOfBirth",
-       "phone", "email", "status", "privacyLevel", 0::int as "openTasks", 0::int as "balanceCents"`,
+       "phone", "email", "status", "privacyLevel", "familyAccountId", "responsibleParty", "patientNote", 0::int as "openTasks", 0::int as "balanceCents"`,
     [
       id,
       tenantId,
+      familyId,
       chartNumber,
       input.firstName.trim(),
       input.lastName.trim(),
@@ -171,6 +227,9 @@ export async function createPatient(input: {
       input.dateOfBirth || null,
       input.phone?.trim() || null,
       input.email?.trim() || null,
+      input.sex?.trim() || null,
+      input.responsibleParty?.trim() || "SELF",
+      input.referralSource?.trim() || null,
     ],
   );
 
@@ -182,7 +241,7 @@ export async function getPatient(patientId: string) {
   const result = await query<PmsPatientSummary>(
     `select
       p."id", p."chartNumber", p."firstName", p."lastName", p."preferredName", p."dateOfBirth"::text as "dateOfBirth",
-      p."phone", p."email", p."status", p."privacyLevel",
+      p."phone", p."email", p."status", p."privacyLevel", p."familyAccountId", p."responsibleParty", p."patientNote",
       coalesce(t.open_tasks, 0)::int as "openTasks",
       coalesce(l.balance_cents, 0)::int as "balanceCents"
      from "PmsPatient" p
@@ -196,6 +255,66 @@ export async function getPatient(patientId: string) {
     [patientId],
   );
   return result.rows[0] ?? null;
+}
+
+export async function getFamilyAccount(patientId: string) {
+  const result = await query<PmsFamilyAccountRow>(
+    `select fa.*
+     from "PmsPatient" p
+     join "PmsFamilyAccount" fa on fa."id" = p."familyAccountId"
+     where p."id" = $1`,
+    [patientId],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getFamilyMembers(patientId: string) {
+  return (await query<PmsPatientSummary>(
+    `select
+      p."id", p."chartNumber", p."firstName", p."lastName", p."preferredName", p."dateOfBirth"::text as "dateOfBirth",
+      p."phone", p."email", p."status", p."privacyLevel", p."familyAccountId", p."responsibleParty", p."patientNote",
+      coalesce(t.open_tasks, 0)::int as "openTasks",
+      coalesce(l.balance_cents, 0)::int as "balanceCents"
+     from "PmsPatient" selected
+     join "PmsPatient" p on p."familyAccountId" = selected."familyAccountId"
+     left join (
+       select "patientId", count(*) as open_tasks from "PmsTask" where "status" = 'OPEN' group by "patientId"
+     ) t on t."patientId" = p."id"
+     left join (
+       select "patientId", sum("balanceCents") as balance_cents from "PmsLedgerEntry" group by "patientId"
+     ) l on l."patientId" = p."id"
+     where selected."id" = $1
+     order by p."lastName", p."firstName"`,
+    [patientId],
+  )).rows;
+}
+
+export async function getPatientAccount(patientId: string) {
+  const [ledger, insurance, claims, treatmentPlans, recalls, documents] = await Promise.all([
+    query(`select * from "PmsLedgerEntry" where "patientId" = $1 order by "postedAt" desc limit 50`, [patientId]),
+    query(
+      `select pi.*, ip."payerName", ip."planName", ip."groupNumber", bs."annualMaxCents", bs."annualUsedCents", bs."frequencies", bs."limitations"
+       from "PmsPatientInsurance" pi
+       join "PmsInsurancePlan" ip on ip."id" = pi."planId"
+       left join "PmsBenefitSummary" bs on bs."patientInsuranceId" = pi."id"
+       where pi."patientId" = $1
+       order by pi."priority"`,
+      [patientId],
+    ),
+    query(`select * from "PmsClaim" where "patientId" = $1 order by "createdAt" desc`, [patientId]),
+    query(`select * from "PmsTreatmentPlan" where "patientId" = $1 order by "updatedAt" desc`, [patientId]),
+    query(`select * from "PmsRecall" where "patientId" = $1 order by "dueDate" asc`, [patientId]),
+    query(`select * from "PmsDocument" where "patientId" = $1 order by "updatedAt" desc`, [patientId]),
+  ]);
+
+  return {
+    ledger: ledger.rows,
+    insurance: insurance.rows,
+    claims: claims.rows,
+    treatmentPlans: treatmentPlans.rows,
+    recalls: recalls.rows,
+    documents: documents.rows,
+  };
 }
 
 export async function listSchedule(tenantId = defaultTenantId, date?: string) {
@@ -389,6 +508,41 @@ export async function getChart(patientId: string) {
     ),
   ]);
   return { patient, alerts: alerts.rows, allergies: allergies.rows, medications: meds.rows, conditions: conditions.rows, notes: notes.rows, procedures: procedures.rows };
+}
+
+export async function listProcedureCodes(tenantId = defaultTenantId) {
+  return (await query<{ id: string; code: string; description: string; category: string; defaultFeeCents: number }>(
+    `select "id", "code", "description", "category", "defaultFeeCents"
+     from "PmsProcedureCode"
+     where "tenantId" = $1
+     order by "category", "code"`,
+    [tenantId],
+  )).rows;
+}
+
+export async function addToothCondition(patientId: string, input: { tooth: string; surface?: string; condition: string; status?: string; source?: string }) {
+  const id = newId("tc");
+  const result = await query(
+    `insert into "PmsToothCondition" ("id", "patientId", "tooth", "surface", "condition", "status", "source", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, current_timestamp)
+     returning *`,
+    [id, patientId, input.tooth, input.surface || null, input.condition, input.status ?? "ACTIVE", input.source ?? "PROVIDER"],
+  );
+  await addAudit(defaultTenantId, "associate_provider", "TOOTH_CONDITION_CREATED", "PmsToothCondition", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function addProcedureLog(patientId: string, input: { procedureCodeId: string; tooth?: string; surface?: string; status?: string; feeCents?: number; providerId?: string }) {
+  const id = newId("plog");
+  const result = await query(
+    `insert into "PmsProcedureLog"
+       ("id", "patientId", "providerId", "procedureCodeId", "tooth", "surface", "status", "feeCents", "serviceDate", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, coalesce($8::int, (select "defaultFeeCents" from "PmsProcedureCode" where "id" = $4)), current_date, current_timestamp)
+     returning *`,
+    [id, patientId, input.providerId ?? null, input.procedureCodeId, input.tooth ?? null, input.surface ?? null, input.status ?? "TREATMENT_PLANNED", input.feeCents ?? null],
+  );
+  await addAudit(defaultTenantId, "associate_provider", "PROCEDURE_LOG_CREATED", "PmsProcedureLog", id, "ALLOWED");
+  return result.rows[0];
 }
 
 export async function addClinicalNote(patientId: string, body: string, noteType = "PROGRESS") {

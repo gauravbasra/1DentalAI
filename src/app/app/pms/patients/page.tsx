@@ -16,6 +16,14 @@ async function createPatientAction(formData: FormData) {
     dateOfBirth: String(formData.get("dateOfBirth") ?? "") || undefined,
     phone: String(formData.get("phone") ?? ""),
     email: String(formData.get("email") ?? ""),
+    sex: String(formData.get("sex") ?? ""),
+    responsibleParty: String(formData.get("responsibleParty") ?? ""),
+    addressLine1: String(formData.get("addressLine1") ?? ""),
+    addressLine2: String(formData.get("addressLine2") ?? ""),
+    city: String(formData.get("city") ?? ""),
+    state: String(formData.get("state") ?? ""),
+    postalCode: String(formData.get("postalCode") ?? ""),
+    referralSource: String(formData.get("referralSource") ?? ""),
   });
   revalidatePath("/app/pms");
   revalidatePath("/app/pms/patients");
@@ -28,22 +36,30 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
 
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>
-      <PageHeader eyebrow="PMS patient records" title="Patients" body="Create and work from a durable patient record that feeds schedule, chart, perio, treatment, insurance, ledger, documents, and follow-up tasks." />
+      <PageHeader eyebrow="PMS family module" title="Patients and family accounts" body="Create the patient and the guarantor/account record together, then work from the same family, chart, insurance, ledger, recall, treatment, and document context." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/patients" />
       <PmsSectionNav active="/app/pms/patients" roleKey={role.key} />
 
       <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
-        <PmsCard title="Create patient record" eyebrow="Front desk intake">
+        <PmsCard title="Create patient and family account" eyebrow="Front desk intake">
           <form action={createPatientAction} className="grid gap-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <Input name="firstName" label="First name" required />
               <Input name="lastName" label="Last name" required />
               <Input name="preferredName" label="Preferred name" />
               <Input name="dateOfBirth" label="Date of birth" type="date" />
+              <Input name="sex" label="Sex" />
+              <Input name="responsibleParty" label="Responsible party" />
               <Input name="phone" label="Phone" />
               <Input name="email" label="Email" type="email" />
+              <Input name="addressLine1" label="Address line 1" />
+              <Input name="addressLine2" label="Address line 2" />
+              <Input name="city" label="City" />
+              <Input name="state" label="State" />
+              <Input name="postalCode" label="ZIP" />
+              <Input name="referralSource" label="Referral source" />
             </div>
-            <button className="mt-2 rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white">Create patient</button>
+            <button className="mt-2 rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white">Create family account</button>
           </form>
         </PmsCard>
 
@@ -55,6 +71,7 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
                   <tr>
                     <th className="px-4 py-3">Patient</th>
                     <th className="px-4 py-3">Chart</th>
+                    <th className="px-4 py-3">Family</th>
                     <th className="px-4 py-3">Contact</th>
                     <th className="px-4 py-3">Balance</th>
                     <th className="px-4 py-3">Status</th>
@@ -70,6 +87,7 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
                         <p className="mt-1 text-xs text-neutral-500">{patient.openTasks} open tasks</p>
                       </td>
                       <td className="px-4 py-3 text-neutral-700">{patient.chartNumber}</td>
+                      <td className="px-4 py-3 text-neutral-700">{patient.responsibleParty ?? "not set"}</td>
                       <td className="px-4 py-3 text-neutral-700">{patient.phone ?? patient.email ?? "not recorded"}</td>
                       <td className="px-4 py-3 text-neutral-700"><Money cents={patient.balanceCents} /></td>
                       <td className="px-4 py-3"><StatusFor value={patient.status} /></td>
