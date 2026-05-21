@@ -1,6 +1,16 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { MarketingShell, PageHero } from "@/components/marketing-shell";
 import { demoWorkflows } from "@/lib/site-data";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata({
+  title: "Dental AI Workflows",
+  description:
+    "See 1DentalAI workflows for AI receptionist, insurance clearance, missed-call recovery, and clinical encounter documentation.",
+  path: "/demos",
+  keywords: ["dental AI workflows", "AI receptionist workflow", "clinical AI dental workflow"],
+});
 
 export default function DemosPage() {
   return (

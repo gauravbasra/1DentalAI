@@ -19,7 +19,14 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: "/:path(app|admin)/:slug*",
+        source: "/:path(app|admin|api|login|logout|signup)/:slug*",
+        headers: [
+          { key: "Cache-Control", value: "no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        ],
+      },
+      {
+        source: "/:path(login|logout|signup)",
         headers: [
           { key: "Cache-Control", value: "no-store" },
           { key: "X-Robots-Tag", value: "noindex, nofollow" },

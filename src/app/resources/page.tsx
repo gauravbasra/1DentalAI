@@ -1,5 +1,15 @@
 import { MarketingShell, PageHero } from "@/components/marketing-shell";
 import { resources } from "@/lib/site-data";
+import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata({
+  title: "Dental AI Resources",
+  description:
+    "Resources for dental practices evaluating AI receptionist, insurance verification, RCM automation, clinical AI, PMS connectivity, and practice analytics.",
+  path: "/resources",
+  keywords: ["dental AI resources", "dental practice automation", "dental AI checklist"],
+});
 
 export default function ResourcesPage() {
   return (
@@ -25,7 +35,7 @@ export default function ResourcesPage() {
           <div className="mx-auto max-w-5xl text-center">
             <p className="text-sm font-semibold text-cyan-700">Research areas</p>
             <h2 className="mt-4 text-4xl font-semibold tracking-tight text-neutral-950 sm:text-6xl">
-              What we are studying before each build phase.
+              Topics dental leaders ask about before adopting AI.
             </h2>
             <div className="mt-10 flex flex-wrap justify-center gap-3">
               {["AI receptionist", "phone workflows", "payer routing", "PMS connectivity", "RCM automation", "AI governance", "clinical AI", "DSO workflows", "patient growth"].map((topic) => (

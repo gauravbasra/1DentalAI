@@ -5,8 +5,11 @@ export function SiteHeader() {
   return (
     <header className="sticky left-0 right-0 top-0 z-50 border-b border-black/10 bg-white/82 backdrop-blur-2xl">
       <nav className="mx-auto flex min-h-14 max-w-7xl items-center justify-between px-5 py-3 sm:px-8">
-        <Link href="/" className="text-sm font-semibold tracking-tight text-neutral-950">
-          1DentalAI
+        <Link href="/" className="flex items-center gap-2 text-sm font-semibold tracking-tight text-neutral-950" aria-label="1DentalAI home">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-700 text-base font-black text-white">
+            1
+          </span>
+          <span>1DentalAI</span>
         </Link>
         <div className="hidden items-center gap-7 lg:flex">
           {navItems.map((item) => (

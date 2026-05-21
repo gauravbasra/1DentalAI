@@ -1,5 +1,15 @@
 import { MarketingShell, PageHero } from "@/components/marketing-shell";
 import { productPillars } from "@/lib/site-data";
+import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata({
+  title: "Dental AI Features",
+  description:
+    "See 1DentalAI features for AI phone, patient messaging, scheduling, insurance, RCM, reputation, clinical AI scribing, payments, analytics, and DSO workflows.",
+  path: "/features",
+  keywords: ["dental AI features", "AI clinical scribe dentistry", "dental insurance verification AI"],
+});
 
 const featureGroups: Array<{ title: string; items: string[] }> = [
   { title: "AI phone", items: ["AI receptionist", "Call pop", "Missed-call text", "Call transcription", "Call summaries", "Follow-up tasks"] },

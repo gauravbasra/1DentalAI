@@ -1,5 +1,15 @@
 import { MarketingShell, PageHero } from "@/components/marketing-shell";
 import { imageUrls, useCases } from "@/lib/site-data";
+import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata({
+  title: "Dental AI Use Cases",
+  description:
+    "Practical 1DentalAI use cases for front desk, insurance coordinators, treatment coordinators, billing teams, providers, owners, and DSOs.",
+  path: "/use-cases",
+  keywords: ["dental AI use cases", "AI for dental front desk", "dental billing AI"],
+});
 
 export default function UseCasesPage() {
   return (

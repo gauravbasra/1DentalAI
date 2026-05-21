@@ -1,5 +1,15 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { MarketingShell, ProductVisual, SectionIntro } from "@/components/marketing-shell";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata({
+  title: "Dental AI Product",
+  description:
+    "Explore the 1DentalAI product for AI phone, patient messaging, scheduling, insurance, RCM, clinical AI, reputation, payments, and practice analytics.",
+  path: "/product",
+  keywords: ["dental AI product", "dental practice workflow software", "AI dental operating system"],
+});
 
 const workflow = [
   {

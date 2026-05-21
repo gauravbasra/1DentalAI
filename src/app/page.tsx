@@ -1,6 +1,16 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { MarketingShell, ProductVisual, SectionIntro } from "@/components/marketing-shell";
+import { blogPosts } from "@/lib/blog-data";
 import { imageUrls, productPillars, stats, useCases } from "@/lib/site-data";
+import { pageMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = pageMetadata({
+  title: "Dental AI Operating System for Practices and DSOs",
+  description:
+    "1DentalAI connects AI phone, scheduling, patient messaging, insurance verification, RCM, clinical AI, reputation, and analytics into one dental operating system.",
+  keywords: ["dental AI operating system", "AI receptionist for dentists", "dental RCM automation"],
+});
 
 export default function Home() {
   return (
@@ -103,6 +113,27 @@ export default function Home() {
                 <p className="text-sm font-semibold text-emerald-700">{item.role}</p>
                 <h2 className="mt-4 text-2xl font-semibold text-neutral-950">{item.title}</h2>
                 <p className="mt-4 text-sm leading-7 text-neutral-600">{item.body}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="bg-white px-6 py-24 sm:px-8">
+          <SectionIntro
+            eyebrow="Dental AI education"
+            title="Guides for practices comparing AI platforms."
+            body="SEO-friendly resources help practices understand what dental AI should do before they request a walkthrough."
+          />
+          <div className="mx-auto mt-14 grid max-w-7xl gap-5 md:grid-cols-2 lg:grid-cols-4">
+            {blogPosts.map((post) => (
+              <article key={post.slug} className="rounded-[2rem] bg-[#f5f5f7] p-7">
+                <p className="text-sm font-semibold text-cyan-700">{post.category}</p>
+                <h2 className="mt-4 text-2xl font-semibold text-neutral-950">
+                  <Link href={`/blog/${post.slug}`} className="transition hover:text-cyan-700">
+                    {post.title}
+                  </Link>
+                </h2>
+                <p className="mt-4 text-sm leading-7 text-neutral-600">{post.description}</p>
               </article>
             ))}
           </div>
