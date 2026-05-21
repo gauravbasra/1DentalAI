@@ -10,7 +10,7 @@ async function addAudit(tenantId: string, actorRole: string, eventType: string, 
 }
 
 export async function getRcmOperatingCenter(tenantId = defaultTenantId) {
-  const [items, claims, metrics] = await Promise.all([
+  const [items, claims, benefits, priorAuths, denials, eras, payerFollowUps, revenueFindings, treatmentPlans, ledger, payments, metrics] = await Promise.all([
     query(
       `select r.*, p."firstName", p."lastName", p."chartNumber", a."startsAt", a."appointmentType"
        from "RcmWorkItem" r
@@ -21,25 +21,141 @@ export async function getRcmOperatingCenter(tenantId = defaultTenantId) {
       [tenantId],
     ),
     query(
-      `select c.*, p."firstName", p."lastName", p."chartNumber"
+      `select c.*, p."firstName", p."lastName", p."chartNumber", pi."subscriberId",
+        coalesce(lines."lineCount", 0)::int as "lineCount",
+        coalesce(lines."readyLines", 0)::int as "readyLines",
+        coalesce(lines."blockedLines", 0)::int as "blockedLines"
        from "PmsClaim" c
        join "PmsPatient" p on p."id" = c."patientId"
+       left join "PmsPatientInsurance" pi on pi."id" = c."patientInsuranceId"
+       left join (
+         select "claimId",
+          count(*)::int as "lineCount",
+          count(*) filter (where "status" in ('READY','SUBMITTED','PAID'))::int as "readyLines",
+          count(*) filter (where "status" like '%NEEDS%' or "status" like '%DENIED%')::int as "blockedLines"
+         from "PmsClaimLine"
+         group by "claimId"
+       ) lines on lines."claimId" = c."id"
        where c."tenantId" = $1
        order by c."lastStatusAt" desc nulls last`,
       [tenantId],
     ),
+    query(
+      `select pi.*, p."firstName", p."lastName", p."chartNumber",
+        ip."payerName", ip."payerId", ip."planName", ip."planType", ip."networkStatus",
+        bs."benefitYear", bs."deductibleCents", bs."deductibleMetCents", bs."annualMaxCents", bs."annualUsedCents", bs."frequencies", bs."limitations"
+       from "PmsPatientInsurance" pi
+       join "PmsPatient" p on p."id" = pi."patientId"
+       join "PmsInsurancePlan" ip on ip."id" = pi."planId"
+       left join "PmsBenefitSummary" bs on bs."patientInsuranceId" = pi."id"
+       where ip."tenantId" = $1
+       order by case pi."eligibilityStatus" when 'NEEDS_REVIEW' then 0 when 'NOT_CHECKED' then 1 when 'INACTIVE' then 2 else 3 end, pi."lastVerifiedAt" asc nulls first, p."lastName"`,
+      [tenantId],
+    ),
+    query(
+      `select pa.*, p."firstName", p."lastName", p."chartNumber", tp."name" as "treatmentPlanName"
+       from "RcmPriorAuthorization" pa
+       join "PmsPatient" p on p."id" = pa."patientId"
+       left join "PmsTreatmentPlan" tp on tp."id" = pa."treatmentPlanId"
+       where pa."tenantId" = $1
+       order by case pa."status" when 'EVIDENCE_NEEDED' then 0 when 'READY_FOR_REVIEW' then 1 when 'SUBMITTED' then 2 else 3 end, pa."expiresAt" asc nulls last`,
+      [tenantId],
+    ),
+    query(
+      `select d.*, p."firstName", p."lastName", p."chartNumber", c."claimNumber"
+       from "RcmDenialCase" d
+       join "PmsPatient" p on p."id" = d."patientId"
+       join "PmsClaim" c on c."id" = d."claimId"
+       where d."tenantId" = $1
+       order by case d."status" when 'OPEN' then 0 when 'APPEAL_READY' then 1 when 'SUBMITTED' then 2 else 3 end, d."appealDeadline" asc nulls last`,
+      [tenantId],
+    ),
+    query(
+      `select era.*, p."firstName", p."lastName", p."chartNumber", c."claimNumber"
+       from "RcmEraPosting" era
+       join "PmsPatient" p on p."id" = era."patientId"
+       join "PmsClaim" c on c."id" = era."claimId"
+       where era."tenantId" = $1
+       order by case era."status" when 'NEEDS_REVIEW' then 0 when 'READY_TO_POST' then 1 else 2 end, era."createdAt" desc`,
+      [tenantId],
+    ),
+    query(
+      `select f.*, p."firstName", p."lastName", p."chartNumber", c."claimNumber"
+       from "RcmPayerFollowUp" f
+       left join "PmsPatient" p on p."id" = f."patientId"
+       left join "PmsClaim" c on c."id" = f."claimId"
+       where f."tenantId" = $1
+       order by case f."status" when 'OPEN' then 0 when 'WAITING_ON_PAYER' then 1 else 2 end, f."dueAt" asc nulls last`,
+      [tenantId],
+    ),
+    query(
+      `select ri.*, p."firstName", p."lastName", p."chartNumber", c."claimNumber"
+       from "RcmRevenueIntegrityFinding" ri
+       left join "PmsPatient" p on p."id" = ri."patientId"
+       left join "PmsClaim" c on c."id" = ri."claimId"
+       where ri."tenantId" = $1
+       order by case ri."severity" when 'HIGH' then 0 when 'NORMAL' then 1 else 2 end, ri."createdAt" desc`,
+      [tenantId],
+    ),
+    query(
+      `select tp.*, p."firstName", p."lastName", p."chartNumber", pi."id" as "patientInsuranceId", ip."payerName",
+        coalesce(items."itemCount", 0)::int as "itemCount",
+        coalesce(items."requiresAuthCount", 0)::int as "requiresAuthCount"
+       from "PmsTreatmentPlan" tp
+       join "PmsPatient" p on p."id" = tp."patientId"
+       left join "PmsPatientInsurance" pi on pi."patientId" = tp."patientId" and pi."priority" = 1
+       left join "PmsInsurancePlan" ip on ip."id" = pi."planId"
+       left join (
+         select tpi."treatmentPlanId", count(*)::int as "itemCount",
+          count(*) filter (where pc."code" in ('D6010','D4341','D4342','D4260','D4261','D2740','D2750','D2950'))::int as "requiresAuthCount"
+         from "PmsTreatmentPlanItem" tpi
+         join "PmsProcedureCode" pc on pc."id" = tpi."procedureCodeId"
+         group by tpi."treatmentPlanId"
+       ) items on items."treatmentPlanId" = tp."id"
+       where tp."tenantId" = $1 and tp."status" in ('PRESENTED','ACCEPTED','DRAFT')
+       order by tp."updatedAt" desc`,
+      [tenantId],
+    ),
+    query(
+      `select le.*, p."firstName", p."lastName", p."chartNumber", c."claimNumber"
+       from "PmsLedgerEntry" le
+       join "PmsPatient" p on p."id" = le."patientId"
+       left join "PmsClaim" c on c."id" = le."claimId"
+       where le."tenantId" = $1
+       order by le."postedAt" desc limit 30`,
+      [tenantId],
+    ),
+    query(
+      `select pay.*, p."firstName", p."lastName", p."chartNumber"
+       from "PmsPayment" pay
+       join "PmsPatient" p on p."id" = pay."patientId"
+       where pay."tenantId" = $1
+       order by pay."postedAt" desc limit 20`,
+      [tenantId],
+    ),
     query<{ openItems: string; highPriority: string; blockedDollars: string; leakageDollars: string }>(
       `select
-        count(*) filter (where "status" not in ('COMPLETED','CLOSED'))::text as "openItems",
-        count(*) filter (where "priority" = 'HIGH' and "status" not in ('COMPLETED','CLOSED'))::text as "highPriority",
-        coalesce(sum("amountCents") filter (where "status" not in ('COMPLETED','CLOSED')), 0)::text as "blockedDollars",
-        coalesce(sum("amountCents") filter (where "workType" = 'REVENUE_INTEGRITY' and "status" not in ('COMPLETED','CLOSED')), 0)::text as "leakageDollars"
-       from "RcmWorkItem"
-       where "tenantId" = $1`,
+        (select count(*) from "RcmWorkItem" where "tenantId" = $1 and "status" not in ('COMPLETED','CLOSED'))::text as "openItems",
+        (select count(*) from "RcmWorkItem" where "tenantId" = $1 and "priority" = 'HIGH' and "status" not in ('COMPLETED','CLOSED'))::text as "highPriority",
+        (select coalesce(sum("billedCents" - "paidCents"), 0) from "PmsClaim" where "tenantId" = $1 and "status" not in ('PAID','CLOSED','VOID'))::text as "blockedDollars",
+        (select coalesce(sum(abs("varianceCents")), 0) from "RcmRevenueIntegrityFinding" where "tenantId" = $1 and "status" not in ('RECOVERED','CLOSED'))::text as "leakageDollars"`,
       [tenantId],
     ),
   ]);
-  return { items: items.rows, claims: claims.rows, metrics: metrics.rows[0] };
+  return {
+    items: items.rows,
+    claims: claims.rows,
+    benefits: benefits.rows,
+    priorAuths: priorAuths.rows,
+    denials: denials.rows,
+    eras: eras.rows,
+    payerFollowUps: payerFollowUps.rows,
+    revenueFindings: revenueFindings.rows,
+    treatmentPlans: treatmentPlans.rows,
+    ledger: ledger.rows,
+    payments: payments.rows,
+    metrics: metrics.rows[0],
+  };
 }
 
 export async function createRcmWorkItem(input: {
@@ -77,6 +193,173 @@ export async function updateRcmWorkItemStatus(id: string, status: string, actorR
     [id, status],
   );
   if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_WORK_ITEM_STATUS_UPDATED", "RcmWorkItem", id, "ALLOWED", { status });
+}
+
+export async function createPriorAuthorization(input: {
+  tenantId?: string;
+  patientId: string;
+  treatmentPlanId?: string;
+  patientInsuranceId?: string;
+  payerName: string;
+  requestedCents: number;
+  requiredEvidence?: string[];
+  nextAction: string;
+  expiresAt?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("pa");
+  const result = await query(
+    `insert into "RcmPriorAuthorization"
+       ("id", "tenantId", "patientId", "treatmentPlanId", "patientInsuranceId", "payerName", "requestedCents", "status", "requiredEvidence", "expiresAt", "nextAction", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, 'EVIDENCE_NEEDED', $8::jsonb, $9::timestamp, $10, current_timestamp)
+     returning *`,
+    [
+      id,
+      tenantId,
+      input.patientId,
+      input.treatmentPlanId || null,
+      input.patientInsuranceId || null,
+      input.payerName.trim(),
+      input.requestedCents,
+      JSON.stringify(input.requiredEvidence ?? []),
+      input.expiresAt || null,
+      input.nextAction.trim(),
+    ],
+  );
+  await addAudit(tenantId, "billing_rcm", "RCM_PRIOR_AUTH_CREATED", "RcmPriorAuthorization", id);
+  return result.rows[0];
+}
+
+export async function updatePriorAuthorizationStatus(id: string, status: string, actorRole = "billing_rcm") {
+  const result = await query<{ tenantId: string }>(
+    `update "RcmPriorAuthorization"
+     set "status" = $2,
+       "submittedAt" = case when $2 = 'SUBMITTED' then current_timestamp else "submittedAt" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId"`,
+    [id, status],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_PRIOR_AUTH_STATUS_UPDATED", "RcmPriorAuthorization", id, "ALLOWED", { status });
+}
+
+export async function createDenialCase(input: {
+  tenantId?: string;
+  patientId: string;
+  claimId: string;
+  payerName: string;
+  denialCode?: string;
+  denialReason: string;
+  deniedCents: number;
+  appealDeadline?: string;
+  requiredEvidence?: string[];
+  nextAction: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("denial");
+  const result = await query(
+    `insert into "RcmDenialCase"
+       ("id", "tenantId", "patientId", "claimId", "payerName", "denialCode", "denialReason", "deniedCents", "appealDeadline", "status", "requiredEvidence", "nextAction", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamp, 'OPEN', $10::jsonb, $11, current_timestamp)
+     returning *`,
+    [id, tenantId, input.patientId, input.claimId, input.payerName.trim(), input.denialCode?.trim() || null, input.denialReason.trim(), input.deniedCents, input.appealDeadline || null, JSON.stringify(input.requiredEvidence ?? []), input.nextAction.trim()],
+  );
+  await addAudit(tenantId, "billing_rcm", "RCM_DENIAL_CASE_CREATED", "RcmDenialCase", id);
+  return result.rows[0];
+}
+
+export async function updateDenialCaseStatus(id: string, status: string, actorRole = "billing_rcm") {
+  const result = await query<{ tenantId: string }>(
+    `update "RcmDenialCase" set "status" = $2, "updatedAt" = current_timestamp where "id" = $1 returning "tenantId"`,
+    [id, status],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_DENIAL_STATUS_UPDATED", "RcmDenialCase", id, "ALLOWED", { status });
+}
+
+export async function createPayerFollowUp(input: {
+  tenantId?: string;
+  patientId?: string;
+  claimId?: string;
+  payerName: string;
+  reason: string;
+  channel: string;
+  dueAt?: string;
+  nextAction: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("pfu");
+  const result = await query(
+    `insert into "RcmPayerFollowUp"
+       ("id", "tenantId", "patientId", "claimId", "payerName", "reason", "channel", "dueAt", "nextAction", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, $9, current_timestamp)
+     returning *`,
+    [id, tenantId, input.patientId || null, input.claimId || null, input.payerName.trim(), input.reason.trim(), input.channel, input.dueAt || null, input.nextAction.trim()],
+  );
+  await addAudit(tenantId, "billing_rcm", "RCM_PAYER_FOLLOW_UP_CREATED", "RcmPayerFollowUp", id);
+  return result.rows[0];
+}
+
+export async function updatePayerFollowUpStatus(id: string, status: string, outcome?: string, actorRole = "billing_rcm") {
+  const result = await query<{ tenantId: string }>(
+    `update "RcmPayerFollowUp"
+     set "status" = $2,
+       "lastContactAt" = current_timestamp,
+       "contactOutcome" = coalesce($3, "contactOutcome"),
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId"`,
+    [id, status, outcome || null],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_PAYER_FOLLOW_UP_UPDATED", "RcmPayerFollowUp", id, "ALLOWED", { status, outcome });
+}
+
+export async function postEraToLedger(id: string, actorRole = "billing_rcm") {
+  const era = (await query<{
+    id: string;
+    tenantId: string;
+    patientId: string;
+    claimId: string;
+    payerName: string;
+    paidCents: number;
+    allowedCents: number;
+    patientDueCents: number;
+    adjustmentCents: number;
+  }>(`select * from "RcmEraPosting" where "id" = $1`, [id])).rows[0];
+  if (!era) throw new Error("ERA posting was not found.");
+  if (Number(era.paidCents) <= 0) throw new Error("ERA paid amount must be greater than zero before posting.");
+  const ledgerEntryId = newId("led");
+  const paymentId = newId("pay");
+  await query(
+    `insert into "PmsLedgerEntry"
+       ("id", "tenantId", "patientId", "claimId", "entryType", "description", "amountCents", "balanceCents", "serviceDate")
+     values ($1, $2, $3, $4, 'INSURANCE_PAYMENT', $5, $6, $6, current_timestamp)`,
+    [ledgerEntryId, era.tenantId, era.patientId, era.claimId, `${era.payerName} ERA insurance payment`, -Math.abs(Number(era.paidCents))],
+  );
+  await query(
+    `insert into "PmsPayment"
+       ("id", "tenantId", "patientId", "ledgerEntryId", "paymentType", "amountCents", "reference", "unappliedCents", "status")
+     values ($1, $2, $3, $4, 'INSURANCE_ERA', $5, $6, 0, 'POSTED')`,
+    [paymentId, era.tenantId, era.patientId, ledgerEntryId, Math.abs(Number(era.paidCents)), id],
+  );
+  await query(
+    `update "PmsClaim"
+     set "allowedCents" = $2, "paidCents" = "paidCents" + $3, "patientDueCents" = $4,
+       "status" = case when ("paidCents" + $3) >= $2 then 'PAID' else 'PARTIALLY_PAID' end,
+       "lastStatusAt" = current_timestamp, "updatedAt" = current_timestamp
+     where "id" = $1`,
+    [era.claimId, Number(era.allowedCents), Math.abs(Number(era.paidCents)), Number(era.patientDueCents)],
+  );
+  await query(`update "RcmEraPosting" set "status" = 'POSTED', "postedAt" = current_timestamp, "updatedAt" = current_timestamp where "id" = $1`, [id]);
+  await addAudit(era.tenantId, actorRole, "RCM_ERA_POSTED_TO_LEDGER", "RcmEraPosting", id, "ALLOWED", { ledgerEntryId, paymentId });
+  return { ledgerEntryId, paymentId };
+}
+
+export async function updateRevenueFindingStatus(id: string, status: string, actorRole = "billing_rcm") {
+  const result = await query<{ tenantId: string }>(
+    `update "RcmRevenueIntegrityFinding" set "status" = $2, "updatedAt" = current_timestamp where "id" = $1 returning "tenantId"`,
+    [id, status],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_REVENUE_INTEGRITY_UPDATED", "RcmRevenueIntegrityFinding", id, "ALLOWED", { status });
 }
 
 export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {

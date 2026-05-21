@@ -188,7 +188,7 @@ const phonePage = fs.readFileSync("src/app/app/phone/page.tsx", "utf8");
 const reputationPage = fs.readFileSync("src/app/app/reputation/page.tsx", "utf8");
 const marketingPage = fs.readFileSync("src/app/app/marketing/page.tsx", "utf8");
 const osRepository = fs.readFileSync("src/lib/operating-system-repository.ts", "utf8");
-for (const token of ["RcmWorkItem", "getRcmOperatingCenter", "Revenue cycle command center", "ELIGIBILITY_AND_BENEFITS", "REVENUE_INTEGRITY", "CREDENTIALING"]) {
+for (const token of ["RcmWorkItem", "RcmPriorAuthorization", "RcmDenialCase", "RcmEraPosting", "RcmPayerFollowUp", "RcmRevenueIntegrityFinding", "getRcmOperatingCenter", "Benefits, prior auth, claims, denials, ERA, billing, and payments", "ELIGIBILITY_AND_BENEFITS", "REVENUE_INTEGRITY", "CREDENTIALING"]) {
   if (!`${schema}\n${rcmPage}\n${osRepository}`.includes(token)) {
     console.error(`RCM operating-system token missing: ${token}`);
     process.exit(1);

@@ -1202,6 +1202,123 @@ model RcmWorkItem {
   @@index([claimId])
 }
 
+model RcmPriorAuthorization {
+  id                String   @id @default(cuid())
+  tenantId          String
+  patientId         String
+  treatmentPlanId   String?
+  patientInsuranceId String?
+  payerName         String
+  requestedCents    Int      @default(0)
+  status            String   @default("DRAFT")
+  requiredEvidence  Json?
+  submittedAt       DateTime?
+  expiresAt         DateTime?
+  determination     String?
+  nextAction        String
+  ownerRoleKey      String   @default("billing_rcm")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantId, status, expiresAt])
+  @@index([patientId, status])
+  @@index([treatmentPlanId])
+}
+
+model RcmDenialCase {
+  id              String   @id @default(cuid())
+  tenantId        String
+  patientId       String
+  claimId         String
+  payerName       String
+  denialCode      String?
+  denialReason    String
+  deniedCents     Int      @default(0)
+  appealDeadline  DateTime?
+  status          String   @default("OPEN")
+  appealLevel     String   @default("FIRST_LEVEL")
+  rootCause       String?
+  requiredEvidence Json?
+  nextAction      String
+  ownerRoleKey    String   @default("billing_rcm")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, appealDeadline])
+  @@index([claimId, status])
+  @@index([patientId, status])
+}
+
+model RcmEraPosting {
+  id              String   @id @default(cuid())
+  tenantId        String
+  patientId       String
+  claimId         String
+  payerName       String
+  eraTraceNumber  String?
+  eobDocumentId   String?
+  allowedCents    Int      @default(0)
+  paidCents       Int      @default(0)
+  patientDueCents Int      @default(0)
+  adjustmentCents Int      @default(0)
+  status          String   @default("NEEDS_REVIEW")
+  exceptionReason String?
+  postedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, createdAt])
+  @@index([claimId, status])
+  @@index([patientId])
+}
+
+model RcmPayerFollowUp {
+  id             String   @id @default(cuid())
+  tenantId       String
+  patientId      String?
+  claimId        String?
+  payerName      String
+  reason         String
+  channel        String   @default("PHONE")
+  status         String   @default("OPEN")
+  dueAt          DateTime?
+  lastContactAt  DateTime?
+  contactOutcome String?
+  referenceNumber String?
+  nextAction     String
+  ownerRoleKey   String   @default("billing_rcm")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, status, dueAt])
+  @@index([claimId, status])
+  @@index([patientId, status])
+}
+
+model RcmRevenueIntegrityFinding {
+  id              String   @id @default(cuid())
+  tenantId        String
+  patientId       String?
+  claimId         String?
+  ledgerEntryId   String?
+  payerName       String?
+  findingType     String
+  severity        String   @default("NORMAL")
+  status          String   @default("OPEN")
+  expectedCents   Int      @default(0)
+  actualCents     Int      @default(0)
+  varianceCents   Int      @default(0)
+  rootCause       String?
+  nextAction      String
+  ownerRoleKey    String   @default("billing_rcm")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, severity])
+  @@index([claimId, status])
+  @@index([patientId, status])
+}
+
 model PhoneConversation {
   id              String   @id @default(cuid())
   tenantId        String
