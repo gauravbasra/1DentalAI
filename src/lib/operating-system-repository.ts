@@ -872,19 +872,27 @@ export async function updateReviewWorkflowStatus(id: string, requestStatus: stri
 }
 
 export async function updateReviewResponseApproval(id: string, approvalStatus: string) {
-  const result = await query<{ tenantId: string }>(
+  const result = await query<{ tenantId: string; appliedStatus: string; publicationStatus: string; blockedReason: string | null }>(
     `update "ReputationReviewResponse"
-     set "approvalStatus" = $2,
-       "approvedByRoleKey" = case when $2 = 'APPROVED' then 'marketing_growth' else "approvedByRoleKey" end,
-       "approvedAt" = case when $2 = 'APPROVED' then current_timestamp else "approvedAt" end,
-       "publicationStatus" = case when $2 = 'APPROVED' then 'BLOCKED_CONNECTOR_REQUIRED' else "publicationStatus" end,
-       "blockedReason" = case when $2 = 'APPROVED' then 'Review source connector and publication policy are required before external posting.' else "blockedReason" end,
+     set "approvalStatus" = case when $2 = 'APPROVED' then 'APPROVED_STAGED' else $2 end,
+       "approvedByRoleKey" = case when $2 in ('APPROVED','APPROVED_STAGED') then 'marketing_growth' else "approvedByRoleKey" end,
+       "approvedAt" = case when $2 in ('APPROVED','APPROVED_STAGED') then current_timestamp else "approvedAt" end,
+       "publicationStatus" = case when $2 in ('APPROVED','APPROVED_STAGED') then 'BLOCKED_CONNECTOR_REQUIRED' else "publicationStatus" end,
+       "blockedReason" = case when $2 in ('APPROVED','APPROVED_STAGED') then 'Review source connector, listing identity, publication permission, and human approval policy are required before external posting. Response is staged only.' else "blockedReason" end,
        "updatedAt" = current_timestamp
      where "id" = $1
-     returning "tenantId"`,
+     returning "tenantId", "approvalStatus" as "appliedStatus", "publicationStatus", "blockedReason"`,
     [id, approvalStatus],
   );
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "REVIEW_RESPONSE_APPROVAL_UPDATED", "ReputationReviewResponse", id, "ALLOWED", { approvalStatus });
+  if (result.rows[0]) {
+    const row = result.rows[0];
+    await addAudit(row.tenantId, "marketing_growth", "REVIEW_RESPONSE_APPROVAL_UPDATED", "ReputationReviewResponse", id, row.publicationStatus.startsWith("BLOCKED") ? "BLOCKED" : "ALLOWED", {
+      requestedStatus: approvalStatus,
+      appliedStatus: row.appliedStatus,
+      publicationStatus: row.publicationStatus,
+      blockedReason: row.blockedReason,
+    });
+  }
 }
 
 export async function updateListingProfileStatus(id: string, syncStatus: string, nextAction: string) {
