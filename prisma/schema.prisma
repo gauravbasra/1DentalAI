@@ -223,6 +223,30 @@ model ConnectorInstallation {
   @@index([definitionId, locationId])
 }
 
+model ConnectorCredentialVault {
+  id              String   @id @default(cuid())
+  tenantId        String
+  definitionId    String?
+  installationId  String?
+  providerKey     String
+  credentialLabel String
+  credentialType  String
+  status          String   @default("STORED_PENDING_VALIDATION")
+  encryptedValue  String
+  encryptionIv    String
+  encryptionTag   String
+  fingerprint     String
+  lastFour        String?
+  createdByRole   String   @default("support_admin")
+  rotatedAt       DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, providerKey, status])
+  @@index([installationId, status])
+  @@unique([tenantId, installationId, providerKey, credentialLabel])
+}
+
 model ConnectorCapability {
   id             String   @id @default(cuid())
   tenantId       String

@@ -14,6 +14,7 @@ const requiredTables = [
   "ConnectorReadinessItem",
   "ConnectorDefinition",
   "ConnectorInstallation",
+  "ConnectorCredentialVault",
   "ConnectorCapability",
   "ConnectorRouteDecision",
   "ConnectorHealthCheck",

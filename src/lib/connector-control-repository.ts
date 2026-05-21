@@ -1,3 +1,4 @@
+import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { newId, query } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
 
@@ -12,7 +13,7 @@ async function addAudit(tenantId: string, actorRole: string, eventType: string, 
 }
 
 export async function getConnectorControlCenter(tenantId = defaultTenantId) {
-  const [definitions, installations, capabilities, routes, healthChecks, costs, metrics, costSummary, fallbackSummary] = await Promise.all([
+  const [definitions, installations, capabilities, routes, healthChecks, costs, credentialVault, metrics, costSummary, fallbackSummary] = await Promise.all([
     query(
       `select d.*,
         coalesce(capabilities."capabilityCount", 0)::int as "capabilityCount",
@@ -82,6 +83,17 @@ export async function getConnectorControlCenter(tenantId = defaultTenantId) {
        limit 30`,
       [tenantId],
     ),
+    query(
+      `select v."id", v."tenantId", v."definitionId", v."installationId", v."providerKey", v."credentialLabel",
+        v."credentialType", v."status", v."fingerprint", v."lastFour", v."createdByRole", v."rotatedAt", v."createdAt",
+        d."name" as "definitionName", d."category", i."fallbackMode"
+       from "ConnectorCredentialVault" v
+       left join "ConnectorDefinition" d on d."id" = v."definitionId"
+       left join "ConnectorInstallation" i on i."id" = v."installationId"
+       where v."tenantId" = $1
+       order by v."providerKey", v."credentialLabel"`,
+      [tenantId],
+    ),
     query<{ definitions: string; installations: string; blockedRoutes: string; monthlyEstimatedCents: string; healthBlocked: string }>(
       `select
         (select count(*) from "ConnectorDefinition" where "tenantId" = $1)::text as definitions,
@@ -130,6 +142,7 @@ export async function getConnectorControlCenter(tenantId = defaultTenantId) {
     routes: routes.rows,
     healthChecks: healthChecks.rows,
     costs: costs.rows,
+    credentialVault: credentialVault.rows,
     metrics: metrics.rows[0],
     costSummary: costSummary.rows,
     fallbackSummary: fallbackSummary.rows,
@@ -212,6 +225,103 @@ export async function updateConnectorInstallation(input: {
       readinessBlockers: statusDecision.blockers,
     });
   }
+}
+
+export async function storeConnectorCredential(input: {
+  tenantId?: string;
+  installationId: string;
+  providerKey: string;
+  credentialLabel: string;
+  credentialType: string;
+  secretValue: string;
+  actorRole?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const secretValue = input.secretValue.trim();
+  if (!secretValue) throw new Error("Credential value is required.");
+  const installation = await query<{ id: string; definitionId: string; tenantId: string }>(
+    `select "id", "definitionId", "tenantId"
+     from "ConnectorInstallation"
+     where "tenantId" = $1 and "id" = $2
+     limit 1`,
+    [tenantId, input.installationId],
+  );
+  const row = installation.rows[0];
+  if (!row) throw new Error("Connector installation not found.");
+  const encrypted = encryptConnectorSecret(secretValue);
+  const fingerprint = createHash("sha256").update(`${tenantId}:${input.installationId}:${input.providerKey}:${input.credentialLabel}:${secretValue}`).digest("hex");
+  const id = newId("cvault");
+  await query(
+    `insert into "ConnectorCredentialVault"
+       ("id", "tenantId", "definitionId", "installationId", "providerKey", "credentialLabel", "credentialType", "status", "encryptedValue", "encryptionIv", "encryptionTag", "fingerprint", "lastFour", "createdByRole")
+     values ($1, $2, $3, $4, $5, $6, $7, 'STORED_PENDING_VALIDATION', $8, $9, $10, $11, $12, $13)
+     on conflict ("tenantId", "installationId", "providerKey", "credentialLabel") do update set
+       "credentialType" = excluded."credentialType",
+       "status" = 'STORED_PENDING_VALIDATION',
+       "encryptedValue" = excluded."encryptedValue",
+       "encryptionIv" = excluded."encryptionIv",
+       "encryptionTag" = excluded."encryptionTag",
+       "fingerprint" = excluded."fingerprint",
+       "lastFour" = excluded."lastFour",
+       "createdByRole" = excluded."createdByRole",
+       "rotatedAt" = current_timestamp,
+       "updatedAt" = current_timestamp`,
+    [
+      id,
+      tenantId,
+      row.definitionId,
+      input.installationId,
+      normalizeProviderKey(input.providerKey),
+      input.credentialLabel.trim(),
+      input.credentialType.trim() || "SECRET",
+      encrypted.value,
+      encrypted.iv,
+      encrypted.tag,
+      fingerprint,
+      secretValue.slice(-4),
+      input.actorRole ?? "support_admin",
+    ],
+  );
+  await query(
+    `update "ConnectorInstallation"
+     set "credentialStatus" = case when "credentialStatus" = 'VALIDATED' then 'VALIDATED' else 'PENDING' end,
+       "status" = case when "status" = 'ACTIVE' then 'READY_FOR_SMOKE_TEST' else "status" end,
+       "nextAction" = $3,
+       "updatedAt" = current_timestamp
+     where "id" = $1`,
+    [input.installationId, tenantId, `${normalizeProviderKey(input.providerKey)} credential stored in vault. Run credential, webhook, and read-only smoke tests before marking validated.`],
+  );
+  await addAudit(tenantId, input.actorRole ?? "support_admin", "CONNECTOR_CREDENTIAL_STORED", "ConnectorInstallation", input.installationId, "ALLOWED", {
+    providerKey: normalizeProviderKey(input.providerKey),
+    credentialLabel: input.credentialLabel.trim(),
+    credentialType: input.credentialType.trim() || "SECRET",
+    fingerprint: fingerprint.slice(0, 16),
+    noSecretLogged: true,
+    noExternalValidationClaimed: true,
+  });
+}
+
+function normalizeProviderKey(value: string) {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+}
+
+function encryptionKey() {
+  const configured = process.env.CONNECTOR_SECRET_KEY || process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
+  if (!configured || configured.length < 24) {
+    throw new Error("CONNECTOR_SECRET_KEY must be configured before storing connector credentials.");
+  }
+  return createHash("sha256").update(configured).digest();
+}
+
+function encryptConnectorSecret(secret: string) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
+  return {
+    value: encrypted.toString("base64"),
+    iv: iv.toString("base64"),
+    tag: cipher.getAuthTag().toString("base64"),
+  };
 }
 
 function resolveInstallationStatus(input: { status: string; credentialStatus: string; webhookStatus: string; approvalStatus: string; healthStatus: string }) {

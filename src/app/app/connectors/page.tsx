@@ -5,6 +5,7 @@ import {
   createConnectorRouteDecision,
   getConnectorControlCenter,
   recordConnectorHealthCheck,
+  storeConnectorCredential,
   updateConnectorInstallation,
 } from "@/lib/connector-control-repository";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
@@ -56,6 +57,19 @@ async function recordHealthCheckAction(formData: FormData) {
     status: value(formData, "status"),
     resultSummary: value(formData, "resultSummary"),
     latencyMs: Number(value(formData, "latencyMs") || 0) || undefined,
+    actorRole: value(formData, "actorRole") || "support_admin",
+  });
+  revalidatePath("/app/connectors");
+}
+
+async function storeCredentialAction(formData: FormData) {
+  "use server";
+  await storeConnectorCredential({
+    installationId: value(formData, "installationId"),
+    providerKey: value(formData, "providerKey"),
+    credentialLabel: value(formData, "credentialLabel"),
+    credentialType: value(formData, "credentialType"),
+    secretValue: value(formData, "secretValue"),
     actorRole: value(formData, "actorRole") || "support_admin",
   });
   revalidatePath("/app/connectors");
@@ -144,6 +158,76 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <PmsCard title="Credential vault intake" eyebrow="Twilio, NexHealth, Stedi keys">
+          <form action={storeCredentialAction} className="grid gap-3">
+            <input type="hidden" name="actorRole" value={role.key} />
+            <label className="block text-xs font-semibold text-neutral-600">
+              Connector installation
+              <select name="installationId" className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold">
+                {data.installations.map((installation) => (
+                  <option key={installation.id} value={installation.id}>{installation.definitionName} - {installation.locationName ?? "Enterprise"}</option>
+                ))}
+              </select>
+            </label>
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="block text-xs font-semibold text-neutral-600">
+                Provider
+                <select name="providerKey" className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold">
+                  {["TWILIO", "NEXHEALTH", "STEDI", "FREESWITCH", "SIGNALWIRE", "OTHER"].map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs font-semibold text-neutral-600">
+                Credential label
+                <select name="credentialLabel" className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold">
+                  {["account_sid", "auth_token", "api_key", "api_secret", "webhook_signing_secret", "location_id", "subdomain", "trading_partner_id", "submitter_id", "messaging_service_sid"].map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs font-semibold text-neutral-600">
+                Type
+                <select name="credentialType" className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold">
+                  {["SECRET", "API_KEY", "ACCOUNT_ID", "WEBHOOK_SECRET", "LOCATION_ID", "SUBMITTER_ID"].map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="block text-xs font-semibold text-neutral-600">
+              Secret value
+              <input name="secretValue" type="password" autoComplete="off" required className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm" />
+            </label>
+            <button className="rounded-md bg-neutral-950 px-3 py-2 text-xs font-semibold text-white">
+              Store encrypted credential
+            </button>
+            <p className="rounded-md bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+              Secrets are encrypted at rest and never displayed after saving. Saving a key changes readiness to pending only; Twilio calls/SMS, NexHealth PMS writes, and Stedi payer transactions still require webhook verification, tenant approval, smoke tests, and provider response evidence.
+            </p>
+          </form>
+        </PmsCard>
+
+        <PmsCard title="Stored credential fingerprints" eyebrow="No raw secrets displayed">
+          <div className="space-y-3">
+            {data.credentialVault.map((credential) => (
+              <div key={credential.id} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{credential.providerKey} · {credential.credentialLabel}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{credential.definitionName ?? "Connector"} · {credential.credentialType} · rotated {formatDate(credential.rotatedAt)}</p>
+                  </div>
+                  <StatusFor value={credential.status} />
+                </div>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">Fingerprint {String(credential.fingerprint).slice(0, 16)}... · ending {credential.lastFour ?? "n/a"} · stored by {credential.createdByRole}</p>
+              </div>
+            ))}
+            {!data.credentialVault.length ? <p className="text-sm text-neutral-600">No connector credentials have been stored yet.</p> : null}
+          </div>
+        </PmsCard>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <PmsCard title="Connector readiness by location" eyebrow="Setup gates">
           <div className="space-y-3">
             {data.installations.map((installation) => (
