@@ -73,7 +73,7 @@ jobs:
               chmod 600 .env
             fi
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
-            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run --rm migrate
+            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build app
             for i in 1 2 3 4 5; do
               curl -fsS http://127.0.0.1:3001/api/health && break
