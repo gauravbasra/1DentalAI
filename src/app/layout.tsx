@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { WebchatInstaller } from "@/components/webchat-installer";
 import { defaultDescription, JsonLd, organizationSchema, siteName, siteUrl, softwareSchema } from "@/lib/seo";
 import "./globals.css";
 
@@ -80,6 +81,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <JsonLd data={[organizationSchema, softwareSchema]} />
         {children}
+        <WebchatInstaller />
       </body>
     </html>
   );

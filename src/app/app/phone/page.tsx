@@ -68,6 +68,7 @@ type VoicemailRow = { id: string; callerNumber: string | null; callerName: strin
 type ChannelSettingRow = { id: string; channel: string; displayName: string; status: string; theme: unknown; nlpMode: string; knowledgeBaseStatus: string; schedulingStatus: string; formsStatus: string; connectorStatus: string; approvalPolicy: unknown; nextAction: string };
 type KnowledgeSourceRow = { id: string; title: string; sourceType: string; sourceModule: string; serviceLine: string | null; status: string; ownerRoleKey: string; contentSummary: string; sourceUrl: string | null; nextAction: string };
 type WebChatRow = { id: string; visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null; sourcePage: string | null; nlpIntent: string | null; nlpConfidence: number; status: string; transcriptSummary: string | null; schedulingOutcome: string; pmsWritebackStatus: string; leadFormName: string | null; serviceLine: string | null; ownerRoleKey: string; blockedReason: string | null };
+type WebChatMessageRow = { id: string; conversationId: string; senderType: string; senderName: string | null; body: string; intent: string | null; sentiment: string | null; confidence: number; actionType: string | null; actionStatus: string; sourcePage: string | null; visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null; conversationStatus: string; createdAt: string };
 type LeadFormRow = { id: string; name: string; serviceLine: string; sourceChannel: string; status: string; fieldSchema: unknown; pmsMapping: unknown; routingRule: string | null; connectorStatus: string; conversionStatus: string; nextAction: string };
 type FormPacketRow = { id: string; packetType: string; status: string; deliveryChannel: string; pmsWritebackStatus: string; consentStatus: string; dueAt: string | null; nextAction: string; firstName: string | null; lastName: string | null; chartNumber: string | null; appointmentType: string | null; startsAt: string | null };
 type SchedulingRuleRow = { id: string; name: string; sourceChannel: string; appointmentCategoryName: string | null; providerName: string | null; locationName: string | null; status: string; bookingWindowDays: number; allowReschedule: boolean; requireHumanApproval: boolean; pmsWritebackStatus: string; conflictPolicy: unknown; nextAction: string };
@@ -216,6 +217,7 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
   const channelSettings = center.channelSettings as ChannelSettingRow[];
   const knowledgeSources = center.knowledgeSources as KnowledgeSourceRow[];
   const webChats = center.webChats as WebChatRow[];
+  const webChatMessages = center.webChatMessages as WebChatMessageRow[];
   const leadForms = center.leadForms as LeadFormRow[];
   const formPackets = center.formPackets as FormPacketRow[];
   const schedulingRules = center.schedulingRules as SchedulingRuleRow[];
@@ -540,6 +542,27 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <MiniMetric label="PMS" value={clean(chat.pmsWritebackStatus)} />
                 </div>
                 {chat.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{chat.blockedReason}</p> : null}
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+        <PmsCard title="Transcript and action stream" eyebrow="Saved messages, intent, sentiment, task handoff">
+          <div className="grid gap-3">
+            {webChatMessages.map((message) => (
+              <div key={message.id} className="rounded-md border border-neutral-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{message.senderType === "VISITOR" ? (message.visitorName ?? message.visitorPhone ?? "Website visitor") : "1DentalAI assistant"}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{clean(message.senderType)} · {message.sourcePage ?? "site"} · {message.createdAt ? new Date(message.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}</p>
+                  </div>
+                  <StatusFor value={message.actionStatus} />
+                </div>
+                <p className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-sm leading-6 text-neutral-700">{message.body}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Intent" value={clean(message.intent ?? "unclassified")} />
+                  <MiniMetric label="Sentiment" value={clean(message.sentiment ?? "none")} />
+                  <MiniMetric label="Confidence" value={`${message.confidence ?? 0}%`} />
+                </div>
               </div>
             ))}
           </div>

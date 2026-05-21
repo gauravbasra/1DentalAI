@@ -1837,6 +1837,71 @@ model PatientWebChatConversation {
   @@index([tenantId, nlpIntent])
 }
 
+model PatientWebChatMessage {
+  id             String   @id @default(cuid())
+  tenantId       String
+  conversationId String
+  senderType     String
+  senderName     String?
+  body           String
+  intent         String?
+  sentiment      String?
+  confidence     Int      @default(0)
+  knowledgeSourceIds String[]
+  actionType     String?
+  actionStatus   String   @default("NONE")
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, conversationId, createdAt])
+  @@index([tenantId, intent])
+}
+
+model PatientWebChatEvent {
+  id             String   @id @default(cuid())
+  tenantId       String
+  conversationId String?
+  eventType      String
+  pageUrl        String?
+  payload        Json?
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, conversationId, createdAt])
+  @@index([tenantId, eventType])
+}
+
+model PatientEngagementKnowledgePage {
+  id             String   @id @default(cuid())
+  tenantId       String
+  url            String
+  title          String
+  status         String   @default("CRAWLED")
+  contentHash    String?
+  extractedText  String
+  lastCrawledAt  DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, url])
+  @@index([tenantId, status, lastCrawledAt])
+}
+
+model PatientEngagementKnowledgeChunk {
+  id             String   @id @default(cuid())
+  tenantId       String
+  pageId         String
+  chunkIndex     Int
+  heading        String?
+  content        String
+  tokenEstimate  Int      @default(0)
+  status         String   @default("READY_FOR_RETRIEVAL")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([pageId, chunkIndex])
+  @@index([tenantId, status])
+}
+
 model PatientEngagementLeadForm {
   id              String   @id @default(cuid())
   tenantId        String

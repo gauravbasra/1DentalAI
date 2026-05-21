@@ -457,7 +457,7 @@ export async function updateRevenueFindingStatus(id: string, status: string, act
 }
 
 export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
-  const [conversations, messages, routes, tasks, analytics, numbers, extensions, devices, providers, activeCalls, controls, voicemails, channelSettings, knowledgeSources, webChats, leadForms, formPackets, schedulingRules, metrics, patients] = await Promise.all([
+  const [conversations, messages, routes, tasks, analytics, numbers, extensions, devices, providers, activeCalls, controls, voicemails, channelSettings, knowledgeSources, webChats, webChatMessages, leadForms, formPackets, schedulingRules, metrics, patients] = await Promise.all([
     query(
       `select c.*, p."firstName", p."lastName", p."chartNumber", p."phone", p."email",
         a."appointmentType", a."startsAt",
@@ -684,6 +684,15 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
        order by case wc."status" when 'OPEN' then 0 else 1 end, wc."createdAt" desc`,
       [tenantId],
     ),
+    query(
+      `select wm.*, wc."visitorName", wc."visitorPhone", wc."visitorEmail", wc."sourcePage", wc."status" as "conversationStatus"
+       from "PatientWebChatMessage" wm
+       join "PatientWebChatConversation" wc on wc."id" = wm."conversationId"
+       where wm."tenantId" = $1
+       order by wm."createdAt" desc
+       limit 40`,
+      [tenantId],
+    ),
     query(`select * from "PatientEngagementLeadForm" where "tenantId" = $1 order by "serviceLine", "name"`, [tenantId]),
     query(
       `select fp.*, p."firstName", p."lastName", p."chartNumber", a."appointmentType", a."startsAt"
@@ -749,6 +758,7 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
     channelSettings: channelSettings.rows,
     knowledgeSources: knowledgeSources.rows,
     webChats: webChats.rows,
+    webChatMessages: webChatMessages.rows,
     leadForms: leadForms.rows,
     formPackets: formPackets.rows,
     schedulingRules: schedulingRules.rows,
