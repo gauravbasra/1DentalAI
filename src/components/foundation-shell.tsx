@@ -31,40 +31,40 @@ export function FoundationShell({
   const modeLabel = foundationPractice.mode === "PRODUCTION_SETUP" ? "Production setup" : "Live";
 
   return (
-    <div className="min-h-screen bg-[#f5f5f7] text-neutral-950">
-      <header className="border-b border-black/10 bg-white/86 backdrop-blur-2xl">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 sm:px-8 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <Link href="/" className="text-sm font-semibold tracking-tight text-neutral-950">
+    <div className="min-h-screen bg-[#f3f4f6] text-neutral-950">
+      <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white/95 shadow-sm backdrop-blur-xl">
+        <div className="mx-auto flex max-w-[1680px] flex-col gap-3 px-4 py-3 sm:px-6 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex items-center gap-4">
+            <Link href="/" className="text-base font-semibold tracking-tight text-neutral-950">
               1DentalAI
             </Link>
-            <p className="mt-1 text-xs font-medium text-neutral-500">
+            <p className="hidden text-xs font-medium text-neutral-500 sm:block">
               {foundationPractice.label}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-800">
+          <div className="flex items-center gap-2">
+            <span className="rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
               {modeLabel}
             </span>
             <Link
               href="/contact"
-              className="rounded-full border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
+              className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-semibold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
             >
-              Request production setup
+              Setup
             </Link>
           </div>
         </div>
-        <nav className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-5 pb-4 sm:px-8">
+        <nav className="mx-auto flex max-w-[1680px] gap-1 overflow-x-auto px-4 pb-2 sm:px-6">
           {appNav.map((item) => {
             const selected = active === item.href;
             return (
               <Link
                 key={item.href}
                 href={`${item.href}?${roleParam}`}
-                className={`shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition ${
+                className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
                   selected
                     ? "bg-neutral-950 text-white"
-                    : "bg-white text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950"
+                    : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950"
                 }`}
               >
                 {item.label}
@@ -73,8 +73,8 @@ export function FoundationShell({
           })}
         </nav>
       </header>
-      <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8">{children}</main>
-      <footer className="mx-auto max-w-7xl px-5 pb-8 text-xs text-neutral-500 sm:px-8">
+      <main className="mx-auto max-w-[1680px] px-4 py-4 sm:px-6">{children}</main>
+      <footer className="mx-auto max-w-[1680px] px-4 pb-6 text-xs text-neutral-500 sm:px-6">
         Production setup environment. No live PHI, no vendor calls, no production writeback until connectors and approvals are enabled.
       </footer>
     </div>
@@ -89,19 +89,19 @@ export function RoleSwitcher({
   basePath: string;
 }) {
   return (
-    <div className="rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-        View as role
+    <div className="mb-3 flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 shadow-sm">
+      <p className="shrink-0 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">
+        Role
       </p>
-      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+      <div className="flex gap-1 overflow-x-auto">
         {roles.map((role) => (
           <Link
             key={role.key}
             href={`${basePath}?role=${role.key}`}
-            className={`shrink-0 rounded-full px-3 py-2 text-xs font-semibold transition ${
+            className={`shrink-0 rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
               activeRole === role.key
-                ? "bg-cyan-700 text-white"
-                : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200 hover:text-neutral-950"
+                ? "bg-neutral-950 text-white"
+                : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950"
             }`}
           >
             {role.title}
@@ -122,12 +122,12 @@ export function PageHeader({
   body: string;
 }) {
   return (
-    <div className="mb-8 max-w-4xl">
-      <p className="text-sm font-semibold text-cyan-700">{eyebrow}</p>
-      <h1 className="mt-3 text-4xl font-semibold tracking-tight text-neutral-950 sm:text-6xl">
+    <div className="mb-4 rounded-lg border border-neutral-200 bg-white px-4 py-3 shadow-sm">
+      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-700">{eyebrow}</p>
+      <h1 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-950">
         {title}
       </h1>
-      <p className="mt-5 text-lg leading-8 text-neutral-600">{body}</p>
+      <p className="mt-1 max-w-5xl text-sm leading-6 text-neutral-600">{body}</p>
     </div>
   );
 }
@@ -147,7 +147,7 @@ export function StatusPill({
     neutral: "bg-neutral-100 text-neutral-700",
   };
   return (
-    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${tones[tone]}`}>
+    <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.04em] ${tones[tone]}`}>
       {children}
     </span>
   );

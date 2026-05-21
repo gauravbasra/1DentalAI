@@ -3,7 +3,7 @@ import Link from "next/link";
 import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
 import { Money, PmsCard, PmsSectionNav } from "@/components/pms-ui";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
-import { createAppointmentHold, getScheduleBoard, type PmsAppointmentRow, type PmsScheduleBoard } from "@/lib/pms-repository";
+import { createAppointmentHold, getScheduleBoard, listPatients, type PmsAppointmentRow, type PmsScheduleBoard } from "@/lib/pms-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +28,7 @@ const timeSlots = Array.from({ length: 21 }, (_, index) => 7 * 60 + index * 30);
 export default async function SchedulePage({ searchParams }: { searchParams: Promise<{ role?: string; date?: string }> }) {
   const params = await searchParams;
   const role = getRole(params.role);
-  const board = await getScheduleBoard(undefined, params.date);
+  const [board, patients] = await Promise.all([getScheduleBoard(undefined, params.date), listPatients()]);
 
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>
@@ -40,7 +40,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/schedule" />
       <PmsSectionNav active="/app/pms/schedule" roleKey={role.key} />
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <Metric label="Scheduled production" value={<Money cents={board.production.scheduledCents} />} />
         <Metric label="Completed production" value={<Money cents={board.production.completedCents} />} />
         <Metric label="ASAP / requests" value={board.production.unscheduledRequests} />
@@ -48,8 +48,8 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
         <Metric label="Lab risks" value={board.production.labCaseRisks} />
       </section>
 
-      <section className="mt-6 grid gap-6 2xl:grid-cols-[340px_1fr_330px]">
-        <PmsCard title="Pinboard appointment" eyebrow="Open Dental-style scheduling">
+      <section className="mt-4 grid gap-4 2xl:grid-cols-[320px_1fr_310px]">
+        <PmsCard title="Pinboard appointment" eyebrow="Scheduling">
           <form action={holdAction} className="grid gap-3">
             <label className="grid gap-1 text-sm font-semibold text-neutral-700">
               Category
@@ -64,6 +64,9 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
               Patient
               <select name="patientId" className="rounded-xl border border-neutral-300 px-3 py-2 text-sm">
                 <option value="">Unassigned hold</option>
+                {patients.map((patient) => (
+                  <option key={patient.id} value={patient.id}>{patient.lastName}, {patient.firstName} · {patient.chartNumber}</option>
+                ))}
               </select>
             </label>
             <div className="grid grid-cols-2 gap-2">
@@ -74,11 +77,8 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
             </div>
             <Input name="appointmentType" label="Custom type" />
             <textarea name="notes" rows={3} placeholder="Reason, medical alert, lab dependency, confirmation note" className="rounded-xl border border-neutral-300 px-3 py-2 text-sm" />
-            <button className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white">Place on appointment book</button>
+            <button className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white">Place on appointment book</button>
           </form>
-          <div className="mt-5 rounded-2xl bg-cyan-50 p-4 text-sm leading-6 text-cyan-950">
-            Categories carry default CDT codes and durations. The next build step will attach those procedure rows to the appointment and calculate estimated patient portion before checkout.
-          </div>
         </PmsCard>
 
         <PmsCard title="Operatory day sheet" eyebrow={new Date(`${board.date}T00:00:00`).toLocaleDateString()}>
@@ -113,7 +113,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
 function ScheduleGrid({ board, roleKey }: { board: PmsScheduleBoard; roleKey: string }) {
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[980px]">
+      <div className="min-w-[980px] rounded-lg border border-neutral-200">
         <div className="grid border-b border-neutral-200" style={{ gridTemplateColumns: `72px repeat(${board.operatories.length}, minmax(220px, 1fr))` }}>
           <div className="bg-neutral-50 p-3 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">Time</div>
           {board.operatories.map((op) => (
@@ -124,7 +124,7 @@ function ScheduleGrid({ board, roleKey }: { board: PmsScheduleBoard; roleKey: st
           ))}
         </div>
         {timeSlots.map((slot) => (
-          <div key={slot} className="grid min-h-24 border-b border-neutral-200" style={{ gridTemplateColumns: `72px repeat(${board.operatories.length}, minmax(220px, 1fr))` }}>
+          <div key={slot} className="grid min-h-20 border-b border-neutral-200" style={{ gridTemplateColumns: `72px repeat(${board.operatories.length}, minmax(220px, 1fr))` }}>
             <div className="bg-white p-3 text-xs font-semibold text-neutral-500">{slotLabel(slot)}</div>
             {board.operatories.map((op) => {
               const appts = board.appointments.filter((appt) => appt.operatoryName === op.name && minutes(appt.startsAt) >= slot && minutes(appt.startsAt) < slot + 30);
@@ -145,7 +145,7 @@ function ScheduleGrid({ board, roleKey }: { board: PmsScheduleBoard; roleKey: st
 
 function AppointmentTile({ appt, roleKey }: { appt: PmsAppointmentRow; roleKey: string }) {
   return (
-    <Link href={appt.patientId ? `/app/pms/patients/${appt.patientId}?role=${roleKey}` : `/app/pms/schedule?role=${roleKey}`} className="mb-2 block rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm shadow-sm">
+    <Link href={appt.patientId ? `/app/pms/patients/${appt.patientId}?role=${roleKey}` : `/app/pms/schedule?role=${roleKey}`} className="mb-2 block rounded-md border-l-4 border-cyan-500 bg-cyan-50 p-2 text-sm shadow-sm">
       <div className="flex items-start justify-between gap-2">
         <p className="font-semibold text-neutral-950">{appt.patientName ?? "Held appointment"}</p>
         <StatusPill tone={appt.status === "COMPLETED" ? "green" : appt.status === "BROKEN" ? "red" : "amber"}>{appt.status.toLowerCase()}</StatusPill>
@@ -157,7 +157,7 @@ function AppointmentTile({ appt, roleKey }: { appt: PmsAppointmentRow; roleKey: 
 }
 
 function Blockout({ reason }: { reason: string }) {
-  return <div className="mb-2 rounded-xl border border-neutral-200 bg-neutral-100 p-3 text-xs font-semibold text-neutral-600">{reason}</div>;
+  return <div className="mb-2 rounded-md border border-neutral-200 bg-neutral-100 p-2 text-xs font-semibold text-neutral-600">{reason}</div>;
 }
 
 function Queue({ title, empty, rows }: { title: string; empty: string; rows: Array<{ id: string; title: string; detail: string; tone: "green" | "cyan" | "amber" | "red" }> }) {
@@ -166,7 +166,7 @@ function Queue({ title, empty, rows }: { title: string; empty: string; rows: Arr
       {rows.length ? (
         <div className="space-y-2">
           {rows.map((row) => (
-            <div key={row.id} className="rounded-2xl bg-neutral-50 p-3">
+            <div key={row.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-2.5">
               <div className="flex items-start justify-between gap-2">
                 <p className="text-sm font-semibold text-neutral-950">{row.title}</p>
                 <StatusPill tone={row.tone}>work</StatusPill>
@@ -175,13 +175,13 @@ function Queue({ title, empty, rows }: { title: string; empty: string; rows: Arr
             </div>
           ))}
         </div>
-      ) : <p className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-500">{empty}</p>}
+      ) : <p className="rounded-md bg-neutral-50 p-3 text-sm text-neutral-500">{empty}</p>}
     </PmsCard>
   );
 }
 
 function Metric({ label, value }: { label: string; value: React.ReactNode }) {
-  return <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p><p className="mt-2 text-2xl font-semibold text-neutral-950">{value}</p></div>;
+  return <div className="rounded-lg border border-neutral-200 bg-white px-4 py-3 shadow-sm"><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p><p className="mt-1 text-xl font-semibold text-neutral-950">{value}</p></div>;
 }
 
 function Input({ label, name, type = "text", required = false }: { label: string; name: string; type?: string; required?: boolean }) {
