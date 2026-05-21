@@ -405,7 +405,8 @@ async function retrieveKnowledge(message: string, tenantId: string) {
 }
 
 function buildReply(analysis: WebchatAnalysis, knowledge: Array<{ content: string; heading: string | null; pageTitle: string }>) {
-  const context = knowledge[0]?.content ? `Here is what I can share: ${knowledge[0].content}` : "I can help route this to the right dental team member.";
+  const knowledgeExcerpt = summarizeKnowledge(knowledge[0]);
+  const context = knowledgeExcerpt ? `Here is what I can share from the approved knowledge base: ${knowledgeExcerpt}` : "I can help route this to the right dental team member.";
   if (analysis.intent === "SCHEDULE_APPOINTMENT") {
     return { body: `${context}\n\nI can collect your request and have the front desk confirm appointment options. I cannot finalize a booking until PMS scheduling writeback is approved.` };
   }
@@ -419,6 +420,19 @@ function buildReply(analysis: WebchatAnalysis, knowledge: Array<{ content: strin
     return { body: `${context}\n\nFor insurance, pricing, or financing, I can collect your question and route it for staff review. Exact benefits or estimates require payer/PMS verification.` };
   }
   return { body: `${context}\n\nWhat would you like help with: booking, rescheduling, insurance, forms, or a service question?` };
+}
+
+function summarizeKnowledge(row?: { content: string; heading: string | null; pageTitle: string }) {
+  if (!row?.content) return "";
+  const title = row.heading || row.pageTitle;
+  const text = row.content
+    .replace(/\s+/g, " ")
+    .replace(/\b(Product|Solutions|Features|Use Cases|Workflows|Resources|Blog|About|Contact|Open platform|Request access)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const sentences = text.split(/(?<=[.!?])\s+/).filter((sentence) => sentence.length > 35);
+  const excerpt = (sentences.slice(0, 2).join(" ") || text).slice(0, 420).trim();
+  return `${title ? `${title}: ` : ""}${excerpt}${excerpt.length >= 420 ? "..." : ""}`;
 }
 
 export async function crawlKnowledgePage(input: { tenantId?: string; url: string }) {
