@@ -7,9 +7,9 @@ export async function OPTIONS() {
 }
 
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
   const tenant = searchParams.get("tenant") ?? "tenant_1dentalai_production";
-  const script = buildWidgetScript({ apiBase: origin, tenant });
+  const script = buildWidgetScript({ tenant });
   return new Response(script, {
     headers: {
       ...corsHeaders,
@@ -19,12 +19,13 @@ export async function GET(request: Request) {
   });
 }
 
-function buildWidgetScript({ apiBase, tenant }: { apiBase: string; tenant: string }) {
+function buildWidgetScript({ tenant }: { tenant: string }) {
   return `
 (function(){
   if (window.__oneDentalAiWebchat) return;
   window.__oneDentalAiWebchat = true;
-  var API_BASE = ${JSON.stringify(apiBase)};
+  var scriptEl = document.currentScript;
+  var API_BASE = scriptEl && scriptEl.src ? new URL(scriptEl.src).origin : window.location.origin;
   var TENANT = ${JSON.stringify(tenant)};
   var state = { open: false, session: null, visitor: {}, sending: false, settings: null };
   var root = document.createElement('div');
