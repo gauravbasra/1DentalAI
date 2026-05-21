@@ -28,7 +28,7 @@ export default function BlogPage() {
             publisher: {
               "@type": "Organization",
               name: "1DentalAI",
-              logo: `${siteUrl}/logo.svg`,
+              logo: `${siteUrl}/brand-profile.png`,
             },
           }}
         />

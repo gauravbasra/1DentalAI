@@ -49,7 +49,7 @@ export default async function BlogPostPage({ params }: Props) {
             publisher: {
               "@type": "Organization",
               name: "1DentalAI",
-              logo: `${siteUrl}/logo.svg`,
+              logo: `${siteUrl}/brand-profile.png`,
             },
             mainEntityOfPage: `${siteUrl}/blog/${post.slug}`,
           }}
