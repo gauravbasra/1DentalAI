@@ -1,49 +1,55 @@
-<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="1536" height="512" viewBox="0 0 1536 512" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <radialGradient id="brandGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(150 186) rotate(20) scale(190 150)">
-      <stop stop-color="#38BDF8"/>
-      <stop offset="0.56" stop-color="#2563EB"/>
-      <stop offset="0.82" stop-color="#7C3AED"/>
-      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="aiGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1014 180) rotate(22) scale(165 115)">
-      <stop stop-color="#38BDF8"/>
-      <stop offset="0.55" stop-color="#2563EB"/>
-      <stop offset="0.8" stop-color="#7C3AED"/>
-      <stop offset="1" stop-color="#020617" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="mark" x1="58" y1="70" x2="260" y2="286" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#22D3EE"/>
-      <stop offset="0.5" stop-color="#0EA5E9"/>
-      <stop offset="0.75" stop-color="#2563EB"/>
-      <stop offset="1" stop-color="#8B5CF6"/>
+    <linearGradient id="wall" x1="0" y1="0" x2="1536" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6B7280"/>
+      <stop offset="0.24" stop-color="#20262E"/>
+      <stop offset="0.52" stop-color="#060A12"/>
+      <stop offset="0.8" stop-color="#27313B"/>
+      <stop offset="1" stop-color="#7B8188"/>
     </linearGradient>
-    <linearGradient id="ai" x1="970" y1="84" x2="1138" y2="238" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#22D3EE"/>
-      <stop offset="0.52" stop-color="#2563EB"/>
-      <stop offset="1" stop-color="#8B5CF6"/>
+    <radialGradient id="leftGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(250 250) rotate(10) scale(238 145)">
+      <stop stop-color="#21D4FD" stop-opacity="0.9"/>
+      <stop offset="0.55" stop-color="#1687FF" stop-opacity="0.52"/>
+      <stop offset="0.82" stop-color="#7B4DFF" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="rightGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1260 248) rotate(7) scale(242 132)">
+      <stop stop-color="#21D4FD" stop-opacity="0.78"/>
+      <stop offset="0.6" stop-color="#1687FF" stop-opacity="0.5"/>
+      <stop offset="0.86" stop-color="#7B4DFF" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="brand" x1="144" y1="154" x2="364" y2="340" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#19D3FF"/>
+      <stop offset="0.58" stop-color="#1687FF"/>
+      <stop offset="1" stop-color="#7B4DFF"/>
     </linearGradient>
-    <filter id="markGlow" x="8" y="34" width="300" height="300" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="0" stdDeviation="18" flood-color="#0EA5E9" flood-opacity="0.92"/>
-      <feDropShadow dx="0" dy="0" stdDeviation="28" flood-color="#7C3AED" flood-opacity="0.42"/>
+    <linearGradient id="ai" x1="1188" y1="160" x2="1390" y2="280" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#21D4FD"/>
+      <stop offset="0.58" stop-color="#1687FF"/>
+      <stop offset="1" stop-color="#645BFF"/>
+    </linearGradient>
+    <filter id="brandGlow" x="56" y="80" width="420" height="350" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="18" flood-color="#1687FF" flood-opacity="0.85"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="34" flood-color="#7B4DFF" flood-opacity="0.42"/>
     </filter>
-    <filter id="textGlow" x="273" y="73" width="885" height="210" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="0" stdDeviation="14" flood-color="#2563EB" flood-opacity="0.42"/>
-      <feDropShadow dx="0" dy="0" stdDeviation="24" flood-color="#0EA5E9" flood-opacity="0.24"/>
+    <filter id="aiGlow" x="1100" y="118" width="384" height="268" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="18" flood-color="#1687FF" flood-opacity="0.72"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="32" flood-color="#7B4DFF" flood-opacity="0.4"/>
     </filter>
   </defs>
-  <rect width="1200" height="360" fill="#020617"/>
-  <rect width="1200" height="360" fill="url(#brandGlow)" opacity="0.55"/>
-  <rect width="1200" height="360" fill="url(#aiGlow)" opacity="0.66"/>
-  <g filter="url(#markGlow)">
-    <path d="M66 150C80 144 95 136 109 128C123 120 134 109 149 106C160 103 171 105 174 113C178 121 175 132 172 143L135 278C132 290 133 300 144 302C156 304 165 298 171 287L196 239C206 219 229 222 234 243L246 288C249 300 257 306 268 303C279 300 284 290 281 276L258 130C255 113 244 102 226 102C214 102 203 106 191 110C176 115 160 120 144 119C128 118 113 114 97 114C80 114 69 125 66 150Z" fill="url(#mark)" stroke="#7DD3FC" stroke-width="8" stroke-linejoin="round"/>
-    <path d="M46 185L72 176L95 170L62 284C59 298 66 309 81 311C97 313 111 313 126 310" stroke="#38BDF8" stroke-width="29" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M157 198C169 198 178 207 178 219V287" stroke="#7DD3FC" stroke-width="25" stroke-linecap="round"/>
-    <path d="M163 162L174 187L199 198L174 209L163 234L151 209L127 198L151 187L163 162Z" fill="#C4B5FD"/>
+  <rect width="1536" height="512" fill="url(#wall)"/>
+  <rect width="1536" height="512" fill="url(#leftGlow)"/>
+  <rect width="1536" height="512" fill="url(#rightGlow)"/>
+  <g filter="url(#brandGlow)">
+    <path d="M144 220L193 207L227 203L188 298C184 310 190 317 204 319C220 320 236 319 252 315" stroke="url(#brand)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M213 198C234 186 258 172 281 172C301 172 313 185 309 204L282 305C279 319 287 326 301 322C314 319 322 310 326 296L338 254C343 235 369 234 376 252L393 296C398 310 410 317 425 312" stroke="url(#brand)" stroke-width="23" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M257 174C281 178 306 182 330 176" stroke="#2CBFFF" stroke-width="10" stroke-linecap="round"/>
+    <path d="M292 226L303 250L327 261L303 272L292 296L281 272L257 261L281 250L292 226Z" fill="#82E8FF"/>
   </g>
-  <g filter="url(#textGlow)">
-    <text x="318" y="220" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="146" font-weight="800" letter-spacing="-5" fill="#020617" stroke="#172554" stroke-width="2">dental</text>
-    <text x="876" y="220" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="150" font-weight="900" letter-spacing="-5" fill="url(#ai)" stroke="#38BDF8" stroke-width="1.4">AI</text>
-    <text x="968" y="282" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="58" font-weight="700" letter-spacing="11" fill="#111827" stroke="#334155" stroke-width="0.8">.com</text>
+  <text x="520" y="300" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="160" font-weight="850" letter-spacing="-8" fill="#020617" stroke="#0B1220" stroke-width="1.5">dental</text>
+  <g filter="url(#aiGlow)">
+    <text x="1170" y="300" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="164" font-weight="900" letter-spacing="-5" fill="url(#ai)" stroke="#25C7FF" stroke-width="1.2">AI</text>
   </g>
+  <text x="1214" y="365" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="58" font-weight="700" letter-spacing="12" fill="#111827" opacity="0.86">.com</text>
 </svg>

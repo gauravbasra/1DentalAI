@@ -1,28 +1,21 @@
-<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="760" height="180" viewBox="0 0 760 180" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="mark" x1="58" y1="70" x2="260" y2="286" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#22D3EE"/>
-      <stop offset="0.5" stop-color="#0EA5E9"/>
-      <stop offset="0.75" stop-color="#2563EB"/>
-      <stop offset="1" stop-color="#8B5CF6"/>
+    <linearGradient id="brand" x1="32" y1="36" x2="178" y2="146" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#19D3FF"/>
+      <stop offset="0.58" stop-color="#1687FF"/>
+      <stop offset="1" stop-color="#7B4DFF"/>
     </linearGradient>
-    <linearGradient id="ai" x1="970" y1="84" x2="1138" y2="238" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#22D3EE"/>
-      <stop offset="0.52" stop-color="#2563EB"/>
-      <stop offset="1" stop-color="#8B5CF6"/>
+    <linearGradient id="ai" x1="626" y1="54" x2="735" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#21D4FD"/>
+      <stop offset="0.58" stop-color="#1687FF"/>
+      <stop offset="1" stop-color="#645BFF"/>
     </linearGradient>
-    <filter id="markGlow" x="12" y="38" width="292" height="292" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="0" stdDeviation="13" flood-color="#0EA5E9" flood-opacity="0.42"/>
-      <feDropShadow dx="0" dy="0" stdDeviation="20" flood-color="#7C3AED" flood-opacity="0.22"/>
-    </filter>
   </defs>
-  <g filter="url(#markGlow)">
-    <path d="M66 150C80 144 95 136 109 128C123 120 134 109 149 106C160 103 171 105 174 113C178 121 175 132 172 143L135 278C132 290 133 300 144 302C156 304 165 298 171 287L196 239C206 219 229 222 234 243L246 288C249 300 257 306 268 303C279 300 284 290 281 276L258 130C255 113 244 102 226 102C214 102 203 106 191 110C176 115 160 120 144 119C128 118 113 114 97 114C80 114 69 125 66 150Z" fill="url(#mark)" stroke="#7DD3FC" stroke-width="8" stroke-linejoin="round"/>
-    <path d="M46 185L72 176L95 170L62 284C59 298 66 309 81 311C97 313 111 313 126 310" stroke="#38BDF8" stroke-width="29" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M157 198C169 198 178 207 178 219V287" stroke="#7DD3FC" stroke-width="25" stroke-linecap="round"/>
-    <path d="M163 162L174 187L199 198L174 209L163 234L151 209L127 198L151 187L163 162Z" fill="#C4B5FD"/>
-  </g>
-  <text x="318" y="220" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="146" font-weight="800" letter-spacing="-5" fill="#050816" stroke="#172554" stroke-width="1.4">dental</text>
-  <text x="876" y="220" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="150" font-weight="900" letter-spacing="-5" fill="url(#ai)" stroke="#38BDF8" stroke-width="1.2">AI</text>
-  <text x="968" y="282" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="58" font-weight="700" letter-spacing="11" fill="#334155">.com</text>
+  <path d="M52 74L87 65L111 62L83 130C80 138 84 143 94 144C106 145 119 144 131 141" stroke="url(#brand)" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M101 59C116 50 134 40 151 40C166 40 175 50 172 65L152 137C149 147 155 153 165 150C174 148 180 141 183 131L192 98C196 83 216 82 222 96L235 130C239 141 248 146 260 142" stroke="url(#brand)" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M133 42C150 45 167 48 184 45C204 42 222 34 238 46C251 56 254 73 249 94L236 141" stroke="#2CBFFF" stroke-width="7" stroke-linecap="round"/>
+  <path d="M160 76L168 93L185 101L168 109L160 126L152 109L135 101L152 93L160 76Z" fill="#82E8FF"/>
+  <text x="300" y="114" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="76" font-weight="850" letter-spacing="-3.5" fill="#050816">dental</text>
+  <text x="618" y="114" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="78" font-weight="900" letter-spacing="-2" fill="url(#ai)">AI</text>
+  <text x="665" y="145" font-family="Inter, Avenir Next, Arial, Helvetica, sans-serif" font-size="25" font-weight="800" letter-spacing="4" fill="#1F2937">.com</text>
 </svg>

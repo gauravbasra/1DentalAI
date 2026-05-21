@@ -11,9 +11,9 @@ export function SiteFooter() {
             <Image
               src="/wordmark-light.svg"
               alt="1dentalAI.com"
-              width={300}
-              height={90}
-              className="h-11 w-[168px] object-contain"
+              width={760}
+              height={180}
+              className="h-11 w-[188px] object-contain"
             />
           </div>
           <p className="mt-3 max-w-xl text-sm leading-6 text-neutral-600">

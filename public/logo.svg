@@ -1,38 +1,14 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <radialGradient id="blueGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(185 268) rotate(27) scale(228 194)">
-      <stop stop-color="#38BDF8"/>
-      <stop offset="0.42" stop-color="#2563EB"/>
-      <stop offset="0.72" stop-color="#7C3AED"/>
-      <stop offset="1" stop-color="#111827" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="mark" x1="111" y1="103" x2="391" y2="407" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#22D3EE"/>
-      <stop offset="0.45" stop-color="#0EA5E9"/>
-      <stop offset="0.75" stop-color="#2563EB"/>
-      <stop offset="1" stop-color="#8B5CF6"/>
+    <linearGradient id="brand" x1="94" y1="110" x2="414" y2="406" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#19D3FF"/>
+      <stop offset="0.58" stop-color="#1687FF"/>
+      <stop offset="1" stop-color="#7B4DFF"/>
     </linearGradient>
-    <linearGradient id="edge" x1="127" y1="121" x2="385" y2="394" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#7DD3FC"/>
-      <stop offset="0.48" stop-color="#38BDF8"/>
-      <stop offset="1" stop-color="#A78BFA"/>
-    </linearGradient>
-    <filter id="glow" x="42" y="54" width="428" height="418" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="0" stdDeviation="26" flood-color="#0EA5E9" flood-opacity="0.95"/>
-      <feDropShadow dx="0" dy="0" stdDeviation="42" flood-color="#7C3AED" flood-opacity="0.5"/>
-    </filter>
   </defs>
-  <rect width="512" height="512" rx="112" fill="#070B13"/>
-  <rect width="512" height="512" rx="112" fill="url(#blueGlow)" opacity="0.78"/>
-  <g filter="url(#glow)">
-    <path d="M137 204C157 195 177 185 197 174C216 163 231 148 251 143C266 139 280 142 285 153C290 164 286 178 282 193L232 374C228 391 229 404 245 407C260 410 273 402 281 387L315 323C328 297 359 301 366 329L382 389C386 405 397 413 412 409C427 405 433 392 430 373L398 177C394 153 379 139 355 139C339 139 324 144 308 149C287 156 266 163 244 161C223 159 202 154 181 154C157 154 141 169 137 204Z" fill="url(#mark)"/>
-    <path d="M137 204C157 195 177 185 197 174C216 163 231 148 251 143C266 139 280 142 285 153C290 164 286 178 282 193L232 374C228 391 229 404 245 407C260 410 273 402 281 387L315 323C328 297 359 301 366 329L382 389C386 405 397 413 412 409C427 405 433 392 430 373L398 177C394 153 379 139 355 139C339 139 324 144 308 149C287 156 266 163 244 161C223 159 202 154 181 154C157 154 141 169 137 204Z" stroke="url(#edge)" stroke-width="11" stroke-linejoin="round"/>
-    <path d="M111 251L146 238L178 231L133 386C128 405 137 419 158 422C179 424 198 424 218 420" stroke="url(#edge)" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M111 251L146 238L178 231L133 386C128 405 137 419 158 422C179 424 198 424 218 420" stroke="#020617" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" opacity="0.45"/>
-    <path d="M260 269C276 269 289 282 289 298V390" stroke="#020617" stroke-width="60" stroke-linecap="round" opacity="0.35"/>
-    <path d="M260 269C276 269 289 282 289 298V390" stroke="url(#edge)" stroke-width="34" stroke-linecap="round"/>
-    <path d="M266 269C282 269 295 282 295 298V390" stroke="#0B1220" stroke-width="9" stroke-linecap="round" opacity="0.32"/>
-    <path d="M268 220L284 254L318 270L284 286L268 320L252 286L218 270L252 254L268 220Z" fill="#7DD3FC" opacity="0.88"/>
-    <path d="M268 241L276 258L293 266L276 274L268 291L260 274L243 266L260 258L268 241Z" fill="#C4B5FD"/>
-  </g>
+  <rect width="512" height="512" rx="112" fill="#050816"/>
+  <path d="M110 208L185 188L238 182L178 332C170 353 181 366 205 368C232 370 260 368 287 361" stroke="url(#brand)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M216 174C249 154 288 132 323 132C356 132 375 154 368 188L326 348C320 371 333 384 356 378C377 373 391 358 397 335L417 262C425 229 470 227 484 258" stroke="url(#brand)" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M286 136C323 143 360 148 397 140" stroke="#2CBFFF" stroke-width="16" stroke-linecap="round"/>
+  <path d="M292 218L310 257L349 275L310 293L292 332L274 293L235 275L274 257L292 218Z" fill="#82E8FF"/>
 </svg>

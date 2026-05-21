@@ -10,9 +10,9 @@ export function SiteHeader() {
           <Image
             src="/wordmark-light.svg"
             alt="1dentalAI.com"
-            width={312}
-            height={94}
-            className="h-12 w-[178px] object-contain sm:w-[206px]"
+            width={760}
+            height={180}
+            className="h-10 w-[170px] object-contain sm:w-[204px]"
             priority
           />
         </Link>
