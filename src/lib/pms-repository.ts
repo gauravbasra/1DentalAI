@@ -1276,11 +1276,18 @@ export async function submitOnlineBooking(input: {
   const appointmentId = newId("appt");
   const bookingId = newId("osbook");
   const appointmentStatus = link.reservationFeeCents > 0 ? "HELD" : "CONFIRMED";
+  const production = await query<{ feeCents: string }>(
+    `select coalesce(max(pc."defaultFeeCents"), 0)::text as "feeCents"
+     from "PmsAppointmentCategory" c
+     left join "PmsProcedureCode" pc on pc."tenantId" = $1 and pc."code" = any(c."defaultProcedureCodes")
+     where c."id" = $2 and c."tenantId" = $1`,
+    [tenantId, link.appointmentCategoryId],
+  );
 
   await query(
     `insert into "PmsAppointment"
        ("id", "tenantId", "patientId", "providerId", "operatoryId", "startsAt", "endsAt", "status", "appointmentType", "productionCents", "readinessStatus", "notes", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6::timestamp, $7::timestamp, $8, $9, coalesce((select "defaultFeeCents" from "PmsProcedureCode" where "tenantId" = $2 and "code" = any((select "defaultProcedureCodes" from "PmsAppointmentCategory" where "id" = $10)) limit 1), 0), $11, $12, current_timestamp)`,
+     values ($1, $2, $3, $4, $5, $6::timestamp, $7::timestamp, $8, $9, $10, $11, $12, current_timestamp)`,
     [
       appointmentId,
       tenantId,
@@ -1291,7 +1298,7 @@ export async function submitOnlineBooking(input: {
       selected.endsAt,
       appointmentStatus,
       categoryName,
-      link.appointmentCategoryId,
+      Number(production.rows[0]?.feeCents ?? 0),
       payerStatus === "NEEDS_REVIEW" ? "NEEDS_REVIEW" : "READY",
       onlineBookingNote(link, input.patientNote, payerStatus),
     ],
