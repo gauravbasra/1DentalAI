@@ -195,7 +195,7 @@ for (const token of ["RcmWorkItem", "RcmPriorAuthorization", "RcmDenialCase", "R
   }
 }
 
-for (const token of ["PhoneConversation", "getPhoneOperatingCenter", "AI phone and communications", "MISSED_CALL", "AI_VOICE_REVIEW"]) {
+for (const token of ["PhoneConversation", "PhoneOutboundMessage", "PhoneRoutingRule", "PhoneCallTask", "PhoneCallAnalytics", "getPhoneOperatingCenter", "AI phone and communications", "MISSED_CALL", "AI_VOICE_REVIEW", "Outbound messages", "Routing rules", "Call intelligence"]) {
   if (!`${schema}\n${phonePage}\n${osRepository}`.includes(token)) {
     console.error(`Phone operating-system token missing: ${token}`);
     process.exit(1);

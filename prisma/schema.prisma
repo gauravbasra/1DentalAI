@@ -1346,6 +1346,89 @@ model PhoneConversation {
   @@index([tenantId, aiIntent])
 }
 
+model PhoneOutboundMessage {
+  id              String   @id @default(cuid())
+  tenantId        String
+  conversationId  String?
+  patientId       String?
+  appointmentId   String?
+  channel         String   @default("SMS")
+  recipientNumber String?
+  messageType     String
+  body            String
+  approvalStatus  String   @default("DRAFT")
+  deliveryStatus  String   @default("NOT_SENT")
+  consentStatus   String   @default("UNKNOWN")
+  blockedReason   String?
+  ownerRoleKey    String   @default("front_desk")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, approvalStatus, deliveryStatus])
+  @@index([conversationId])
+  @@index([patientId, messageType])
+}
+
+model PhoneRoutingRule {
+  id              String   @id @default(cuid())
+  tenantId        String
+  locationId      String?
+  name            String
+  triggerType     String
+  destinationType String
+  destination     String
+  priority        Int      @default(100)
+  schedule        Json?
+  status          String   @default("ACTIVE")
+  failoverAction  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, priority])
+  @@index([locationId, status])
+}
+
+model PhoneCallTask {
+  id              String   @id @default(cuid())
+  tenantId        String
+  conversationId  String?
+  patientId       String?
+  taskType        String
+  priority        String   @default("NORMAL")
+  status          String   @default("OPEN")
+  dueAt           DateTime?
+  ownerRoleKey    String   @default("front_desk")
+  nextAction      String
+  sourceModule    String   @default("PHONE")
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, priority])
+  @@index([conversationId])
+  @@index([patientId, status])
+}
+
+model PhoneCallAnalytics {
+  id              String   @id @default(cuid())
+  tenantId        String
+  conversationId  String
+  talkRatio       Json?
+  sentimentTimeline Json?
+  keywords        Json?
+  riskFlags       Json?
+  bookingIntentScore Int    @default(0)
+  serviceRecoveryScore Int  @default(0)
+  revenueOpportunityCents Int @default(0)
+  summaryQuality  String   @default("AI_DRAFT")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([conversationId])
+  @@index([tenantId, bookingIntentScore])
+  @@index([tenantId, serviceRecoveryScore])
+}
+
 model ReputationReviewWorkflow {
   id                  String   @id @default(cuid())
   tenantId            String

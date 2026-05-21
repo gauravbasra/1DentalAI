@@ -363,29 +363,71 @@ export async function updateRevenueFindingStatus(id: string, status: string, act
 }
 
 export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
-  const [conversations, metrics, patients] = await Promise.all([
+  const [conversations, messages, routes, tasks, analytics, metrics, patients] = await Promise.all([
     query(
-      `select c.*, p."firstName", p."lastName", p."chartNumber", p."phone", p."email", a."appointmentType", a."startsAt"
+      `select c.*, p."firstName", p."lastName", p."chartNumber", p."phone", p."email",
+        a."appointmentType", a."startsAt",
+        coalesce(ca."bookingIntentScore", 0)::int as "bookingIntentScore",
+        coalesce(ca."serviceRecoveryScore", 0)::int as "serviceRecoveryScore",
+        coalesce(ca."revenueOpportunityCents", 0)::int as "revenueOpportunityCents",
+        ca."keywords", ca."riskFlags"
        from "PhoneConversation" c
        left join "PmsPatient" p on p."id" = c."patientId"
        left join "PmsAppointment" a on a."id" = c."appointmentId"
+       left join "PhoneCallAnalytics" ca on ca."conversationId" = c."id"
        where c."tenantId" = $1
        order by c."startedAt" desc`,
       [tenantId],
     ),
-    query<{ openCalls: string; missedCalls: string; needsReview: string; highIntent: string }>(
+    query(
+      `select m.*, p."firstName", p."lastName", p."chartNumber", c."aiIntent"
+       from "PhoneOutboundMessage" m
+       left join "PmsPatient" p on p."id" = m."patientId"
+       left join "PhoneConversation" c on c."id" = m."conversationId"
+       where m."tenantId" = $1
+       order by case m."approvalStatus" when 'BLOCKED' then 0 when 'NEEDS_APPROVAL' then 1 when 'DRAFT' then 2 else 3 end, m."createdAt" desc`,
+      [tenantId],
+    ),
+    query(
+      `select r.*, l."name" as "locationName"
+       from "PhoneRoutingRule" r
+       left join "Location" l on l."id" = r."locationId"
+       where r."tenantId" = $1
+       order by r."priority" asc, r."name"`,
+      [tenantId],
+    ),
+    query(
+      `select t.*, p."firstName", p."lastName", p."chartNumber", c."aiIntent", c."callerNumber"
+       from "PhoneCallTask" t
+       left join "PmsPatient" p on p."id" = t."patientId"
+       left join "PhoneConversation" c on c."id" = t."conversationId"
+       where t."tenantId" = $1
+       order by case t."priority" when 'HIGH' then 0 when 'NORMAL' then 1 else 2 end, t."dueAt" asc nulls last`,
+      [tenantId],
+    ),
+    query(
+      `select ca.*, c."callerName", c."callerNumber", c."aiIntent", p."firstName", p."lastName", p."chartNumber"
+       from "PhoneCallAnalytics" ca
+       join "PhoneConversation" c on c."id" = ca."conversationId"
+       left join "PmsPatient" p on p."id" = c."patientId"
+       where ca."tenantId" = $1
+       order by ca."bookingIntentScore" desc, ca."serviceRecoveryScore" desc`,
+      [tenantId],
+    ),
+    query<{ openCalls: string; missedCalls: string; needsReview: string; highIntent: string; stagedMessages: string; openTasks: string; opportunityCents: string }>(
       `select
-        count(*) filter (where "status" = 'OPEN')::text as "openCalls",
-        count(*) filter (where "outcome" = 'MISSED_CALL')::text as "missedCalls",
-        count(*) filter (where "followUpStatus" like '%REVIEW%' or "followUpStatus" like '%BLOCKED%')::text as "needsReview",
-        count(*) filter (where "aiSentiment" = 'HIGH_INTENT')::text as "highIntent"
-       from "PhoneConversation"
-       where "tenantId" = $1`,
+        (select count(*) from "PhoneConversation" where "tenantId" = $1 and "status" = 'OPEN')::text as "openCalls",
+        (select count(*) from "PhoneConversation" where "tenantId" = $1 and "outcome" = 'MISSED_CALL')::text as "missedCalls",
+        (select count(*) from "PhoneConversation" where "tenantId" = $1 and ("followUpStatus" like '%REVIEW%' or "followUpStatus" like '%BLOCKED%'))::text as "needsReview",
+        (select count(*) from "PhoneConversation" where "tenantId" = $1 and "aiSentiment" = 'HIGH_INTENT')::text as "highIntent",
+        (select count(*) from "PhoneOutboundMessage" where "tenantId" = $1 and "approvalStatus" in ('DRAFT','NEEDS_APPROVAL','BLOCKED'))::text as "stagedMessages",
+        (select count(*) from "PhoneCallTask" where "tenantId" = $1 and "status" = 'OPEN')::text as "openTasks",
+        (select coalesce(sum("revenueOpportunityCents"), 0) from "PhoneCallAnalytics" where "tenantId" = $1)::text as "opportunityCents"`,
       [tenantId],
     ),
     listPatientOptions(tenantId),
   ]);
-  return { conversations: conversations.rows, metrics: metrics.rows[0], patients };
+  return { conversations: conversations.rows, messages: messages.rows, routes: routes.rows, tasks: tasks.rows, analytics: analytics.rows, metrics: metrics.rows[0], patients };
 }
 
 export async function createPhoneConversation(input: {
@@ -415,6 +457,77 @@ export async function updatePhoneConversationStatus(id: string, status: string, 
     [id, status, followUpStatus],
   );
   if (result.rows[0]) await addAudit(result.rows[0].tenantId, "front_desk", "PHONE_WORK_STATUS_UPDATED", "PhoneConversation", id, "ALLOWED", { status, followUpStatus });
+}
+
+export async function createPhoneOutboundMessage(input: {
+  tenantId?: string;
+  conversationId?: string;
+  patientId?: string;
+  appointmentId?: string;
+  channel: string;
+  recipientNumber?: string;
+  messageType: string;
+  body: string;
+  consentStatus?: string;
+  blockedReason?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("pmsg");
+  await query(
+    `insert into "PhoneOutboundMessage"
+       ("id", "tenantId", "conversationId", "patientId", "appointmentId", "channel", "recipientNumber", "messageType", "body", "approvalStatus", "deliveryStatus", "consentStatus", "blockedReason", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+       case when coalesce($11, '') <> '' then 'BLOCKED' else 'NEEDS_APPROVAL' end,
+       'NOT_SENT', coalesce($10, 'UNKNOWN'), $11, current_timestamp)`,
+    [id, tenantId, input.conversationId || null, input.patientId || null, input.appointmentId || null, input.channel, input.recipientNumber || null, input.messageType, input.body.trim(), input.consentStatus || "UNKNOWN", input.blockedReason || null],
+  );
+  await addAudit(tenantId, "front_desk", "PHONE_OUTBOUND_MESSAGE_STAGED", "PhoneOutboundMessage", id);
+}
+
+export async function updatePhoneOutboundMessageApproval(id: string, approvalStatus: string, actorRole = "front_desk") {
+  const result = await query<{ tenantId: string }>(
+    `update "PhoneOutboundMessage"
+     set "approvalStatus" = $2,
+       "deliveryStatus" = case when $2 = 'APPROVED_STAGED' then 'READY_FOR_CONNECTOR' else "deliveryStatus" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId"`,
+    [id, approvalStatus],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "PHONE_MESSAGE_APPROVAL_UPDATED", "PhoneOutboundMessage", id, "ALLOWED", { approvalStatus });
+}
+
+export async function updatePhoneCallTaskStatus(id: string, status: string, actorRole = "front_desk") {
+  const result = await query<{ tenantId: string }>(
+    `update "PhoneCallTask"
+     set "status" = $2,
+       "completedAt" = case when $2 in ('COMPLETED','CLOSED') then current_timestamp else "completedAt" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId"`,
+    [id, status],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "PHONE_TASK_STATUS_UPDATED", "PhoneCallTask", id, "ALLOWED", { status });
+}
+
+export async function createPhoneRoutingRule(input: {
+  tenantId?: string;
+  name: string;
+  triggerType: string;
+  destinationType: string;
+  destination: string;
+  priority: number;
+  failoverAction?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("route");
+  await query(
+    `insert into "PhoneRoutingRule"
+       ("id", "tenantId", "name", "triggerType", "destinationType", "destination", "priority", "failoverAction", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, current_timestamp)`,
+    [id, tenantId, input.name.trim(), input.triggerType, input.destinationType, input.destination.trim(), input.priority, input.failoverAction?.trim() || null],
+  );
+  await addAudit(tenantId, "practice_manager", "PHONE_ROUTING_RULE_CREATED", "PhoneRoutingRule", id);
 }
 
 export async function getReputationOperatingCenter(tenantId = defaultTenantId) {
