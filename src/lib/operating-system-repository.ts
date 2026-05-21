@@ -937,27 +937,47 @@ export async function createReferralRequest(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("repref");
+  const blockedReason =
+    input.consentStatus === "VERIFIED"
+      ? null
+      : input.consentStatus === "OPTED_OUT"
+        ? "Patient has opted out of this channel. Referral request cannot be sent."
+        : "Patient referral communication consent is not verified.";
   await query(
     `insert into "ReputationReferralRequest"
        ("id", "tenantId", "patientId", "requestType", "channel", "status", "offerSummary", "messageDraft", "consentStatus", "conversionStatus", "dueAt", "updatedAt")
-     values ($1, $2, $3, $4, $5, 'READY_FOR_APPROVAL', $6, $7, $8, 'NOT_SENT', current_timestamp + interval '1 day', current_timestamp)`,
-    [id, tenantId, input.patientId || null, input.requestType, input.channel, input.offerSummary?.trim() || null, input.messageDraft.trim(), input.consentStatus],
+     values ($1, $2, $3, $4, $5, $9, $6, $7, $8, $10, current_timestamp + interval '1 day', current_timestamp)`,
+    [id, tenantId, input.patientId || null, input.requestType, input.channel, input.offerSummary?.trim() || null, input.messageDraft.trim(), input.consentStatus, blockedReason ? "BLOCKED_CONSENT" : "READY_FOR_APPROVAL", blockedReason ? `BLOCKED: ${blockedReason}` : "NOT_SENT"],
   );
-  await addAudit(tenantId, "marketing_growth", "REPUTATION_REFERRAL_REQUEST_CREATED", "ReputationReferralRequest", id);
+  await addAudit(tenantId, "marketing_growth", "REPUTATION_REFERRAL_REQUEST_CREATED", "ReputationReferralRequest", id, blockedReason ? "BLOCKED" : "ALLOWED", { consentStatus: input.consentStatus, blockedReason });
 }
 
 export async function updateReferralRequestStatus(id: string, status: string) {
-  const result = await query<{ tenantId: string }>(
+  const result = await query<{ tenantId: string; appliedStatus: string; conversionStatus: string }>(
     `update "ReputationReferralRequest"
-     set "status" = $2,
-       "conversionStatus" = case when $2 = 'APPROVED_TO_SEND' then 'BLOCKED_CONNECTOR_REQUIRED' else "conversionStatus" end,
+     set "status" = case
+         when $2 = 'APPROVED_TO_SEND' and "consentStatus" <> 'VERIFIED' then 'BLOCKED_CONSENT'
+         else $2
+       end,
+       "conversionStatus" = case
+         when $2 = 'APPROVED_TO_SEND' and "consentStatus" <> 'VERIFIED' then 'BLOCKED: consent not verified'
+         when $2 = 'APPROVED_TO_SEND' then 'BLOCKED_CONNECTOR_REQUIRED'
+         else "conversionStatus"
+       end,
        "completedAt" = case when $2 in ('COMPLETED','CLOSED') then current_timestamp else "completedAt" end,
        "updatedAt" = current_timestamp
      where "id" = $1
-     returning "tenantId"`,
+     returning "tenantId", "status" as "appliedStatus", "conversionStatus"`,
     [id, status],
   );
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "REPUTATION_REFERRAL_STATUS_UPDATED", "ReputationReferralRequest", id, "ALLOWED", { status });
+  if (result.rows[0]) {
+    const row = result.rows[0];
+    await addAudit(row.tenantId, "marketing_growth", "REPUTATION_REFERRAL_STATUS_UPDATED", "ReputationReferralRequest", id, row.appliedStatus.startsWith("BLOCKED") ? "BLOCKED" : "ALLOWED", {
+      requestedStatus: status,
+      appliedStatus: row.appliedStatus,
+      conversionStatus: row.conversionStatus,
+    });
+  }
 }
 
 export async function getMarketingOperatingCenter(tenantId = defaultTenantId) {
