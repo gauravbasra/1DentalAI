@@ -8,11 +8,11 @@ export function SiteHeader() {
       <nav className="mx-auto flex min-h-14 max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-3 sm:px-8">
         <Link href="/" className="flex items-center" aria-label="1DentalAI home">
           <Image
-            src="/wordmark-light.svg"
+            src="/brand-wordmark.png"
             alt="1dentalAI.com"
-            width={760}
-            height={180}
-            className="h-10 w-[170px] object-contain sm:w-[204px]"
+            width={1285}
+            height={365}
+            className="h-11 w-[155px] rounded-sm object-cover sm:w-[188px]"
             priority
           />
         </Link>

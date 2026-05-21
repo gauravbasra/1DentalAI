@@ -87,7 +87,7 @@ export const organizationSchema = {
   "@type": "Organization",
   name: siteName,
   url: siteUrl,
-  logo: `${siteUrl}/logo.svg`,
+  logo: `${siteUrl}/brand-profile.png`,
   founder: {
     "@type": "Person",
     name: "Gaurav Basra",

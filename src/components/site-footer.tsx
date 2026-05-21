@@ -9,11 +9,11 @@ export function SiteFooter() {
         <div>
           <div className="flex items-center">
             <Image
-              src="/wordmark-light.svg"
+              src="/brand-wordmark.png"
               alt="1dentalAI.com"
-              width={760}
-              height={180}
-              className="h-11 w-[188px] object-contain"
+              width={1285}
+              height={365}
+              className="h-12 w-[170px] rounded-sm object-cover"
             />
           </div>
           <p className="mt-3 max-w-xl text-sm leading-6 text-neutral-600">
