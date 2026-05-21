@@ -1,4 +1,4 @@
-name: Debug DigitalOcean 1DentalAI
+name: Cleanup QA Data
 
 on:
   workflow_dispatch:
