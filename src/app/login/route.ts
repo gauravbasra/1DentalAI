@@ -24,3 +24,7 @@ export async function POST(request: Request) {
 
   return NextResponse.redirect(publicUrl(result.redirectTo, request));
 }
+
+export async function GET(request: Request) {
+  return NextResponse.redirect(publicUrl("/app", request));
+}
