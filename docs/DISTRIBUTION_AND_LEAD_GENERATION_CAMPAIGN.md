@@ -47,7 +47,7 @@ https://app.1dentalai.com/contact
 
 ## Funnel
 
-1. Awareness: LinkedIn posts, dental group education posts, short videos, paid search, newsletter sponsorships.
+1. Awareness: founder-led posts, dental group education, partner webinars, referral loops, short videos, newsletter/editorial placements, and search/LLM content.
 2. Education: solution pages, blog articles, comparison posts, workflow teardown content.
 3. Conversion: contact form, email reply, LinkedIn DM, partner intro, webinar signup.
 4. Sales motion: 15-minute triage, 45-minute workflow review, pilot scope, implementation plan.
@@ -120,98 +120,59 @@ Best offer:
 
 ## Distribution Channels
 
-### 1. Google Search Ads
+### 1. Organic Search And LLM Discovery
 
-Use Search first. Avoid Display/remarketing until policy review is stable because healthcare-related personalized advertising can be restricted.
+Use the solution pages, blog, sitemap, and `llms.txt` file as the always-on discovery engine. The goal is to become the answer for high-intent dental AI workflow searches without paid traffic.
 
-Campaign structure:
+Priority topic clusters:
 
-- Campaign 1: AI Receptionist
-- Campaign 2: Insurance Verification
-- Campaign 3: Clinical AI Scribe
-- Campaign 4: Dental RCM Automation
-- Campaign 5: DSO Dental AI Platform
-- Campaign 6: Competitor/Alternative Research
+- AI receptionist for dentists
+- dental insurance verification AI
+- clinical AI scribe for dentistry
+- dental RCM automation
+- dental reputation management AI
+- dental practice analytics AI
+- DSO dental AI platform
 
-Initial budget:
+Weekly publishing cadence:
 
-- $150/day for 14 days
-- $40/day AI receptionist
-- $35/day insurance verification
-- $30/day RCM
-- $25/day clinical scribe
-- $20/day DSO platform
+- 1 comparison or workflow blog post
+- 1 founder LinkedIn post that links to a solution page
+- 1 short video walkthrough
+- 1 community-safe educational post
+- 1 partner-ready checklist or scorecard update
 
-Targeting:
+Internal linking plan:
 
-- United States
-- Search only
-- Exact and phrase match first
-- No remarketing lists at launch
-- No patient-health-condition targeting
-- No claims about diagnosis, treatment outcomes, or guaranteed revenue
+- Home links to all core solution pages.
+- Blog posts link to the matching solution page and contact page.
+- Solution pages link to contact and related blog articles.
+- About page links to founder-led posts and workflow review CTA.
 
-Example keywords:
+Organic content angles:
 
-- "AI receptionist for dentists"
-- "dental AI receptionist"
-- "dental insurance verification AI"
-- "dental eligibility automation"
-- "dental RCM automation"
-- "AI dental scribe"
-- "clinical AI scribe dentistry"
-- "dental practice analytics"
-- "DSO dental AI platform"
+- "AI receptionist is not enough. The handoff to scheduling and insurance is the product."
+- "Dental insurance verification should be a queue, not a scavenger hunt."
+- "Clinical AI scribing only works when provider review and chart context are built in."
+- "Why DSOs need an AI operating layer, not another point tool."
+- "The 7 workflows to score before buying dental AI."
 
-Negative keywords:
+Quarterly SEO targets:
 
-- jobs
-- salary
-- school
-- course
-- free software
-- patient
-- tooth pain
-- emergency dentist
-- dental clinic near me
-- insurance plan
-- medicare
-- medicaid
+- 30 educational articles
+- 7 solution pages maintained monthly
+- 20 partner backlinks or mentions
+- 10 podcast/webinar appearances
+- 5 comparison/alternatives pages if legally and factually reviewed
 
-Ad copy:
-
-Headline options:
-
-- AI Receptionist For Dentists
-- Dental Insurance Verification AI
-- Dental RCM Automation
-- Clinical AI Scribe For Dentistry
-- One Dental AI Operating System
-- Built For Practices And DSOs
-- Request A Workflow Review
-
-Descriptions:
-
-- Connect calls, insurance, RCM, clinical AI, reputation, and analytics in one governed dental workflow.
-- See where your front desk, billing, and clinical workflows are leaking time. Request a 1DentalAI review.
-- Built for dental teams that need AI assistance, source evidence, human approval, and accountable work queues.
-
-Landing pages:
-
-- AI receptionist: /solutions/ai-receptionist-for-dentists
-- Insurance: /solutions/dental-insurance-verification-ai
-- Clinical scribe: /solutions/clinical-ai-scribe-dentistry
-- RCM: /solutions/dental-rcm-automation
-- DSO: /solutions/dso-dental-ai-platform
-
-## 2. LinkedIn Organic
+## 2. Founder-Led Social
 
 Cadence:
 
 - 2 founder posts per week
 - 1 product workflow post per week
 - 1 short teardown per week
-- 10 thoughtful comments per day on dental/DSO operations posts
+- 10 thoughtful comments per day on dental, DSO, practice management, and RCM operations posts
 
 Audience:
 
@@ -255,54 +216,71 @@ Sample comment:
 
 > This is exactly where dental AI has to be workflow-first. A missed call or insurance issue is not just a communication problem; it becomes scheduling, billing, patient experience, and revenue cycle work. The handoff is where the value is.
 
-## 3. LinkedIn Paid
+Use the same post ideas on:
 
-Start after organic posts have 2 weeks of signal.
+- LinkedIn
+- X
+- YouTube Shorts
+- Instagram Reels
+- TikTok if the tone stays educational
+- founder newsletter
+- dental Slack/Discord communities where allowed
 
-Campaigns:
+## 3. Referral Program
 
-- Sponsored Content: workflow review
-- Document Ad: Dental AI Readiness Checklist
-- Conversation Ad: DSO workflow review invite
+Referral promise:
 
-Target roles:
+**Introduce a dental practice or DSO to 1DentalAI. If they complete a workflow review, both sides get the Dental AI Readiness Scorecard and implementation roadmap. If they become a customer, the referrer receives a partner/referral reward.**
 
-- Founder
-- Owner
-- Dentist
-- Practice Administrator
-- Office Manager
-- Operations Director
-- VP Operations
-- Revenue Cycle Director
-- COO
-- CIO
-- CTO
+Referral sources:
 
-Company targeting:
+- dentists who know other owners
+- consultants
+- dental CPAs
+- RCM advisors
+- PMS trainers
+- marketing agencies
+- phone system installers
+- existing beta users
+- dental vendors serving the same buyer
 
-- Dental practices
-- Healthcare services
-- DSOs
-- 11-50, 51-200, 201-500, 501-1000 employees
+Referral ask:
 
-Budget:
+> Who do you know running a dental practice or DSO that is currently dealing with missed calls, insurance verification, RCM follow-up, clinical documentation, or review workflows?
 
-- $75/day for 14 days
-- kill ad sets below 0.45% CTR after 1,500 impressions
-- scale winners above 0.8% CTR and sub-$150 qualified lead
+Referral email:
 
-Ad angle:
+Subject:
 
-> Your dental AI strategy should not start with a tool. It should start with the workflows losing the most time.
+> Quick intro to 1DentalAI?
+
+Body:
+
+> Hi [Name],
+>
+> I am looking for warm introductions to dental owners, operators, RCM leaders, and DSO teams who are evaluating AI for phones, insurance, RCM, clinical notes, reputation, or analytics.
+>
+> We are offering a free Dental AI Workflow Review. It maps where work is leaking and which workflow should be automated first.
+>
+> Is there one person you think I should talk to?
+>
+> Gaurav
+
+Reward options:
+
+- referral fee for closed customer
+- co-branded workflow review
+- partner listing
+- free readiness workshop for their audience
+- founder thank-you video or public acknowledgement where appropriate
 
 ## 4. Dental Communities And Groups
 
-Do not spam groups. Use education, admin-approved posts, webinars, or sponsor options.
+Do not spam groups. Use education, admin-approved posts, AMAs, checklists, webinars, and operator-focused discussions.
 
 Priority communities and media:
 
-- Group Dentistry Now: DSO/group practice audience, newsletter, podcast, webinar sponsorship.
+- Group Dentistry Now: DSO/group practice audience, editorial, podcast, newsletter, and webinar opportunities.
 - DEO: dentist entrepreneur and group practice owner audience.
 - Women in DSO: DSO leadership and partner ecosystem.
 - ADSO ecosystem: DSO leadership and industry network.
@@ -349,7 +327,7 @@ Educational group post:
 >
 > Happy to share it with any owner or manager who wants to benchmark their practice.
 
-## 5. Email Outreach
+## 5. Warm Email And Relationship Outreach
 
 Compliance rules:
 
@@ -368,7 +346,7 @@ List sources:
 - LinkedIn connections
 - partner introductions
 - existing professional network
-- purchased B2B lists only if provenance and opt-out compliance are clear
+- warm referrals from dentists, partners, consultants, vendors, and professional networks
 
 Email sequence:
 
@@ -459,6 +437,10 @@ Targets:
 - dental marketing agencies
 - phone system vendors
 - payer/eligibility workflow consultants
+- dental podcast hosts
+- dental YouTube educators
+- dental newsletter operators
+- dental office manager educators
 
 Offer:
 
@@ -466,12 +448,30 @@ Offer:
 - referral fee or partner rev share
 - webinar for their clients
 - free workflow review for their top clients
+- guest expert session for their audience
+- joint "Dental AI Workflow Map" teardown
+- private office-hours session
 
 Partner pitch:
 
 > You already see the operational bottlenecks inside dental practices. 1DentalAI gives those teams a workflow map across phones, insurance, RCM, clinical AI, reputation, and analytics.
 >
 > I would like to run a co-branded Dental AI Readiness Review for your clients. You bring the audience; we bring the framework and workflow mapping.
+
+Partner tiers:
+
+- Referral partner: introduces qualified practices and DSOs.
+- Education partner: hosts webinars, office hours, or newsletter content.
+- Implementation partner: helps practices adopt workflow changes after review.
+- Strategic partner: PMS, phone, RCM, marketing, analytics, or consulting company with shared customers.
+
+Partner weekly target:
+
+- 25 partner prospects identified
+- 10 personalized outreach messages
+- 5 conversations booked
+- 2 co-marketing opportunities scheduled
+- 1 referral source activated
 
 ## 7. Webinar Campaign
 
@@ -496,9 +496,11 @@ Promotion:
 
 - LinkedIn founder posts
 - dental group admin-approved post
-- newsletter sponsorship
+- partner newsletters
 - partner email
-- Google search sitelink
+- consultant communities
+- direct founder invites
+- replay clips posted as short videos
 
 ## 8. Viral Loop
 
@@ -532,35 +534,37 @@ Share prompt:
 Week 1:
 
 - publish 7 solution pages and submit sitemap
-- launch Google Search campaigns
 - post 2 LinkedIn founder posts
 - send 100 warm emails
 - contact 10 community admins
 - contact 10 dental consultants
+- ask 25 people for one qualified referral
 
 Week 2:
 
 - publish "Dental AI Workflow Map" blog post
-- launch LinkedIn organic comment routine
+- run founder-led comment routine
 - send email follow-up 1
 - book 2 partner webinar conversations
-- test 3 Google ad angles
+- publish first short workflow teardown video
+- secure 3 partner/referral introductions
 
 Week 3:
 
 - host first live webinar
-- launch LinkedIn sponsored content test
 - post 3 short workflow videos
 - send email follow-up 2
 - publish readiness scorecard landing section
+- run 10 one-to-one referral asks
+- book 3 consultant or vendor partnership calls
 
 Week 4:
 
-- retarget site visitors only if platform policy permits
-- double budget on winning Google campaign
 - publish case-style teardown without naming a customer
 - send breakup email
-- review CPL, booked calls, and close rate
+- publish webinar replay clips
+- ask all workflow review participants for one intro
+- review lead sources, booked calls, partner intros, and close rate
 
 ## 10. KPIs
 
@@ -568,7 +572,7 @@ Traffic:
 
 - 1,500 qualified visits in 30 days
 - 35%+ from search and direct
-- 20%+ from LinkedIn/social/community
+- 30%+ from founder social, partner, referral, and community channels
 
 Conversion:
 
@@ -577,12 +581,14 @@ Conversion:
 - 15 workflow review calls booked
 - 5 pilot discussions
 
-Paid:
+Organic distribution:
 
-- Google Search CTR above 4%
-- LinkedIn CTR above 0.45%
-- qualified lead below $150 initially
-- booked call below $450 initially
+- 25 partner conversations in 30 days
+- 10 warm referral introductions
+- 5 community-approved posts or sessions
+- 4 founder posts per week
+- 3 short videos per week
+- 1 webinar or live session per month
 
 Sales:
 
@@ -602,9 +608,10 @@ Use UTM standards:
 
 Examples:
 
-- `utm_source=google&utm_medium=cpc&utm_campaign=ai_receptionist&utm_term=ai_receptionist_for_dentists`
 - `utm_source=linkedin&utm_medium=organic&utm_campaign=workflow_review&utm_content=founder_post_handoffs`
 - `utm_source=partner&utm_medium=email&utm_campaign=ai_readiness_webinar&utm_content=consultant_partner`
+- `utm_source=referral&utm_medium=intro&utm_campaign=workflow_review&utm_content=dental_consultant`
+- `utm_source=community&utm_medium=post&utm_campaign=ai_readiness_score&utm_content=admin_approved_group_post`
 
 Lead fields to capture:
 
@@ -628,6 +635,7 @@ Do:
 - avoid PHI in forms, emails, ads, and demos
 - get admin permission before posting in private groups
 - comply with CAN-SPAM for every commercial email
+- disclose partner/referral relationships where required
 
 Do not:
 
@@ -637,11 +645,12 @@ Do not:
 - use patient health condition targeting
 - imply the ad knows someone has a medical/dental condition
 - use before/after clinical claims
+- pretend to be a neutral community member while promoting the product
+- automate spam DMs to dentists or office managers
 
 ## 13. Immediate Execution Checklist
 
 - Submit sitemap in Google Search Console.
-- Add Google Search campaigns for the five high-intent solution pages.
 - Add UTM capture to the lead form.
 - Create "Dental AI Readiness Score" landing section.
 - Build a one-page PDF checklist from this campaign.
@@ -650,3 +659,6 @@ Do not:
 - Pitch 10 dental consultants for co-branded workflow reviews.
 - Post the founder LinkedIn launch post.
 - Book the first webinar date.
+- Ask 25 warm contacts for one qualified intro.
+- Build a referral partner one-pager.
+- Create a partner tracker with owner, source, next step, and referral status.
