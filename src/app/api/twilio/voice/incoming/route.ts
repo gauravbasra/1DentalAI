@@ -1,11 +1,11 @@
-import { formPayload, ingestIncomingVoice, publicWebhookUrl, twiml, xmlEscape } from "@/lib/twilio-webhooks";
+import { formPayload, ingestIncomingVoice, twiml, xmlEscape } from "@/lib/twilio-webhooks";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   const payload = await formPayload(request);
   await ingestIncomingVoice(payload);
-  const origin = new URL(publicWebhookUrl(request)).origin;
+  const origin = process.env.ONE_DENTAL_PUBLIC_APP_URL || "https://app.1dentalai.com";
   const recordingUrl = `${origin}/api/twilio/voice/recording`;
   const transcriptionUrl = `${origin}/api/twilio/voice/transcription`;
   return twiml(`<?xml version="1.0" encoding="UTF-8"?>
