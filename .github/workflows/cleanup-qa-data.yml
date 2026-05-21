@@ -22,15 +22,10 @@ jobs:
           ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" <<EOF
             set -e
             cd "${DEPLOY_PATH}"
-            docker compose -f docker-compose.yml -f docker-compose.public.yml exec -T postgres psql -U dentalai_app -d dentalai_prod <<'SQL'
-              delete from "PmsProfileChangeRequest" where "proposedValue" ilike '%QA validation%';
-              delete from "PmsFormResponseAnswer" where "answerValue" ilike '%QA validation%';
-              delete from "PmsFormResponse"
-                where "assignmentId" = 'formassign_sample_010_medical'
-                  and "id" not in (select "responseId" from "PmsFormResponseAnswer");
-              delete from "PmsAllergy" where "allergen" ilike '%QA validation%';
-              update "PmsFormAssignment"
-                set "status" = 'ASSIGNED', "completedAt" = null, "updatedAt" = current_timestamp
-                where "id" = 'formassign_sample_010_medical';
-SQL
+            docker compose -f docker-compose.yml -f docker-compose.public.yml exec -T postgres psql -U dentalai_app -d dentalai_prod -v ON_ERROR_STOP=1 \
+              -c "delete from \"PmsProfileChangeRequest\" where \"proposedValue\" ilike '%QA validation%';" \
+              -c "delete from \"PmsFormResponseAnswer\" where \"answerValue\" ilike '%QA validation%';" \
+              -c "delete from \"PmsFormResponse\" where \"assignmentId\" = 'formassign_sample_010_medical' and \"id\" not in (select \"responseId\" from \"PmsFormResponseAnswer\");" \
+              -c "delete from \"PmsAllergy\" where \"allergen\" ilike '%QA validation%';" \
+              -c "update \"PmsFormAssignment\" set \"status\" = 'ASSIGNED', \"completedAt\" = null, \"updatedAt\" = current_timestamp where \"id\" = 'formassign_sample_010_medical';"
           EOF
