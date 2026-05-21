@@ -7,9 +7,10 @@
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p ${PORT:-3001}",
     "lint": "eslint",
-    "check": "npm run lint && npm run build",
+    "check": "npm run test:phase0 && npm run lint && npm run build",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
+    "test:phase0": "node scripts/validate-phase0-depth.mjs",
     "test:workbenches": "node scripts/validate-phase2-workbenches.mjs",
     "test:pms": "node scripts/validate-phase3-pms.mjs"
   },

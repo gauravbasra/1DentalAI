@@ -13,6 +13,11 @@ type CampaignRow = {
   status: string;
   audienceDefinition: string;
   channelMix: string[];
+  sourceAudience: string;
+  channelPlan: unknown;
+  connectorReadiness: unknown;
+  attribution: unknown;
+  blockedReason: string | null;
   estimatedAudience: number;
   attributedBookings: number;
   attributedProductionCents: number;
@@ -27,6 +32,11 @@ type LandingPageRow = {
   status: string;
   offerSummary: string | null;
   primaryCta: string;
+  trackingPlan: unknown;
+  formMapping: unknown;
+  bookingRouting: string | null;
+  attribution: unknown;
+  connectorStatus: string;
 };
 
 type AssetRow = {
@@ -37,6 +47,27 @@ type AssetRow = {
   generatedDraft: string;
   approvalStatus: string;
   complianceNotes: string | null;
+  brief: string | null;
+  sourceData: unknown;
+  reviewerRoleKey: string | null;
+  revisionState: string;
+  useTarget: string | null;
+  approvalNotes: string | null;
+};
+
+type LocalSeoTaskRow = {
+  id: string;
+  title: string;
+  taskType: string;
+  status: string;
+  priority: string;
+  platform: string | null;
+  serviceLine: string | null;
+  issueSummary: string;
+  nextAction: string;
+  connectorStatus: string;
+  dueAt: string | null;
+  locationName: string | null;
 };
 
 async function createAction(formData: FormData) {
@@ -67,6 +98,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
   const campaigns = center.campaigns as CampaignRow[];
   const landingPages = center.landingPages as LandingPageRow[];
   const assets = center.assets as AssetRow[];
+  const localSeoTasks = center.localSeoTasks as LocalSeoTaskRow[];
 
   return (
     <FoundationShell active="/app/marketing" roleKey={role.key}>
@@ -77,11 +109,13 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/marketing" />
 
-      <section className="grid gap-3 md:grid-cols-4">
+      <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Metric label="Campaigns" value={metrics.campaigns} />
         <Metric label="Landing pages" value={metrics.landingPages} />
         <Metric label="AI drafts" value={metrics.aiDrafts} />
         <Metric label="Attributed production" value={<Money cents={Number(metrics.attributedProduction)} />} />
+        <Metric label="Local SEO open" value={metrics.localSeoOpen} />
+        <Metric label="Staged plans" value={metrics.stagedChannels} />
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-[0.7fr_1.3fr]">
@@ -89,7 +123,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
           <form action={createAction} className="grid gap-3">
             <Input name="name" label="Campaign name" required />
             <div className="grid gap-3 sm:grid-cols-2">
-              <Select name="campaignType" label="Campaign type" options={["RECALL_REACTIVATION", "UNSCHEDULED_TREATMENT", "NEW_PATIENT", "IMPLANTS", "WHITENING", "MEMBERSHIP", "REFERRAL_GROWTH", "LOCAL_SEO", "AI_SEO"]} />
+              <Select name="campaignType" label="Campaign type" options={["RECALL_REACTIVATION", "UNSCHEDULED_TREATMENT", "INACTIVE_PATIENTS", "FAILED_APPOINTMENTS", "BALANCE_FOLLOW_UP", "NEW_PATIENT", "IMPLANTS", "WHITENING", "CLEAR_ALIGNERS", "MEMBERSHIP", "REFERRAL_GROWTH", "LOCAL_SEO", "AI_SEO"]} />
               <label className="grid gap-1 text-xs font-semibold text-neutral-700">Landing page<select name="landingPageId" className="rounded-md border border-neutral-300 px-3 py-2 text-sm"><option value="">No landing page</option>{landingPages.map((page) => <option key={page.id} value={page.id}>{page.title}</option>)}</select></label>
             </div>
             <Textarea name="audienceDefinition" label="Audience definition" required />
@@ -108,7 +142,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
                   <div>
                     <p className="text-sm font-semibold text-neutral-950">{campaign.name}</p>
                     <p className="mt-1 text-xs text-neutral-600">{String(campaign.campaignType).replaceAll("_", " ")} · {campaign.channelMix?.join(", ")}</p>
-                    <p className="mt-1 text-xs text-neutral-600">Audience: {campaign.audienceDefinition}</p>
+                    <p className="mt-1 text-xs text-neutral-600">Audience: {campaign.sourceAudience} · {campaign.audienceDefinition}</p>
                   </div>
                   <StatusFor value={campaign.status} />
                 </div>
@@ -118,6 +152,12 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
                   <Small label="Production" value={<Money cents={Number(campaign.attributedProductionCents ?? 0)} />} />
                   <Small label="Compliance" value={String(campaign.complianceStatus).replaceAll("_", " ")} />
                 </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-3">
+                  <Small label="Channel plan" value={jsonSummary(campaign.channelPlan)} />
+                  <Small label="Connectors" value={jsonSummary(campaign.connectorReadiness)} />
+                  <Small label="Attribution" value={jsonSummary(campaign.attribution)} />
+                </div>
+                {campaign.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{campaign.blockedReason}</p> : null}
                 <div className="mt-3 grid gap-2 md:grid-cols-3">
                   <StatusButton target="campaign" id={campaign.id} status="READY_FOR_APPROVAL" label="Ready review" />
                   <StatusButton target="campaign" id={campaign.id} status="APPROVED_STAGED" label="Approve staged" />
@@ -137,6 +177,13 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
                 <div className="flex items-start justify-between gap-3"><p className="text-sm font-semibold text-neutral-950">{page.title}</p><StatusFor value={page.status} /></div>
                 <p className="mt-1 text-xs text-neutral-600">/{page.slug} · {page.serviceLine} · CTA: {page.primaryCta}</p>
                 <p className="mt-2 text-sm leading-6 text-neutral-700">{page.offerSummary}</p>
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  <Small label="Connector" value={clean(page.connectorStatus)} />
+                  <Small label="Tracking" value={jsonSummary(page.trackingPlan)} />
+                  <Small label="Form mapping" value={jsonSummary(page.formMapping)} />
+                  <Small label="Attribution" value={jsonSummary(page.attribution)} />
+                </div>
+                {page.bookingRouting ? <p className="mt-2 text-xs leading-5 text-neutral-600">{page.bookingRouting}</p> : null}
                 <div className="mt-3 grid gap-2 md:grid-cols-2">
                   <StatusButton target="landingPage" id={page.id} status="READY_FOR_APPROVAL" label="Ready review" />
                   <StatusButton target="landingPage" id={page.id} status="APPROVED_STAGED" label="Approve staged" />
@@ -152,12 +199,44 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
               <div key={asset.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
                 <div className="flex items-start justify-between gap-3"><p className="text-sm font-semibold text-neutral-950">{asset.title}</p><StatusFor value={asset.approvalStatus} /></div>
                 <p className="mt-1 text-xs text-neutral-600">{asset.sourceModule} · {String(asset.assetType).replaceAll("_", " ")}</p>
+                <div className="mt-2 grid gap-2 md:grid-cols-3">
+                  <Small label="Reviewer" value={asset.reviewerRoleKey ?? "unassigned"} />
+                  <Small label="Revision" value={clean(asset.revisionState)} />
+                  <Small label="Use target" value={asset.useTarget ?? asset.assetType} />
+                </div>
+                {asset.brief ? <p className="mt-2 text-xs leading-5 text-neutral-600">Brief: {asset.brief}</p> : null}
                 <p className="mt-2 rounded-md border border-cyan-100 bg-white p-2 text-sm leading-6 text-neutral-700">{asset.generatedDraft}</p>
-                {asset.complianceNotes ? <p className="mt-2 text-xs text-neutral-500">{asset.complianceNotes}</p> : null}
+                <p className="mt-2 text-xs text-neutral-500">Source data: {jsonSummary(asset.sourceData)}</p>
+                {asset.approvalNotes ?? asset.complianceNotes ? <p className="mt-2 text-xs text-neutral-500">{asset.approvalNotes ?? asset.complianceNotes}</p> : null}
                 <div className="mt-3 grid gap-2 md:grid-cols-2">
                   <StatusButton target="asset" id={asset.id} status="APPROVED" label="Approve draft" />
                   <StatusButton target="asset" id={asset.id} status="REVISION_REQUIRED" label="Needs revision" />
                 </div>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </section>
+
+      <section className="mt-4">
+        <PmsCard title="Local SEO task queue" eyebrow="Listings, GBP-style posts, services, citations, rankings">
+          <div className="grid gap-3 lg:grid-cols-3">
+            {localSeoTasks.map((task) => (
+              <div key={task.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{task.title}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{clean(task.taskType)} · {task.platform ?? "Website"} · {task.locationName ?? "Practice"}</p>
+                  </div>
+                  <StatusFor value={task.status} />
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <Small label="Priority" value={clean(task.priority)} />
+                  <Small label="Connector" value={clean(task.connectorStatus)} />
+                </div>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">{task.issueSummary}</p>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{task.nextAction}</p>
+                <p className="mt-1 text-xs text-neutral-500">Due {formatDate(task.dueAt)}</p>
               </div>
             ))}
           </div>
@@ -189,4 +268,22 @@ function Select({ name, label, options }: { name: string; label: string; options
 
 function Textarea({ name, label, required = false }: { name: string; label: string; required?: boolean }) {
   return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<textarea name={name} required={required} rows={3} className="rounded-md border border-neutral-300 px-3 py-2 text-sm" /></label>;
+}
+
+function clean(value: string) {
+  return value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "not scheduled";
+  return new Date(value).toLocaleString();
+}
+
+function jsonSummary(value: unknown) {
+  if (!value) return "none";
+  if (Array.isArray(value)) return value.join(", ");
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).map(([key, item]) => `${clean(key)}: ${Array.isArray(item) ? item.join(", ") : typeof item === "object" && item !== null ? JSON.stringify(item) : String(item)}`).join("; ");
+  }
+  return String(value);
 }

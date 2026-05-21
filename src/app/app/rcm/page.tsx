@@ -31,6 +31,9 @@ type RcmItemRow = {
   chartNumber: string | null;
   payerName: string | null;
   blockerReason: string | null;
+  connectorStatus: string;
+  proofRequired: unknown;
+  approvalPolicy: unknown;
   nextAction: string;
 };
 
@@ -100,6 +103,10 @@ type PriorAuthRow = {
   requestedCents: number;
   status: string;
   requiredEvidence: string[] | null;
+  evidenceChecklist: unknown;
+  submissionReadiness: unknown;
+  connectorStatus: string;
+  blockedReason: string | null;
   expiresAt: string | null;
   nextAction: string;
 };
@@ -116,7 +123,11 @@ type DenialRow = {
   deniedCents: number;
   appealDeadline: string | null;
   status: string;
+  appealPacketStatus: string;
   requiredEvidence: string[] | null;
+  submissionReadiness: unknown;
+  connectorStatus: string;
+  blockedReason: string | null;
   nextAction: string;
 };
 
@@ -134,6 +145,9 @@ type EraRow = {
   adjustmentCents: number;
   status: string;
   exceptionReason: string | null;
+  postingReadiness: unknown;
+  connectorStatus: string;
+  blockedReason: string | null;
 };
 
 type PayerFollowUpRow = {
@@ -148,6 +162,9 @@ type PayerFollowUpRow = {
   status: string;
   dueAt: string | null;
   contactOutcome: string | null;
+  connectorStatus: string;
+  blockedReason: string | null;
+  proofRequired: unknown;
   nextAction: string;
 };
 
@@ -165,6 +182,9 @@ type RevenueFindingRow = {
   actualCents: number;
   varianceCents: number;
   rootCause: string | null;
+  recoveryStatus: string;
+  connectorStatus: string;
+  proofRequired: unknown;
   nextAction: string;
 };
 
@@ -323,7 +343,7 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
   const payments = center.payments as PaymentRow[];
   const metrics = center.metrics;
   const openClaimDollars = claims.reduce((sum, claim) => sum + Number(claim.billedCents ?? 0) - Number(claim.paidCents ?? 0), 0);
-  const eraReady = eras.filter((era) => era.status === "READY_TO_POST");
+  const eraReady = eras.filter((era) => ["READY_TO_POST", "NEEDS_REVIEW"].includes(era.status));
 
   return (
     <FoundationShell active="/app/rcm" roleKey={role.key}>
@@ -406,9 +426,14 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
           <div className="grid gap-3 lg:grid-cols-2">
             {priorAuths.map((auth) => (
               <WorkCard key={auth.id} title={auth.treatmentPlanName ?? "Prior authorization"} status={auth.status} patient={`${auth.lastName}, ${auth.firstName} · ${auth.chartNumber}`} payer={auth.payerName} amount={<Money cents={Number(auth.requestedCents)} />} body={auth.nextAction} evidence={auth.requiredEvidence}>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <MiniMetric label="Connector" value={clean(auth.connectorStatus)} />
+                  <MiniMetric label="Readiness" value={jsonSummary(auth.submissionReadiness)} />
+                </div>
+                {auth.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{auth.blockedReason}</p> : null}
+                <div className="mt-3 grid grid-cols-2 gap-2">
                   <PriorAuthStatusButton id={auth.id} status="READY_FOR_REVIEW" label="Ready for review" />
-                  <PriorAuthStatusButton id={auth.id} status="SUBMITTED" label="Mark submitted" />
+                  <PriorAuthStatusButton id={auth.id} status="APPROVED_STAGED" label="Stage for payer" />
                 </div>
               </WorkCard>
             ))}
@@ -457,9 +482,15 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
           <div className="grid gap-3">
             {denials.map((denial) => (
               <WorkCard key={denial.id} title={`${denial.claimNumber ?? denial.id} · ${denial.denialCode ?? "denial"}`} status={denial.status} patient={`${denial.lastName}, ${denial.firstName} · ${denial.chartNumber}`} payer={denial.payerName} amount={<Money cents={Number(denial.deniedCents)} />} body={`${denial.denialReason} ${denial.nextAction}`} evidence={denial.requiredEvidence}>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Appeal packet" value={clean(denial.appealPacketStatus)} />
+                  <MiniMetric label="Connector" value={clean(denial.connectorStatus)} />
+                  <MiniMetric label="Readiness" value={jsonSummary(denial.submissionReadiness)} />
+                </div>
+                {denial.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{denial.blockedReason}</p> : null}
+                <div className="mt-3 grid grid-cols-2 gap-2">
                   <DenialStatusButton id={denial.id} status="APPEAL_READY" label="Appeal ready" />
-                  <DenialStatusButton id={denial.id} status="SUBMITTED" label="Mark submitted" />
+                  <DenialStatusButton id={denial.id} status="APPROVED_STAGED" label="Stage appeal" />
                 </div>
               </WorkCard>
             ))}
@@ -477,7 +508,12 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
           <div className="grid gap-3">
             {payerFollowUps.map((followUp) => (
               <WorkCard key={followUp.id} title={followUp.reason} status={followUp.status} patient={followUp.lastName ? `${followUp.lastName}, ${followUp.firstName} · ${followUp.chartNumber}` : "Practice-level payer work"} payer={`${followUp.payerName} · ${followUp.channel}`} body={followUp.nextAction}>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <MiniMetric label="Connector" value={clean(followUp.connectorStatus)} />
+                  <MiniMetric label="Proof" value={jsonSummary(followUp.proofRequired)} />
+                </div>
+                {followUp.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{followUp.blockedReason}</p> : null}
+                <div className="mt-3 grid grid-cols-2 gap-2">
                   <PayerFollowUpStatusButton id={followUp.id} status="WAITING_ON_PAYER" label="Contacted payer" outcome="Payer contacted; waiting on response." />
                   <PayerFollowUpStatusButton id={followUp.id} status="RESOLVED" label="Resolved" outcome="Payer follow-up resolved." />
                 </div>
@@ -496,8 +532,11 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
                   <MiniMetric label="Allowed" value={<Money cents={Number(era.allowedCents)} />} />
                   <MiniMetric label="Paid" value={<Money cents={Number(era.paidCents)} />} />
                   <MiniMetric label="Patient due" value={<Money cents={Number(era.patientDueCents)} />} />
-                  <form action={eraPostAction}><input type="hidden" name="id" value={era.id} /><button disabled={era.status === "POSTED"} className="h-full w-full rounded-md border border-neutral-300 px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 disabled:bg-neutral-100 disabled:text-neutral-400">Post ERA</button></form>
+                  <MiniMetric label="Connector" value={clean(era.connectorStatus)} />
                 </div>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">Readiness: {jsonSummary(era.postingReadiness)}</p>
+                {era.blockedReason ? <p className="mt-1 text-xs leading-5 text-red-700">{era.blockedReason}</p> : null}
+                <form action={eraPostAction} className="mt-3"><input type="hidden" name="id" value={era.id} /><button disabled={era.status === "POSTED"} className="w-full rounded-md border border-neutral-300 px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 disabled:bg-neutral-100 disabled:text-neutral-400">Post to PMS ledger after review</button></form>
               </WorkCard>
             ))}
           </div>
@@ -529,9 +568,14 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
           <div className="grid gap-3 lg:grid-cols-2">
             {revenueFindings.map((finding) => (
               <WorkCard key={finding.id} title={finding.findingType.replaceAll("_", " ")} status={finding.status} patient={finding.lastName ? `${finding.lastName}, ${finding.firstName} · ${finding.chartNumber}` : "Practice finding"} payer={finding.payerName ?? "No payer"} amount={<Money cents={Math.abs(Number(finding.varianceCents))} />} body={`${finding.rootCause ?? ""} ${finding.nextAction}`}>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Recovery" value={clean(finding.recoveryStatus)} />
+                  <MiniMetric label="Connector" value={clean(finding.connectorStatus)} />
+                  <MiniMetric label="Proof" value={jsonSummary(finding.proofRequired)} />
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
                   <RevenueStatusButton id={finding.id} status="IN_REVIEW" label="In review" />
-                  <RevenueStatusButton id={finding.id} status="RECOVERED" label="Recovered" />
+                  <RevenueStatusButton id={finding.id} status="RECOVERY_STAGED" label="Stage recovery" />
                 </div>
               </WorkCard>
             ))}
@@ -555,7 +599,12 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
           <div className="grid gap-3">
             {items.map((item) => (
               <WorkCard key={item.id} title={item.workType.replaceAll("_", " ")} status={item.status} patient={item.lastName ? `${item.lastName}, ${item.firstName} · ${item.chartNumber}` : "Practice-level item"} payer={item.payerName ?? "No payer"} amount={<Money cents={Number(item.amountCents ?? 0)} />} body={`${item.blockerReason ?? ""} ${item.nextAction}`}>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <MiniMetric label="Connector" value={clean(item.connectorStatus)} />
+                  <MiniMetric label="Proof" value={jsonSummary(item.proofRequired)} />
+                  <MiniMetric label="Policy" value={jsonSummary(item.approvalPolicy)} />
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
                   <RcmItemStatusButton id={item.id} status="READY_FOR_REVIEW" label="Review" />
                   <RcmItemStatusButton id={item.id} status="APPROVED_STAGED" label="Stage" />
                   <RcmItemStatusButton id={item.id} status="COMPLETED" label="Done" />
@@ -569,9 +618,17 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
   );
 }
 
-function jsonSummary(value: Record<string, string> | null) {
+function clean(value: string) {
+  return value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function jsonSummary(value: unknown) {
   if (!value || !Object.keys(value).length) return "not recorded";
-  return Object.entries(value).map(([key, val]) => `${key}: ${String(val)}`).join("; ");
+  if (Array.isArray(value)) return value.join(", ");
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).map(([key, val]) => `${clean(key)}: ${Array.isArray(val) ? val.join(", ") : typeof val === "object" && val !== null ? JSON.stringify(val) : String(val)}`).join("; ");
+  }
+  return String(value);
 }
 
 function WorkCard({ title, status, patient, payer, amount, body, evidence, children }: { title: string; status: string; patient: string; payer?: string; amount?: React.ReactNode; body: string; evidence?: string[] | null; children?: React.ReactNode }) {

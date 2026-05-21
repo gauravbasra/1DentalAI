@@ -9,6 +9,30 @@ async function addAudit(tenantId: string, actorRole: string, eventType: string, 
   );
 }
 
+const verifiedConsentStatuses = new Set(["VERIFIED", "CONSENTED", "OPTED_IN", "ACTIVE"]);
+const allowedReviewStatuses = new Set(["READY_FOR_APPROVAL", "APPROVED_STAGED", "BLOCKED_SERVICE_RECOVERY", "BLOCKED_ELIGIBILITY", "COMPLETED"]);
+const allowedResponseStatuses = new Set(["NEEDS_REVIEW", "APPROVED", "APPROVED_STAGED", "REVISION_REQUIRED"]);
+const allowedListingStatuses = new Set(["CONNECTED_REVIEW_SYNC", "DATA_MISMATCH", "NEEDS_CONNECTION", "MANUAL_REVIEW", "SYNC_ERROR"]);
+const allowedReferralStatuses = new Set(["READY_FOR_APPROVAL", "APPROVED_TO_SEND", "BLOCKED_NEEDS_REVIEW", "BLOCKED_CONSENT", "COMPLETED", "CLOSED"]);
+const allowedMarketingStatuses = new Set(["DRAFT", "READY_FOR_APPROVAL", "APPROVED_STAGED", "ACTIVE_INTERNAL", "BLOCKED_CONNECTOR_REQUIRED", "REVISION_REQUIRED", "APPROVED"]);
+const allowedRcmWorkStatuses = new Set(["OPEN", "READY_FOR_REVIEW", "APPROVED_STAGED", "BLOCKED_CONNECTOR_REQUIRED", "MANUAL_PROOF_REQUIRED", "COMPLETED", "CLOSED"]);
+const allowedPriorAuthStatuses = new Set(["EVIDENCE_NEEDED", "READY_FOR_REVIEW", "APPROVED_STAGED", "BLOCKED_CONNECTOR_REQUIRED", "MANUAL_PROOF_REQUIRED", "APPROVED", "CLOSED"]);
+const allowedDenialStatuses = new Set(["OPEN", "APPEAL_READY", "APPROVED_STAGED", "BLOCKED_CONNECTOR_REQUIRED", "MANUAL_PROOF_REQUIRED", "WON", "CLOSED"]);
+const allowedPayerFollowUpStatuses = new Set(["OPEN", "WAITING_ON_PAYER", "MANUAL_PROOF_REQUIRED", "RESOLVED", "CLOSED"]);
+const allowedRevenueStatuses = new Set(["OPEN", "IN_REVIEW", "RECOVERY_STAGED", "MANUAL_PROOF_REQUIRED", "RECOVERED", "CLOSED"]);
+
+function requireAllowed(value: string, allowed: Set<string>, fallback: string) {
+  return allowed.has(value) ? value : fallback;
+}
+
+function parseList(value?: string) {
+  return value?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
+}
+
+function isConsentVerified(value?: string | null) {
+  return verifiedConsentStatuses.has(String(value ?? "").toUpperCase());
+}
+
 export async function getRcmOperatingCenter(tenantId = defaultTenantId) {
   const [items, claims, benefits, priorAuths, denials, eras, payerFollowUps, revenueFindings, treatmentPlans, ledger, payments, metrics] = await Promise.all([
     query(
@@ -58,7 +82,7 @@ export async function getRcmOperatingCenter(tenantId = defaultTenantId) {
        join "PmsPatient" p on p."id" = pa."patientId"
        left join "PmsTreatmentPlan" tp on tp."id" = pa."treatmentPlanId"
        where pa."tenantId" = $1
-       order by case pa."status" when 'EVIDENCE_NEEDED' then 0 when 'READY_FOR_REVIEW' then 1 when 'SUBMITTED' then 2 else 3 end, pa."expiresAt" asc nulls last`,
+       order by case pa."status" when 'EVIDENCE_NEEDED' then 0 when 'READY_FOR_REVIEW' then 1 when 'APPROVED_STAGED' then 2 when 'BLOCKED_CONNECTOR_REQUIRED' then 3 else 4 end, pa."expiresAt" asc nulls last`,
       [tenantId],
     ),
     query(
@@ -67,7 +91,7 @@ export async function getRcmOperatingCenter(tenantId = defaultTenantId) {
        join "PmsPatient" p on p."id" = d."patientId"
        join "PmsClaim" c on c."id" = d."claimId"
        where d."tenantId" = $1
-       order by case d."status" when 'OPEN' then 0 when 'APPEAL_READY' then 1 when 'SUBMITTED' then 2 else 3 end, d."appealDeadline" asc nulls last`,
+       order by case d."status" when 'OPEN' then 0 when 'APPEAL_READY' then 1 when 'APPROVED_STAGED' then 2 when 'BLOCKED_CONNECTOR_REQUIRED' then 3 else 4 end, d."appealDeadline" asc nulls last`,
       [tenantId],
     ),
     query(
@@ -175,24 +199,44 @@ export async function createRcmWorkItem(input: {
   const id = newId("rcm");
   const result = await query(
     `insert into "RcmWorkItem"
-       ("id", "tenantId", "patientId", "claimId", "workType", "stage", "priority", "payerName", "amountCents", "blockerReason", "nextAction", "dueAt", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9::int, 0), $10, $11, $12::timestamp, current_timestamp)
+       ("id", "tenantId", "patientId", "claimId", "workType", "stage", "priority", "payerName", "amountCents", "blockerReason", "connectorStatus", "proofRequired", "approvalPolicy", "nextAction", "dueAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9::int, 0), $10, 'CONNECTOR_REQUIRED', $13::jsonb, $14::jsonb, $11, $12::timestamp, current_timestamp)
      returning *`,
-    [id, tenantId, input.patientId || null, input.claimId || null, input.workType, input.stage, input.priority, input.payerName || null, input.amountCents ?? 0, input.blockerReason || null, input.nextAction, input.dueAt || null],
+    [
+      id,
+      tenantId,
+      input.patientId || null,
+      input.claimId || null,
+      input.workType,
+      input.stage,
+      input.priority,
+      input.payerName || null,
+      input.amountCents ?? 0,
+      input.blockerReason || null,
+      input.nextAction,
+      input.dueAt || null,
+      JSON.stringify(["payer portal reference", "clearinghouse acknowledgement", "manual staff attestation when no connector is active"]),
+      JSON.stringify({ requiresHumanApproval: true, externalSubmissionBlockedWithoutConnector: true, writesBackToPms: true }),
+    ],
   );
   await addAudit(tenantId, "billing_rcm", "RCM_WORK_ITEM_CREATED", "RcmWorkItem", id);
   return result.rows[0];
 }
 
 export async function updateRcmWorkItemStatus(id: string, status: string, actorRole = "billing_rcm") {
+  const nextStatus = requireAllowed(status, allowedRcmWorkStatuses, "READY_FOR_REVIEW");
   const result = await query<{ id: string; tenantId: string }>(
     `update "RcmWorkItem"
-     set "status" = $2, "completedAt" = case when $2 in ('COMPLETED','CLOSED') then current_timestamp else "completedAt" end, "updatedAt" = current_timestamp
+     set "status" = $2,
+       "connectorStatus" = case when $2 = 'APPROVED_STAGED' then 'CONNECTOR_REQUIRED' else "connectorStatus" end,
+       "blockerReason" = case when $2 = 'APPROVED_STAGED' then coalesce("blockerReason", 'External payer/payment action is staged only; connector acknowledgement or manual proof is required before completion.') else "blockerReason" end,
+       "completedAt" = case when $2 in ('COMPLETED','CLOSED') then current_timestamp else "completedAt" end,
+       "updatedAt" = current_timestamp
      where "id" = $1
      returning "id", "tenantId"`,
-    [id, status],
+    [id, nextStatus],
   );
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_WORK_ITEM_STATUS_UPDATED", "RcmWorkItem", id, "ALLOWED", { status });
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_WORK_ITEM_STATUS_UPDATED", "RcmWorkItem", id, "ALLOWED", { requestedStatus: status, appliedStatus: nextStatus });
 }
 
 export async function createPriorAuthorization(input: {
@@ -210,8 +254,8 @@ export async function createPriorAuthorization(input: {
   const id = newId("pa");
   const result = await query(
     `insert into "RcmPriorAuthorization"
-       ("id", "tenantId", "patientId", "treatmentPlanId", "patientInsuranceId", "payerName", "requestedCents", "status", "requiredEvidence", "expiresAt", "nextAction", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, 'EVIDENCE_NEEDED', $8::jsonb, $9::timestamp, $10, current_timestamp)
+       ("id", "tenantId", "patientId", "treatmentPlanId", "patientInsuranceId", "payerName", "requestedCents", "status", "requiredEvidence", "evidenceChecklist", "submissionReadiness", "connectorStatus", "blockedReason", "expiresAt", "nextAction", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, 'EVIDENCE_NEEDED', $8::jsonb, $11::jsonb, $12::jsonb, 'CONNECTOR_REQUIRED', 'Prior authorization cannot be marked submitted until a payer connector acknowledgement or manual proof is attached.', $9::timestamp, $10, current_timestamp)
      returning *`,
     [
       id,
@@ -224,6 +268,8 @@ export async function createPriorAuthorization(input: {
       JSON.stringify(input.requiredEvidence ?? []),
       input.expiresAt || null,
       input.nextAction.trim(),
+      JSON.stringify({ requiredEvidence: input.requiredEvidence ?? [], payerRulesChecked: false, clinicalReviewRequired: true, patientFinancialReviewRequired: true }),
+      JSON.stringify({ evidenceComplete: false, payerConnectorReady: false, humanApprovalRequired: true, externalSubmissionBlocked: true }),
     ],
   );
   await addAudit(tenantId, "billing_rcm", "RCM_PRIOR_AUTH_CREATED", "RcmPriorAuthorization", id);
@@ -231,16 +277,22 @@ export async function createPriorAuthorization(input: {
 }
 
 export async function updatePriorAuthorizationStatus(id: string, status: string, actorRole = "billing_rcm") {
+  const nextStatus = requireAllowed(status === "SUBMITTED" ? "BLOCKED_CONNECTOR_REQUIRED" : status, allowedPriorAuthStatuses, "READY_FOR_REVIEW");
   const result = await query<{ tenantId: string }>(
     `update "RcmPriorAuthorization"
      set "status" = $2,
-       "submittedAt" = case when $2 = 'SUBMITTED' then current_timestamp else "submittedAt" end,
+       "connectorStatus" = case when $2 in ('APPROVED_STAGED','BLOCKED_CONNECTOR_REQUIRED') then 'CONNECTOR_REQUIRED' else "connectorStatus" end,
+       "blockedReason" = case
+         when $2 in ('APPROVED_STAGED','BLOCKED_CONNECTOR_REQUIRED') then 'Prior authorization is staged only. Payer submission requires connector acknowledgement or attached manual proof.'
+         else "blockedReason"
+       end,
+       "submissionReadiness" = coalesce("submissionReadiness", '{"evidenceComplete":false,"payerConnectorReady":false,"humanApprovalRequired":true,"externalSubmissionBlocked":true}'::jsonb),
        "updatedAt" = current_timestamp
      where "id" = $1
      returning "tenantId"`,
-    [id, status],
+    [id, nextStatus],
   );
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_PRIOR_AUTH_STATUS_UPDATED", "RcmPriorAuthorization", id, "ALLOWED", { status });
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_PRIOR_AUTH_STATUS_UPDATED", "RcmPriorAuthorization", id, "ALLOWED", { requestedStatus: status, appliedStatus: nextStatus });
 }
 
 export async function createDenialCase(input: {
@@ -259,21 +311,29 @@ export async function createDenialCase(input: {
   const id = newId("denial");
   const result = await query(
     `insert into "RcmDenialCase"
-       ("id", "tenantId", "patientId", "claimId", "payerName", "denialCode", "denialReason", "deniedCents", "appealDeadline", "status", "requiredEvidence", "nextAction", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamp, 'OPEN', $10::jsonb, $11, current_timestamp)
+       ("id", "tenantId", "patientId", "claimId", "payerName", "denialCode", "denialReason", "deniedCents", "appealDeadline", "status", "requiredEvidence", "appealPacketStatus", "submissionReadiness", "connectorStatus", "blockedReason", "nextAction", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamp, 'OPEN', $10::jsonb, 'EVIDENCE_NEEDED', $12::jsonb, 'CONNECTOR_REQUIRED', 'Appeal cannot be marked submitted until payer connector acknowledgement or manual submission proof is attached.', $11, current_timestamp)
      returning *`,
-    [id, tenantId, input.patientId, input.claimId, input.payerName.trim(), input.denialCode?.trim() || null, input.denialReason.trim(), input.deniedCents, input.appealDeadline || null, JSON.stringify(input.requiredEvidence ?? []), input.nextAction.trim()],
+    [id, tenantId, input.patientId, input.claimId, input.payerName.trim(), input.denialCode?.trim() || null, input.denialReason.trim(), input.deniedCents, input.appealDeadline || null, JSON.stringify(input.requiredEvidence ?? []), input.nextAction.trim(), JSON.stringify({ appealPacketComplete: false, payerConnectorReady: false, humanApprovalRequired: true, externalSubmissionBlocked: true })],
   );
   await addAudit(tenantId, "billing_rcm", "RCM_DENIAL_CASE_CREATED", "RcmDenialCase", id);
   return result.rows[0];
 }
 
 export async function updateDenialCaseStatus(id: string, status: string, actorRole = "billing_rcm") {
+  const nextStatus = requireAllowed(status === "SUBMITTED" ? "BLOCKED_CONNECTOR_REQUIRED" : status, allowedDenialStatuses, "APPEAL_READY");
   const result = await query<{ tenantId: string }>(
-    `update "RcmDenialCase" set "status" = $2, "updatedAt" = current_timestamp where "id" = $1 returning "tenantId"`,
-    [id, status],
+    `update "RcmDenialCase"
+     set "status" = $2,
+       "appealPacketStatus" = case when $2 in ('APPEAL_READY','APPROVED_STAGED') then 'READY_FOR_APPROVAL' else "appealPacketStatus" end,
+       "connectorStatus" = case when $2 in ('APPROVED_STAGED','BLOCKED_CONNECTOR_REQUIRED') then 'CONNECTOR_REQUIRED' else "connectorStatus" end,
+       "blockedReason" = case when $2 in ('APPROVED_STAGED','BLOCKED_CONNECTOR_REQUIRED') then 'Appeal package is staged only. External submission requires payer connector acknowledgement or attached manual proof.' else "blockedReason" end,
+       "submissionReadiness" = coalesce("submissionReadiness", '{"appealPacketComplete":false,"payerConnectorReady":false,"humanApprovalRequired":true,"externalSubmissionBlocked":true}'::jsonb),
+       "updatedAt" = current_timestamp
+     where "id" = $1 returning "tenantId"`,
+    [id, nextStatus],
   );
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_DENIAL_STATUS_UPDATED", "RcmDenialCase", id, "ALLOWED", { status });
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_DENIAL_STATUS_UPDATED", "RcmDenialCase", id, "ALLOWED", { requestedStatus: status, appliedStatus: nextStatus });
 }
 
 export async function createPayerFollowUp(input: {
@@ -290,27 +350,30 @@ export async function createPayerFollowUp(input: {
   const id = newId("pfu");
   const result = await query(
     `insert into "RcmPayerFollowUp"
-       ("id", "tenantId", "patientId", "claimId", "payerName", "reason", "channel", "dueAt", "nextAction", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, $9, current_timestamp)
+       ("id", "tenantId", "patientId", "claimId", "payerName", "reason", "channel", "dueAt", "connectorStatus", "blockedReason", "proofRequired", "nextAction", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, 'CONNECTOR_REQUIRED', 'Payer follow-up is a work queue item until a connector response or manual proof is recorded.', $10::jsonb, $9, current_timestamp)
      returning *`,
-    [id, tenantId, input.patientId || null, input.claimId || null, input.payerName.trim(), input.reason.trim(), input.channel, input.dueAt || null, input.nextAction.trim()],
+    [id, tenantId, input.patientId || null, input.claimId || null, input.payerName.trim(), input.reason.trim(), input.channel, input.dueAt || null, input.nextAction.trim(), JSON.stringify(["payer portal screenshot/reference", "call note", "276/277 status response", "staff attestation"])],
   );
   await addAudit(tenantId, "billing_rcm", "RCM_PAYER_FOLLOW_UP_CREATED", "RcmPayerFollowUp", id);
   return result.rows[0];
 }
 
 export async function updatePayerFollowUpStatus(id: string, status: string, outcome?: string, actorRole = "billing_rcm") {
+  const nextStatus = requireAllowed(status, allowedPayerFollowUpStatuses, "WAITING_ON_PAYER");
   const result = await query<{ tenantId: string }>(
     `update "RcmPayerFollowUp"
      set "status" = $2,
        "lastContactAt" = current_timestamp,
        "contactOutcome" = coalesce($3, "contactOutcome"),
+       "connectorStatus" = case when $2 = 'WAITING_ON_PAYER' then 'MANUAL_PROOF_REQUIRED' else "connectorStatus" end,
+       "blockedReason" = case when $2 = 'WAITING_ON_PAYER' then 'Payer contact is recorded internally; external 276/277 or portal proof is required before payer status is treated as verified.' else "blockedReason" end,
        "updatedAt" = current_timestamp
      where "id" = $1
      returning "tenantId"`,
-    [id, status, outcome || null],
+    [id, nextStatus, outcome || null],
   );
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_PAYER_FOLLOW_UP_UPDATED", "RcmPayerFollowUp", id, "ALLOWED", { status, outcome });
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_PAYER_FOLLOW_UP_UPDATED", "RcmPayerFollowUp", id, "ALLOWED", { requestedStatus: status, appliedStatus: nextStatus, outcome });
 }
 
 export async function postEraToLedger(id: string, actorRole = "billing_rcm") {
@@ -320,6 +383,8 @@ export async function postEraToLedger(id: string, actorRole = "billing_rcm") {
     patientId: string;
     claimId: string;
     payerName: string;
+    eraTraceNumber: string | null;
+    eobDocumentId: string | null;
     paidCents: number;
     allowedCents: number;
     patientDueCents: number;
@@ -327,6 +392,27 @@ export async function postEraToLedger(id: string, actorRole = "billing_rcm") {
   }>(`select * from "RcmEraPosting" where "id" = $1`, [id])).rows[0];
   if (!era) throw new Error("ERA posting was not found.");
   if (Number(era.paidCents) <= 0) throw new Error("ERA paid amount must be greater than zero before posting.");
+  if (!era.eraTraceNumber && !era.eobDocumentId) {
+    await query(
+      `update "RcmEraPosting"
+       set "connectorStatus" = 'MANUAL_PROOF_REQUIRED',
+         "blockedReason" = 'Manual EOB proof or ERA trace is required before posting to the PMS ledger.',
+         "postingReadiness" = coalesce("postingReadiness", '{"hasEraOrEobProof":false,"ledgerImpactReviewed":false,"adjustmentsReviewed":false}'::jsonb),
+         "updatedAt" = current_timestamp
+       where "id" = $1`,
+      [id],
+    );
+    await addAudit(era.tenantId, actorRole, "RCM_ERA_POST_BLOCKED", "RcmEraPosting", id, "BLOCKED", { blockedReason: "Manual EOB proof or ERA trace is required." });
+    throw new Error("Manual EOB proof or ERA trace is required before posting to the PMS ledger.");
+  }
+  await query(
+    `update "RcmEraPosting"
+     set "postingReadiness" = coalesce("postingReadiness", jsonb_build_object('hasEraOrEobProof', coalesce("eraTraceNumber", '') <> '' or coalesce("eobDocumentId", '') <> '', 'ledgerImpactReviewed', true, 'adjustmentsReviewed', true)),
+       "connectorStatus" = 'MANUAL_PROOF_REQUIRED',
+       "blockedReason" = case when coalesce("eraTraceNumber", '') = '' and coalesce("eobDocumentId", '') = '' then 'Manual EOB proof or ERA trace is required for audit review.' else "blockedReason" end
+     where "id" = $1`,
+    [id],
+  );
   const ledgerEntryId = newId("led");
   const paymentId = newId("pay");
   await query(
@@ -355,11 +441,18 @@ export async function postEraToLedger(id: string, actorRole = "billing_rcm") {
 }
 
 export async function updateRevenueFindingStatus(id: string, status: string, actorRole = "billing_rcm") {
+  const nextStatus = requireAllowed(status, allowedRevenueStatuses, "IN_REVIEW");
   const result = await query<{ tenantId: string }>(
-    `update "RcmRevenueIntegrityFinding" set "status" = $2, "updatedAt" = current_timestamp where "id" = $1 returning "tenantId"`,
-    [id, status],
+    `update "RcmRevenueIntegrityFinding"
+     set "status" = $2,
+       "recoveryStatus" = $2,
+       "connectorStatus" = case when $2 in ('RECOVERY_STAGED','RECOVERED') then 'MANUAL_PROOF_REQUIRED' else "connectorStatus" end,
+       "proofRequired" = coalesce("proofRequired", '["source claim","ledger variance","payer contract or fee schedule","recovery action proof"]'::jsonb),
+       "updatedAt" = current_timestamp
+     where "id" = $1 returning "tenantId"`,
+    [id, nextStatus],
   );
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_REVENUE_INTEGRITY_UPDATED", "RcmRevenueIntegrityFinding", id, "ALLOWED", { status });
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_REVENUE_INTEGRITY_UPDATED", "RcmRevenueIntegrityFinding", id, "ALLOWED", { requestedStatus: status, appliedStatus: nextStatus });
 }
 
 export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
@@ -820,24 +913,61 @@ export async function createReviewWorkflow(input: {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("rep");
   const eligibility = input.patientId
-    ? await query<{ openRecovery: string; optedOut: string }>(
+    ? await query<{ openRecovery: string; optedOut: string; verifiedConsent: string; recentReview: string; billingDispute: string; completedVisit: string; clinicalIncident: string }>(
         `select
            (select count(*) from "ReputationRecoveryCase" where "tenantId" = $1 and "patientId" = $2 and "status" not in ('COMPLETED','CLOSED'))::text as "openRecovery",
-           (select count(*) from "PmsPatientCommunicationPreference" where "patientId" = $2 and "channel" = $3 and "status" in ('OPTED_OUT','DO_NOT_CONTACT'))::text as "optedOut"`,
+           (select count(*) from "PmsPatientCommunicationPreference" where "patientId" = $2 and "channel" = $3 and "consentStatus" in ('OPTED_OUT','DO_NOT_CONTACT'))::text as "optedOut",
+           (select count(*) from "PmsPatientCommunicationPreference" where "patientId" = $2 and "channel" = $3 and "consentStatus" in ('VERIFIED','CONSENTED','OPTED_IN','ACTIVE'))::text as "verifiedConsent",
+           (select count(*) from "ReputationReviewWorkflow" where "tenantId" = $1 and "patientId" = $2 and "createdAt" > current_timestamp - interval '90 days')::text as "recentReview",
+           (select count(*) from "PmsClaim" where "tenantId" = $1 and "patientId" = $2 and "patientDueCents" > 0 and "status" in ('NEEDS_REVIEW','DENIED','PARTIAL','OPEN'))::text as "billingDispute",
+           (select count(*) from "PmsAppointment" where "tenantId" = $1 and "patientId" = $2 and "status" = 'COMPLETED')::text as "completedVisit",
+           (select count(*) from "ReputationRecoveryCase" where "tenantId" = $1 and "patientId" = $2 and "sentiment" in ('CLINICAL_RISK','FRUSTRATED','NEGATIVE') and "status" not in ('COMPLETED','CLOSED'))::text as "clinicalIncident"`,
         [tenantId, input.patientId, input.requestChannel],
       )
-    : { rows: [{ openRecovery: "0", optedOut: "0" }] };
+    : { rows: [{ openRecovery: "0", optedOut: "0", verifiedConsent: "0", recentReview: "0", billingDispute: "0", completedVisit: "0", clinicalIncident: "0" }] };
   const blockedReasons = [
     Number(eligibility.rows[0]?.openRecovery ?? 0) > 0 ? "open service recovery case" : null,
     Number(eligibility.rows[0]?.optedOut ?? 0) > 0 ? "patient channel opt-out" : null,
+    input.patientId && Number(eligibility.rows[0]?.verifiedConsent ?? 0) === 0 ? "patient consent not verified for channel" : null,
+    Number(eligibility.rows[0]?.recentReview ?? 0) > 0 ? "duplicate review cooldown" : null,
+    Number(eligibility.rows[0]?.billingDispute ?? 0) > 0 ? "billing dispute or balance sensitivity" : null,
+    input.patientId && Number(eligibility.rows[0]?.completedVisit ?? 0) === 0 ? "no completed PMS visit found" : null,
+    Number(eligibility.rows[0]?.clinicalIncident ?? 0) > 0 ? "clinical incident or service-risk hold" : null,
   ].filter(Boolean);
   const requestStatus = blockedReasons.length ? "BLOCKED_ELIGIBILITY" : "READY_FOR_APPROVAL";
   const recoveryStatus = Number(eligibility.rows[0]?.openRecovery ?? 0) > 0 ? "REQUIRED" : "NOT_REQUIRED";
+  const eligibilitySummary = {
+    source: input.patientId ? "PmsPatient completed visit eligibility" : "practice-level manual workflow",
+    checks: {
+      completedVisit: Number(eligibility.rows[0]?.completedVisit ?? 0),
+      verifiedConsent: Number(eligibility.rows[0]?.verifiedConsent ?? 0),
+      optOut: Number(eligibility.rows[0]?.optedOut ?? 0),
+      openRecovery: Number(eligibility.rows[0]?.openRecovery ?? 0),
+      billingDispute: Number(eligibility.rows[0]?.billingDispute ?? 0),
+      clinicalIncident: Number(eligibility.rows[0]?.clinicalIncident ?? 0),
+      duplicateCooldown: Number(eligibility.rows[0]?.recentReview ?? 0),
+    },
+  };
   await query(
     `insert into "ReputationReviewWorkflow"
-       ("id", "tenantId", "patientId", "locationId", "status", "serviceLine", "reviewSite", "requestChannel", "requestStatus", "responseDraft", "recoveryStatus", "dueAt", "updatedAt")
-     values ($1, $2, $3, 'loc_primary', 'OPEN', $4, $5, $6, $7, $8, $9, current_timestamp + interval '1 day', current_timestamp)`,
-    [id, tenantId, input.patientId || null, input.serviceLine, input.reviewSite, input.requestChannel, requestStatus, input.responseDraft || (blockedReasons.length ? `Blocked: ${blockedReasons.join(", ")}.` : null), recoveryStatus],
+       ("id", "tenantId", "patientId", "locationId", "status", "serviceLine", "reviewSite", "requestChannel", "requestStatus", "responseDraft", "recoveryStatus", "eligibilitySummary", "suppressionReasons", "privateSurveyRequired", "connectorStatus", "blockedReason", "dueAt", "updatedAt")
+     values ($1, $2, $3, 'loc_primary', 'OPEN', $4, $5, $6, $7, $8, $9, $10::jsonb, $11::text[], $12, $13, $14, current_timestamp + interval '1 day', current_timestamp)`,
+    [
+      id,
+      tenantId,
+      input.patientId || null,
+      input.serviceLine,
+      input.reviewSite,
+      input.requestChannel,
+      requestStatus,
+      input.responseDraft || (blockedReasons.length ? `Blocked: ${blockedReasons.join(", ")}.` : null),
+      recoveryStatus,
+      JSON.stringify(eligibilitySummary),
+      blockedReasons,
+      blockedReasons.some((reason) => String(reason).includes("service") || String(reason).includes("clinical") || String(reason).includes("billing")),
+      blockedReasons.length ? "CONNECTOR_REQUIRED" : "READY_FOR_CONNECTOR",
+      blockedReasons.length ? blockedReasons.join("; ") : null,
+    ],
   );
   await addAudit(tenantId, "marketing_growth", "REPUTATION_WORKFLOW_CREATED", "ReputationReviewWorkflow", id, blockedReasons.length ? "BLOCKED" : "ALLOWED", {
     requestStatus,
@@ -848,18 +978,29 @@ export async function createReviewWorkflow(input: {
 }
 
 export async function updateReviewWorkflowStatus(id: string, requestStatus: string) {
+  const nextStatus = requireAllowed(requestStatus, allowedReviewStatuses, "READY_FOR_APPROVAL");
   const result = await query<{ tenantId: string; appliedStatus: string; recoveryStatus: string }>(
     `update "ReputationReviewWorkflow"
      set "requestStatus" = case
          when $2 in ('APPROVED_STAGED','READY_FOR_APPROVAL') and "recoveryStatus" in ('REQUIRED','OPEN') then 'BLOCKED_SERVICE_RECOVERY'
+         when $2 = 'APPROVED_STAGED' and cardinality("suppressionReasons") > 0 then 'BLOCKED_ELIGIBILITY'
          else $2
+       end,
+       "connectorStatus" = case
+         when $2 = 'APPROVED_STAGED' and "recoveryStatus" not in ('REQUIRED','OPEN') and cardinality("suppressionReasons") = 0 then 'READY_FOR_CONNECTOR'
+         else "connectorStatus"
+       end,
+       "blockedReason" = case
+         when $2 = 'APPROVED_STAGED' and cardinality("suppressionReasons") > 0 then array_to_string("suppressionReasons", '; ')
+         when $2 in ('APPROVED_STAGED','READY_FOR_APPROVAL') and "recoveryStatus" in ('REQUIRED','OPEN') then 'Service recovery must close before any public review request.'
+         else "blockedReason"
        end,
        "status" = case when $2 = 'COMPLETED' then 'COMPLETED' else "status" end,
        "completedAt" = case when $2 = 'COMPLETED' then current_timestamp else "completedAt" end,
        "updatedAt" = current_timestamp
      where "id" = $1
      returning "tenantId", "requestStatus" as "appliedStatus", "recoveryStatus"`,
-    [id, requestStatus],
+    [id, nextStatus],
   );
   if (result.rows[0]) {
     const row = result.rows[0];
@@ -872,17 +1013,20 @@ export async function updateReviewWorkflowStatus(id: string, requestStatus: stri
 }
 
 export async function updateReviewResponseApproval(id: string, approvalStatus: string) {
+  const nextStatus = requireAllowed(approvalStatus, allowedResponseStatuses, "NEEDS_REVIEW");
   const result = await query<{ tenantId: string; appliedStatus: string; publicationStatus: string; blockedReason: string | null }>(
     `update "ReputationReviewResponse"
      set "approvalStatus" = case when $2 = 'APPROVED' then 'APPROVED_STAGED' else $2 end,
        "approvedByRoleKey" = case when $2 in ('APPROVED','APPROVED_STAGED') then 'marketing_growth' else "approvedByRoleKey" end,
        "approvedAt" = case when $2 in ('APPROVED','APPROVED_STAGED') then current_timestamp else "approvedAt" end,
        "publicationStatus" = case when $2 in ('APPROVED','APPROVED_STAGED') then 'BLOCKED_CONNECTOR_REQUIRED' else "publicationStatus" end,
-       "blockedReason" = case when $2 in ('APPROVED','APPROVED_STAGED') then 'Review source connector, listing identity, publication permission, and human approval policy are required before external posting. Response is staged only.' else "blockedReason" end,
+       "blockedReason" = case when $2 in ('APPROVED','APPROVED_STAGED') then 'Review source connector, listing identity, publication permission, HIPAA guardrails, and human approval policy are required before external posting. Response is staged only.' else "blockedReason" end,
+       "hipaaGuardrails" = coalesce("hipaaGuardrails", '{"noPhi":true,"noTreatmentDetails":true,"noDiagnosis":true,"movePrivateDetailsOffline":true,"humanApprovalRequired":true}'::jsonb),
+       "sourceSiteStatus" = case when $2 in ('APPROVED','APPROVED_STAGED') then 'CONNECTOR_REQUIRED' else "sourceSiteStatus" end,
        "updatedAt" = current_timestamp
      where "id" = $1
      returning "tenantId", "approvalStatus" as "appliedStatus", "publicationStatus", "blockedReason"`,
-    [id, approvalStatus],
+    [id, nextStatus],
   );
   if (result.rows[0]) {
     const row = result.rows[0];
@@ -896,17 +1040,21 @@ export async function updateReviewResponseApproval(id: string, approvalStatus: s
 }
 
 export async function updateListingProfileStatus(id: string, syncStatus: string, nextAction: string) {
+  const nextStatus = requireAllowed(syncStatus, allowedListingStatuses, "MANUAL_REVIEW");
   const result = await query<{ tenantId: string }>(
     `update "ReputationListingProfile"
      set "syncStatus" = $2,
        "nextAction" = $3,
+       "ownerAction" = $3,
+       "napConsistencyStatus" = case when $2 = 'DATA_MISMATCH' then 'MISMATCH' when $2 = 'NEEDS_CONNECTION' then 'UNVERIFIED' else "napConsistencyStatus" end,
+       "syncReadiness" = jsonb_build_object('connectorStatus', case when $2 like 'CONNECTED%' then 'READY_FOR_SYNC' else 'CONNECTOR_REQUIRED' end, 'ownerAction', $3),
        "lastSyncedAt" = case when $2 like 'CONNECTED%' then current_timestamp else "lastSyncedAt" end,
        "updatedAt" = current_timestamp
      where "id" = $1
      returning "tenantId"`,
-    [id, syncStatus, nextAction.trim()],
+    [id, nextStatus, nextAction.trim()],
   );
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "LISTING_PROFILE_STATUS_UPDATED", "ReputationListingProfile", id, "ALLOWED", { syncStatus });
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "LISTING_PROFILE_STATUS_UPDATED", "ReputationListingProfile", id, "ALLOWED", { syncStatus: nextStatus });
 }
 
 export async function createReputationCampaignRule(input: {
@@ -924,7 +1072,7 @@ export async function createReputationCampaignRule(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("repcamp");
-  const suppressions = input.suppressions ? input.suppressions.split(",").map((item) => item.trim()).filter(Boolean) : [];
+  const suppressions = parseList(input.suppressions);
   await query(
     `insert into "ReputationCampaignRule"
        ("id", "tenantId", "name", "triggerEvent", "serviceLine", "channel", "targetReviewSite", "sendDelayHours", "cooldownDays", "minimumSurveyScore", "suppressions", "status", "nextAction", "updatedAt")
@@ -946,37 +1094,57 @@ export async function createReferralRequest(input: {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("repref");
   const blockedReason =
-    input.consentStatus === "VERIFIED"
+    isConsentVerified(input.consentStatus)
       ? null
       : input.consentStatus === "OPTED_OUT"
         ? "Patient has opted out of this channel. Referral request cannot be sent."
         : "Patient referral communication consent is not verified.";
   await query(
     `insert into "ReputationReferralRequest"
-       ("id", "tenantId", "patientId", "requestType", "channel", "status", "offerSummary", "messageDraft", "consentStatus", "conversionStatus", "dueAt", "updatedAt")
-     values ($1, $2, $3, $4, $5, $9, $6, $7, $8, $10, current_timestamp + interval '1 day', current_timestamp)`,
-    [id, tenantId, input.patientId || null, input.requestType, input.channel, input.offerSummary?.trim() || null, input.messageDraft.trim(), input.consentStatus, blockedReason ? "BLOCKED_CONSENT" : "READY_FOR_APPROVAL", blockedReason ? `BLOCKED: ${blockedReason}` : "NOT_SENT"],
+       ("id", "tenantId", "patientId", "requestType", "channel", "status", "offerSummary", "messageDraft", "consentStatus", "conversionStatus", "complianceText", "bookingAttributionStatus", "attribution", "connectorStatus", "blockedReason", "dueAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $9, $6, $7, $8, $10, 'Use compliance-approved referral language; no inducement, guarantee, or PHI.', 'NOT_ATTRIBUTED', $11::jsonb, 'CONNECTOR_REQUIRED', $12, current_timestamp + interval '1 day', current_timestamp)`,
+    [
+      id,
+      tenantId,
+      input.patientId || null,
+      input.requestType,
+      input.channel,
+      input.offerSummary?.trim() || null,
+      input.messageDraft.trim(),
+      input.consentStatus,
+      blockedReason ? "BLOCKED_CONSENT" : "READY_FOR_APPROVAL",
+      blockedReason ? `BLOCKED: ${blockedReason}` : "READY_FOR_CONNECTOR",
+      JSON.stringify({ newPatientBookings: 0, acceptedTreatmentCents: 0, source: "booking-link pending" }),
+      blockedReason,
+    ],
   );
   await addAudit(tenantId, "marketing_growth", "REPUTATION_REFERRAL_REQUEST_CREATED", "ReputationReferralRequest", id, blockedReason ? "BLOCKED" : "ALLOWED", { consentStatus: input.consentStatus, blockedReason });
 }
 
 export async function updateReferralRequestStatus(id: string, status: string) {
+  const nextStatus = requireAllowed(status, allowedReferralStatuses, "READY_FOR_APPROVAL");
   const result = await query<{ tenantId: string; appliedStatus: string; conversionStatus: string }>(
     `update "ReputationReferralRequest"
      set "status" = case
-         when $2 = 'APPROVED_TO_SEND' and "consentStatus" <> 'VERIFIED' then 'BLOCKED_CONSENT'
+         when $2 = 'APPROVED_TO_SEND' and "consentStatus" not in ('VERIFIED','CONSENTED','OPTED_IN','ACTIVE') then 'BLOCKED_CONSENT'
          else $2
        end,
        "conversionStatus" = case
-         when $2 = 'APPROVED_TO_SEND' and "consentStatus" <> 'VERIFIED' then 'BLOCKED: consent not verified'
+         when $2 = 'APPROVED_TO_SEND' and "consentStatus" not in ('VERIFIED','CONSENTED','OPTED_IN','ACTIVE') then 'BLOCKED: consent not verified'
          when $2 = 'APPROVED_TO_SEND' then 'BLOCKED_CONNECTOR_REQUIRED'
          else "conversionStatus"
+       end,
+       "connectorStatus" = case when $2 = 'APPROVED_TO_SEND' then 'CONNECTOR_REQUIRED' else "connectorStatus" end,
+       "blockedReason" = case
+         when $2 = 'APPROVED_TO_SEND' and "consentStatus" not in ('VERIFIED','CONSENTED','OPTED_IN','ACTIVE') then 'Referral/testimonial delivery requires verified channel consent.'
+         when $2 = 'APPROVED_TO_SEND' then 'Delivery connector is required before patient-facing request is sent.'
+         else "blockedReason"
        end,
        "completedAt" = case when $2 in ('COMPLETED','CLOSED') then current_timestamp else "completedAt" end,
        "updatedAt" = current_timestamp
      where "id" = $1
      returning "tenantId", "status" as "appliedStatus", "conversionStatus"`,
-    [id, status],
+    [id, nextStatus],
   );
   if (result.rows[0]) {
     const row = result.rows[0];
@@ -989,7 +1157,7 @@ export async function updateReferralRequestStatus(id: string, status: string) {
 }
 
 export async function getMarketingOperatingCenter(tenantId = defaultTenantId) {
-  const [campaigns, landingPages, assets, metrics] = await Promise.all([
+  const [campaigns, landingPages, assets, localSeoTasks, metrics] = await Promise.all([
     query(
       `select c.*, lp."title" as "landingPageTitle", lp."slug" as "landingPageSlug"
        from "MarketingCampaign" c
@@ -1000,16 +1168,26 @@ export async function getMarketingOperatingCenter(tenantId = defaultTenantId) {
     ),
     query(`select * from "MarketingLandingPage" where "tenantId" = $1 order by "serviceLine", "title"`, [tenantId]),
     query(`select * from "AiStudioAsset" where "tenantId" = $1 order by "createdAt" desc`, [tenantId]),
-    query<{ campaigns: string; landingPages: string; aiDrafts: string; attributedProduction: string }>(
+    query(
+      `select t.*, l."name" as "locationName"
+       from "MarketingLocalSeoTask" t
+       left join "Location" l on l."id" = t."locationId"
+       where t."tenantId" = $1
+       order by case t."priority" when 'HIGH' then 0 when 'NORMAL' then 1 else 2 end, t."dueAt" asc nulls last`,
+      [tenantId],
+    ),
+    query<{ campaigns: string; landingPages: string; aiDrafts: string; attributedProduction: string; localSeoOpen: string; stagedChannels: string }>(
       `select
         (select count(*) from "MarketingCampaign" where "tenantId" = $1)::text as campaigns,
         (select count(*) from "MarketingLandingPage" where "tenantId" = $1)::text as "landingPages",
         (select count(*) from "AiStudioAsset" where "tenantId" = $1 and "approvalStatus" = 'NEEDS_REVIEW')::text as "aiDrafts",
-        (select coalesce(sum("attributedProductionCents"), 0) from "MarketingCampaign" where "tenantId" = $1)::text as "attributedProduction"`,
+        (select coalesce(sum("attributedProductionCents"), 0) from "MarketingCampaign" where "tenantId" = $1)::text as "attributedProduction",
+        (select count(*) from "MarketingLocalSeoTask" where "tenantId" = $1 and "status" not in ('COMPLETED','CLOSED'))::text as "localSeoOpen",
+        (select count(*) from "MarketingCampaign" where "tenantId" = $1 and "status" in ('READY_FOR_APPROVAL','APPROVED_STAGED','ACTIVE_INTERNAL'))::text as "stagedChannels"`,
       [tenantId],
     ),
   ]);
-  return { campaigns: campaigns.rows, landingPages: landingPages.rows, assets: assets.rows, metrics: metrics.rows[0] };
+  return { campaigns: campaigns.rows, landingPages: landingPages.rows, assets: assets.rows, localSeoTasks: localSeoTasks.rows, metrics: metrics.rows[0] };
 }
 
 export async function createMarketingCampaign(input: {
@@ -1024,11 +1202,32 @@ export async function createMarketingCampaign(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("campaign");
+  const channels = parseList(input.channelMix);
+  const sourceAudience = marketingSourceAudience(input.campaignType);
+  const channelPlan = {
+    channels,
+    sourceAudience,
+    checks: ["consent", "channel preference", "quiet hours", "service recovery hold", "balance sensitivity", "approval policy"],
+  };
   await query(
     `insert into "MarketingCampaign"
-       ("id", "tenantId", "landingPageId", "name", "campaignType", "status", "audienceDefinition", "primaryGoal", "channelMix", "aiStudioBrief", "complianceStatus", "startsAt", "updatedAt")
-     values ($1, $2, $3, $4, $5, 'DRAFT', $6, $7, $8, $9, 'NEEDS_REVIEW', current_date + interval '1 day', current_timestamp)`,
-    [id, tenantId, input.landingPageId || null, input.name, input.campaignType, input.audienceDefinition, input.primaryGoal, input.channelMix.split(",").map((item) => item.trim()).filter(Boolean), input.aiStudioBrief || null],
+       ("id", "tenantId", "landingPageId", "name", "campaignType", "status", "audienceDefinition", "primaryGoal", "channelMix", "aiStudioBrief", "complianceStatus", "sourceAudience", "channelPlan", "connectorReadiness", "attribution", "blockedReason", "startsAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, 'DRAFT', $6, $7, $8, $9, 'NEEDS_REVIEW', $10, $11::jsonb, $12::jsonb, $13::jsonb, 'External activation blocked until audience validation, consent checks, approval, and channel connectors are ready.', current_date + interval '1 day', current_timestamp)`,
+    [
+      id,
+      tenantId,
+      input.landingPageId || null,
+      input.name.trim(),
+      input.campaignType,
+      input.audienceDefinition.trim(),
+      input.primaryGoal.trim(),
+      channels,
+      input.aiStudioBrief || null,
+      sourceAudience,
+      JSON.stringify(channelPlan),
+      JSON.stringify({ sms: "CONNECTOR_REQUIRED", email: "CONNECTOR_REQUIRED", phone: "CONNECTOR_REQUIRED", landingPage: input.landingPageId ? "STAGED" : "NOT_SELECTED", aiVoice: "CONNECTOR_REQUIRED" }),
+      JSON.stringify({ bookedAppointments: 0, acceptedTreatmentCents: 0, productionCents: 0, collectionCents: 0, reviewOutcomes: 0, referralOutcomes: 0 }),
+    ],
   );
   await addAudit(tenantId, "marketing_growth", "MARKETING_CAMPAIGN_CREATED", "MarketingCampaign", id);
 }
@@ -1036,8 +1235,56 @@ export async function createMarketingCampaign(input: {
 export async function updateMarketingStatus(target: "campaign" | "landingPage" | "asset", id: string, status: string) {
   const table = target === "campaign" ? "MarketingCampaign" : target === "landingPage" ? "MarketingLandingPage" : "AiStudioAsset";
   const field = target === "asset" ? "approvalStatus" : "status";
-  const result = await query<{ tenantId: string }>(`update "${table}" set "${field}" = $2, "updatedAt" = current_timestamp where "id" = $1 returning "tenantId"`, [id, status]);
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "MARKETING_STATUS_UPDATED", table, id, "ALLOWED", { field, status });
+  const nextStatus = requireAllowed(status, allowedMarketingStatuses, target === "asset" ? "NEEDS_REVIEW" : "DRAFT");
+  const result = await query<{ tenantId: string; appliedStatus: string }>(
+    `update "${table}"
+     set "${field}" = case when $3 = 'asset' and $2 = 'APPROVED' then 'APPROVED_STAGED' else $2 end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId", "${field}" as "appliedStatus"`,
+    [id, nextStatus, target],
+  );
+  if (target === "campaign") {
+    await query(
+      `update "MarketingCampaign"
+       set "blockedReason" = case
+         when "status" in ('APPROVED_STAGED','ACTIVE_INTERNAL') then 'Campaign is internally approved only; external delivery requires channel connector readiness, consent checks, and final approval evidence.'
+         else "blockedReason"
+       end,
+       "connectorReadiness" = coalesce("connectorReadiness", '{"sms":"CONNECTOR_REQUIRED","email":"CONNECTOR_REQUIRED","phone":"CONNECTOR_REQUIRED","landingPage":"STAGED","aiVoice":"CONNECTOR_REQUIRED"}'::jsonb)
+       where "id" = $1`,
+      [id],
+    );
+  }
+  if (target === "landingPage") {
+    await query(
+      `update "MarketingLandingPage"
+       set "connectorStatus" = case when "status" = 'APPROVED_STAGED' then 'STAGED' else "connectorStatus" end,
+         "bookingRouting" = coalesce("bookingRouting", 'Route form and booking CTA into PMS/CRM lead queue; no lead marked booked until appointment exists.'),
+         "trackingPlan" = coalesce("trackingPlan", '{"utmSource":"1dentalai","utmMedium":"campaign","callTracking":"connector_required","formTracking":"staged","bookingTracking":"pms_booking_route"}'::jsonb)
+       where "id" = $1`,
+      [id],
+    );
+  }
+  if (target === "asset") {
+    await query(
+      `update "AiStudioAsset"
+       set "revisionState" = case when "approvalStatus" = 'REVISION_REQUIRED' then 'REVISION_REQUESTED' else "revisionState" end,
+         "reviewerRoleKey" = coalesce("reviewerRoleKey", 'marketing_growth'),
+         "brief" = coalesce("brief", "promptInput"),
+         "sourceData" = coalesce("sourceData", jsonb_build_object('sourceModule', "sourceModule", 'sourceRecordId', "sourceRecordId"))
+       where "id" = $1`,
+      [id],
+    );
+  }
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "MARKETING_STATUS_UPDATED", table, id, "ALLOWED", { field, requestedStatus: status, appliedStatus: result.rows[0].appliedStatus });
+}
+
+function marketingSourceAudience(campaignType: string) {
+  if (["UNSCHEDULED_TREATMENT", "RECALL_REACTIVATION", "FAILED_APPOINTMENTS", "MEMBERSHIP"].includes(campaignType)) return "PMS";
+  if (["BALANCE_FOLLOW_UP"].includes(campaignType)) return "RCM";
+  if (["REFERRAL_GROWTH", "TESTIMONIALS"].includes(campaignType)) return "REPUTATION";
+  return "PMS+RCM+REPUTATION";
 }
 
 async function listPatientOptions(tenantId: string) {

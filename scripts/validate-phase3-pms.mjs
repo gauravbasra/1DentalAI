@@ -25,6 +25,7 @@ const requiredFiles = [
   "src/app/app/marketing/page.tsx",
   "src/app/app/huddle/page.tsx",
   "src/app/app/patient-finder/page.tsx",
+  "docs/PHASE_0_FEATURE_COMPLETENESS_MATRIX.md",
   "src/app/api/pms/patients/route.ts",
   "src/app/api/pms/schedule/route.ts",
   "src/app/api/pms/chart/[patientId]/route.ts",
@@ -190,10 +191,38 @@ for (const token of ["createImagingStudy", "createLabCase", "createDocument", "c
 }
 
 const engagementPage = fs.readFileSync("src/app/app/engagement/page.tsx", "utf8");
-for (const token of ["PatientEngagementEvent", "ReputationRecoveryCase", "stageEngagementEvent", "updateEngagementEventStatus", "PMS operating graph", "Post-visit review", "Service recovery before review requests"]) {
-  const haystack = `${schema}\n${engagementPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+const featureMatrix = fs.readFileSync("docs/PHASE_0_FEATURE_COMPLETENESS_MATRIX.md", "utf8");
+for (const token of [
+  "PatientEngagementEvent",
+  "ReputationRecoveryCase",
+  "stageEngagementEvent",
+  "updateEngagementEventStatus",
+  "PMS operating graph",
+  "Post-visit review",
+  "Service recovery before review requests",
+  "Appointment lifecycle",
+  "consent",
+  "quiet hours",
+  "FORMS_REMINDER",
+  "RECALL_REACTIVATION",
+  "NO_SHOW_RECOVERY",
+  "CANCELLATION_FILL",
+  "WAITLIST_FILL",
+  "POST_OP_INSTRUCTIONS",
+  "Cross-module PMS tasks",
+  "No-send process gates",
+  "classifyEngagementWork",
+]) {
+  const haystack = `${schema}\n${engagementPage}\n${featureMatrix}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS-connected engagement token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["Phone", "RCM", "Reputation", "Marketing", "Engagement", "PMS", "UI depth", "Backend", "Integrations/connectors", "Process logic", "Database migrations", "Audit", "Tests", "No fake sends"]) {
+  if (!featureMatrix.includes(token)) {
+    console.error(`Phase 0 feature matrix token missing: ${token}`);
     process.exit(1);
   }
 }

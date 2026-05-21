@@ -48,6 +48,11 @@ type ReviewRow = {
   startsAt: string | null;
   responseApprovalStatus: string | null;
   publicationStatus: string | null;
+  eligibilitySummary: unknown;
+  suppressionReasons: string[];
+  privateSurveyRequired: boolean;
+  connectorStatus: string;
+  blockedReason: string | null;
 };
 type SurveyRow = {
   id: string;
@@ -60,6 +65,8 @@ type SurveyRow = {
   nps: number | null;
   recoveryRequired: boolean;
   responseText: string | null;
+  connectorStatus: string;
+  blockedReason: string | null;
   dueAt: string | null;
 };
 type RecoveryRow = { id: string; firstName: string | null; lastName: string | null; chartNumber: string | null; status: string; sentiment: string; reason: string; recoveryNote: string | null; dueAt: string | null };
@@ -74,6 +81,9 @@ type ListingRow = {
   rating: number | null;
   reviewCount: number;
   syncStatus: string;
+  napConsistencyStatus: string;
+  syncReadiness: unknown;
+  ownerAction: string | null;
   dataQualityScore: number;
   issueSummary: string | null;
   nextAction: string;
@@ -91,6 +101,8 @@ type ResponseRow = {
   approvalStatus: string;
   publicationStatus: string;
   blockedReason: string | null;
+  hipaaGuardrails: unknown;
+  sourceSiteStatus: string;
 };
 type RuleRow = {
   id: string;
@@ -119,6 +131,11 @@ type ReferralRow = {
   messageDraft: string;
   consentStatus: string;
   conversionStatus: string;
+  complianceText: string | null;
+  bookingAttributionStatus: string;
+  attribution: unknown;
+  connectorStatus: string;
+  blockedReason: string | null;
   dueAt: string | null;
 };
 
@@ -218,6 +235,7 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
         <Metric label="Response drafts" value={metrics.responseDrafts} />
         <Metric label="Listing issues" value={metrics.listingIssues} />
         <Metric label="Recovery holds" value={metrics.openRecovery} />
+        <Metric label="Blocked asks" value={metrics.blockedRequests} />
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
@@ -239,6 +257,14 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
                   <Mini label="Recovery" value={clean(review.recoveryStatus)} />
                   <Mini label="Response" value={clean(review.responseApprovalStatus ?? "not drafted")} />
                 </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                  <Mini label="Connector" value={clean(review.connectorStatus)} />
+                  <Mini label="Private survey" value={review.privateSurveyRequired ? "Required first" : "Not required"} />
+                  <Mini label="Suppressions" value={review.suppressionReasons?.length ? review.suppressionReasons.length : "none"} />
+                </div>
+                {review.suppressionReasons?.length ? <p className="mt-2 text-xs leading-5 text-red-700">Suppressed: {review.suppressionReasons.join("; ")}</p> : null}
+                {review.blockedReason ? <p className="mt-1 text-xs leading-5 text-red-700">{review.blockedReason}</p> : null}
+                <p className="mt-1 text-xs leading-5 text-neutral-500">Eligibility: {jsonSummary(review.eligibilitySummary)}</p>
                 {review.publicReviewText ? <p className="mt-3 text-sm leading-6 text-neutral-700">{review.publicReviewText}</p> : null}
                 {review.responseDraft ? <p className="mt-2 rounded-md border border-cyan-100 bg-white p-2 text-xs leading-5 text-neutral-700">{review.responseDraft}</p> : null}
                 <div className="mt-3 grid gap-2 md:grid-cols-4">
@@ -280,6 +306,10 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
                 </div>
                 {response.publicReviewText ? <p className="mt-3 text-sm leading-6 text-neutral-700">{response.publicReviewText}</p> : null}
                 <p className="mt-3 rounded-md border border-neutral-200 bg-white p-2 text-sm leading-6 text-neutral-700">{response.draftBody}</p>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <Mini label="Source connector" value={clean(response.sourceSiteStatus)} />
+                  <Mini label="HIPAA guardrails" value={jsonSummary(response.hipaaGuardrails)} />
+                </div>
                 {response.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{response.blockedReason}</p> : null}
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   <ResponseButton id={response.id} approvalStatus="NEEDS_REVIEW" label="Needs review" />
@@ -302,6 +332,11 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
                   </div>
                   <StatusFor value={survey.recoveryRequired ? "RECOVERY_REQUIRED" : survey.status} />
                 </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <Mini label="Connector" value={clean(survey.connectorStatus)} />
+                  <Mini label="Public ask" value={survey.recoveryRequired ? "Blocked until recovery closes" : "Eligible after approval"} />
+                </div>
+                {survey.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{survey.blockedReason}</p> : null}
                 {survey.responseText ? <p className="mt-2 text-sm leading-6 text-neutral-700">{survey.responseText}</p> : null}
               </div>
             ))}
@@ -339,8 +374,12 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
                   <Mini label="Reviews" value={listing.reviewCount} />
                   <Mini label="Quality" value={`${listing.dataQualityScore}%`} />
                 </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <Mini label="NAP" value={clean(listing.napConsistencyStatus)} />
+                  <Mini label="Sync readiness" value={jsonSummary(listing.syncReadiness)} />
+                </div>
                 {listing.issueSummary ? <p className="mt-3 text-sm leading-6 text-red-700">{listing.issueSummary}</p> : null}
-                <p className="mt-2 text-xs leading-5 text-neutral-600">{listing.nextAction}</p>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{listing.ownerAction ?? listing.nextAction}</p>
                 <form action={listingAction} className="mt-3 grid gap-2 sm:grid-cols-[0.8fr_1.2fr_auto]">
                   <input type="hidden" name="id" value={listing.id} />
                   <select name="syncStatus" defaultValue={listing.syncStatus} className="rounded-md border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-700">
@@ -400,7 +439,7 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
             <div className="grid gap-3 sm:grid-cols-2">
               <Select name="requestType" label="Request type" options={["REFERRAL", "TESTIMONIAL", "CASE_STORY", "REVIEW_FOLLOWUP"]} />
               <Select name="channel" label="Channel" options={["SMS", "EMAIL", "PHONE", "PORTAL"]} />
-              <Select name="consentStatus" label="Consent" options={["CONSENTED", "UNKNOWN", "DECLINED"]} />
+              <Select name="consentStatus" label="Consent" options={["VERIFIED", "CONSENTED", "OPTED_IN", "UNKNOWN", "OPTED_OUT", "DECLINED"]} />
               <Input name="offerSummary" label="Offer summary" placeholder="Compliance-approved referral language" />
             </div>
             <Textarea name="messageDraft" label="Message draft" required />
@@ -419,7 +458,14 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
                   </div>
                   <StatusFor value={item.status} />
                 </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <Mini label="Connector" value={clean(item.connectorStatus)} />
+                  <Mini label="Attribution" value={clean(item.bookingAttributionStatus)} />
+                </div>
                 {item.offerSummary ? <p className="mt-2 text-xs leading-5 text-neutral-600">{item.offerSummary}</p> : null}
+                {item.complianceText ? <p className="mt-1 text-xs leading-5 text-neutral-500">{item.complianceText}</p> : null}
+                <p className="mt-1 text-xs leading-5 text-neutral-500">Attribution: {jsonSummary(item.attribution)}</p>
+                {item.blockedReason ? <p className="mt-1 text-xs leading-5 text-red-700">{item.blockedReason}</p> : null}
                 <p className="mt-2 text-sm leading-6 text-neutral-700">{item.messageDraft}</p>
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   <ReferralButton id={item.id} status="READY_FOR_APPROVAL" label="Ready" />

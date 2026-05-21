@@ -2600,17 +2600,49 @@ export async function createTask(input: { tenantId?: string; patientId?: string;
   return result.rows[0];
 }
 
+export function classifyEngagementWork(eventType: string) {
+  if (eventType.includes("POST_OP")) return { ownerRoleKey: "clinical_assistant", taskType: "POST_OP_FOLLOW_UP", priority: "HIGH" };
+  if (eventType.includes("RECALL") || eventType.includes("WAITLIST")) return { ownerRoleKey: "front_desk", taskType: "SCHEDULE_RECOVERY", priority: "NORMAL" };
+  if (eventType.includes("NO_SHOW") || eventType.includes("CANCEL")) return { ownerRoleKey: "front_desk", taskType: "BROKEN_APPOINTMENT_RECOVERY", priority: "HIGH" };
+  if (eventType.includes("PAYMENT") || eventType.includes("INSURANCE")) return { ownerRoleKey: "billing_rcm", taskType: "PATIENT_FINANCIAL_FOLLOW_UP", priority: "NORMAL" };
+  if (eventType.includes("FORM") || eventType.includes("CONSENT")) return { ownerRoleKey: "front_desk", taskType: "FORMS_CONSENT_REVIEW", priority: "NORMAL" };
+  if (eventType.includes("REVIEW") || eventType.includes("RECOVERY")) return { ownerRoleKey: "marketing_growth", taskType: "REPUTATION_OUTREACH_REVIEW", priority: "NORMAL" };
+  return { ownerRoleKey: "marketing_growth", taskType: "PATIENT_ENGAGEMENT_REVIEW", priority: "NORMAL" };
+}
+
 export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
-  const [events, recoveryCases, sourceSignals, patients] = await Promise.all([
+  const [events, recoveryCases, sourceSignals, patients, lifecycle, recallQueue, brokenAppointments, waitlist, postOpQueue, crossModuleTasks, governance] = await Promise.all([
     query(
       `select e.*, p."firstName", p."lastName", p."chartNumber", p."phone", p."email",
-        a."appointmentType", a."startsAt", a."readinessStatus",
+        a."appointmentType", a."startsAt", a."status" as "appointmentStatus", a."readinessStatus",
+        cp."consentStatus", cp."quietHoursStart", cp."quietHoursEnd",
+        coalesce(forms."openForms", 0)::int as "openForms",
+        coalesce(tasks."openTasks", 0)::int as "openTasks",
         pc."code" as "procedureCode", pc."description" as "procedureDescription"
        from "PatientEngagementEvent" e
        join "PmsPatient" p on p."id" = e."patientId"
        left join "PmsAppointment" a on a."id" = e."appointmentId"
        left join "PmsProcedureLog" pl on pl."id" = e."procedureLogId"
        left join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
+       left join lateral (
+        select pref."consentStatus", pref."quietHoursStart", pref."quietHoursEnd"
+        from "PmsPatientCommunicationPreference" pref
+        where pref."patientId" = p."id" and pref."channel" = e."channel"
+        order by pref."priority" asc, pref."updatedAt" desc
+        limit 1
+       ) cp on true
+       left join (
+        select "patientId", count(*) as "openForms"
+        from "PmsFormAssignment"
+        where "tenantId" = $1 and "status" in ('ASSIGNED','IN_PROGRESS','NEEDS_REVIEW')
+        group by "patientId"
+       ) forms on forms."patientId" = p."id"
+       left join (
+        select "patientId", count(*) as "openTasks"
+        from "PmsTask"
+        where "tenantId" = $1 and "status" = 'OPEN'
+        group by "patientId"
+       ) tasks on tasks."patientId" = p."id"
        where e."tenantId" = $1
        order by
         case e."status"
@@ -2646,10 +2678,126 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
        from "PmsLedgerEntry" where "tenantId" = $1 and "balanceCents" > 0
        union all
        select 'readiness_blocks' as key, count(*)::int as value
-       from "PmsAppointment" where "tenantId" = $1 and "readinessStatus" <> 'READY'`,
+       from "PmsAppointment" where "tenantId" = $1 and "readinessStatus" <> 'READY'
+       union all
+       select 'open_forms' as key, count(*)::int as value
+       from "PmsFormAssignment" where "tenantId" = $1 and "status" in ('ASSIGNED','IN_PROGRESS','NEEDS_REVIEW')
+       union all
+       select 'waitlist_requests' as key, count(*)::int as value
+       from "PmsAppointmentRequest" where "tenantId" = $1 and "status" = 'OPEN'
+       union all
+       select 'broken_appointments' as key, count(*)::int as value
+       from "PmsAppointment" where "tenantId" = $1 and "status" in ('CANCELED','BROKEN','NO_SHOW')
+       union all
+       select 'approved_no_send' as key, count(*)::int as value
+       from "PatientEngagementEvent" where "tenantId" = $1 and "status" = 'APPROVED_TO_SEND'`,
       [tenantId],
     ),
     listPatients(tenantId),
+    query(
+      `select a."id", a."patientId", a."appointmentType", a."startsAt", a."status", a."readinessStatus", p."firstName", p."lastName", p."chartNumber",
+        cp."consentStatus", cp."quietHoursStart", cp."quietHoursEnd",
+        coalesce(forms."openForms", 0)::int as "openForms",
+        coalesce(reminders."reminderCount", 0)::int as "reminderCount"
+       from "PmsAppointment" a
+       join "PmsPatient" p on p."id" = a."patientId"
+       left join lateral (
+        select pref."consentStatus", pref."quietHoursStart", pref."quietHoursEnd"
+        from "PmsPatientCommunicationPreference" pref
+        where pref."patientId" = p."id" and pref."channel" in ('SMS','EMAIL')
+        order by case pref."consentStatus" when 'OPTED_IN' then 0 when 'UNKNOWN' then 1 else 2 end, pref."priority"
+        limit 1
+       ) cp on true
+       left join (
+        select "patientId", count(*) as "openForms"
+        from "PmsFormAssignment"
+        where "tenantId" = $1 and "status" in ('ASSIGNED','IN_PROGRESS','NEEDS_REVIEW')
+        group by "patientId"
+       ) forms on forms."patientId" = p."id"
+       left join (
+        select "appointmentId", count(*) as "reminderCount"
+        from "PatientEngagementEvent"
+        where "tenantId" = $1 and "eventType" in ('APPOINTMENT_CONFIRMATION','APPOINTMENT_REMINDER','FORMS_REMINDER')
+        group by "appointmentId"
+       ) reminders on reminders."appointmentId" = a."id"
+       where a."tenantId" = $1 and a."startsAt" >= current_date - interval '1 day' and a."startsAt" < current_date + interval '14 days'
+       order by a."startsAt" asc
+       limit 12`,
+      [tenantId],
+    ),
+    query(
+      `select r.*, p."firstName", p."lastName", p."chartNumber", cp."consentStatus", cp."quietHoursStart", cp."quietHoursEnd"
+       from "PmsRecall" r
+       join "PmsPatient" p on p."id" = r."patientId"
+       left join lateral (
+        select pref."consentStatus", pref."quietHoursStart", pref."quietHoursEnd"
+        from "PmsPatientCommunicationPreference" pref
+        where pref."patientId" = p."id" and pref."channel" in ('SMS','EMAIL')
+        order by case pref."consentStatus" when 'OPTED_IN' then 0 when 'UNKNOWN' then 1 else 2 end, pref."priority"
+        limit 1
+       ) cp on true
+       where r."tenantId" = $1 and r."status" in ('DUE','OVERDUE')
+       order by r."dueDate" asc
+       limit 10`,
+      [tenantId],
+    ),
+    query(
+      `select a."id", a."patientId", a."appointmentType", a."startsAt", a."status", p."firstName", p."lastName", p."chartNumber"
+       from "PmsAppointment" a
+       join "PmsPatient" p on p."id" = a."patientId"
+       where a."tenantId" = $1 and a."status" in ('CANCELED','BROKEN','NO_SHOW')
+        and not exists (
+          select 1 from "PmsAppointment" future
+          where future."patientId" = a."patientId" and future."startsAt" > a."startsAt" and future."status" not in ('CANCELED','NO_SHOW','BROKEN')
+        )
+       order by a."startsAt" desc
+       limit 10`,
+      [tenantId],
+    ),
+    query(
+      `select ar.*, p."firstName", p."lastName", p."chartNumber"
+       from "PmsAppointmentRequest" ar
+       left join "PmsPatient" p on p."id" = ar."patientId"
+       where ar."tenantId" = $1 and ar."status" = 'OPEN'
+       order by case ar."urgency" when 'HIGH' then 0 when 'NORMAL' then 1 else 2 end, ar."createdAt" asc
+       limit 10`,
+      [tenantId],
+    ),
+    query(
+      `select pl."id", pl."patientId", pl."appointmentId", pl."serviceDate", pl."status",
+        p."firstName", p."lastName", p."chartNumber", pc."code", pc."description",
+        coalesce(events."postOpCount", 0)::int as "postOpCount"
+       from "PmsProcedureLog" pl
+       join "PmsPatient" p on p."id" = pl."patientId"
+       join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
+       left join (
+        select "procedureLogId", count(*) as "postOpCount"
+        from "PatientEngagementEvent"
+        where "tenantId" = $1 and "eventType" = 'POST_OP_INSTRUCTIONS'
+        group by "procedureLogId"
+       ) events on events."procedureLogId" = pl."id"
+       where p."tenantId" = $1 and pl."status" = 'COMPLETED' and pl."serviceDate" >= current_date - interval '14 days'
+       order by pl."serviceDate" desc
+       limit 10`,
+      [tenantId],
+    ),
+    query(
+      `select t.*, p."firstName", p."lastName", p."chartNumber"
+       from "PmsTask" t
+       left join "PmsPatient" p on p."id" = t."patientId"
+       where t."tenantId" = $1 and t."status" = 'OPEN'
+        and t."taskType" in ('PATIENT_ENGAGEMENT_REVIEW','POST_OP_FOLLOW_UP','SCHEDULE_RECOVERY','BROKEN_APPOINTMENT_RECOVERY','FORMS_CONSENT_REVIEW','REPUTATION_RECOVERY','PATIENT_FINANCIAL_FOLLOW_UP')
+       order by case t."priority" when 'HIGH' then 0 when 'NORMAL' then 1 else 2 end, t."dueAt" asc nulls last, t."createdAt" desc
+       limit 12`,
+      [tenantId],
+    ),
+    Promise.resolve([
+      { area: "Consent", control: "SMS/email/portal outreach checks patient communication preferences and status before approval.", status: "LIVE_GATED" },
+      { area: "Quiet hours", control: "Quiet-hour windows are surfaced with every staged item; approval is queue-only and does not send.", status: "LIVE_GATED" },
+      { area: "Forms", control: "Open form assignments and consent review are linked before appointment reminders or check-in nudges.", status: "LIVE_PMS" },
+      { area: "Recall and waitlist", control: "Due recalls, ASAP requests, and broken visits become front-desk scheduling tasks.", status: "LIVE_PMS" },
+      { area: "Post-op and reputation", control: "Completed procedures can create clinical post-op work; poor experience blocks public review asks.", status: "LIVE_PMS" },
+    ]),
   ]);
 
   return {
@@ -2657,6 +2805,13 @@ export async function getEngagementCommandCenter(tenantId = defaultTenantId) {
     recoveryCases: recoveryCases.rows,
     sourceSignals: sourceSignals.rows,
     patients,
+    lifecycle: lifecycle.rows,
+    recallQueue: recallQueue.rows,
+    brokenAppointments: brokenAppointments.rows,
+    waitlist: waitlist.rows,
+    postOpQueue: postOpQueue.rows,
+    crossModuleTasks: crossModuleTasks.rows,
+    governance,
   };
 }
 
@@ -2675,6 +2830,7 @@ export async function stageEngagementEvent(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("eng");
+  const workflow = classifyEngagementWork(input.eventType.trim());
   const result = await query(
     `insert into "PatientEngagementEvent"
        ("id", "tenantId", "patientId", "appointmentId", "procedureLogId", "sourceModule", "eventType", "channel", "status", "triggerReason", "messageBody", "approvalStatus", "scheduledFor", "updatedAt")
@@ -2695,6 +2851,15 @@ export async function stageEngagementEvent(input: {
     ],
   );
   await addAudit(tenantId, input.actorRole ?? "marketing_growth", "ENGAGEMENT_EVENT_STAGED", "PatientEngagementEvent", id, "ALLOWED");
+  await createTask({
+    tenantId,
+    patientId: input.patientId,
+    ownerRoleKey: workflow.ownerRoleKey,
+    title: `${input.eventType.trim().replaceAll("_", " ")} approval and PMS handoff`,
+    taskType: workflow.taskType,
+    priority: workflow.priority,
+    dueAt: input.scheduledFor,
+  });
   return result.rows[0];
 }
 

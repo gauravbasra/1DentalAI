@@ -1189,6 +1189,9 @@ model RcmWorkItem {
   ownerRoleKey   String   @default("billing_rcm")
   sourceRecord   String?
   blockerReason  String?
+  connectorStatus String  @default("CONNECTOR_REQUIRED")
+  proofRequired  Json?
+  approvalPolicy Json?
   nextAction     String
   dueAt          DateTime?
   completedAt    DateTime?
@@ -1212,6 +1215,10 @@ model RcmPriorAuthorization {
   requestedCents    Int      @default(0)
   status            String   @default("DRAFT")
   requiredEvidence  Json?
+  evidenceChecklist Json?
+  submissionReadiness Json?
+  connectorStatus   String   @default("CONNECTOR_REQUIRED")
+  blockedReason     String?
   submittedAt       DateTime?
   expiresAt         DateTime?
   determination     String?
@@ -1239,6 +1246,10 @@ model RcmDenialCase {
   appealLevel     String   @default("FIRST_LEVEL")
   rootCause       String?
   requiredEvidence Json?
+  appealPacketStatus String @default("EVIDENCE_NEEDED")
+  submissionReadiness Json?
+  connectorStatus String   @default("CONNECTOR_REQUIRED")
+  blockedReason   String?
   nextAction      String
   ownerRoleKey    String   @default("billing_rcm")
   createdAt       DateTime @default(now())
@@ -1263,6 +1274,9 @@ model RcmEraPosting {
   adjustmentCents Int      @default(0)
   status          String   @default("NEEDS_REVIEW")
   exceptionReason String?
+  postingReadiness Json?
+  connectorStatus String   @default("MANUAL_PROOF_REQUIRED")
+  blockedReason   String?
   postedAt        DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -1285,6 +1299,9 @@ model RcmPayerFollowUp {
   lastContactAt  DateTime?
   contactOutcome String?
   referenceNumber String?
+  connectorStatus String   @default("CONNECTOR_REQUIRED")
+  blockedReason   String?
+  proofRequired   Json?
   nextAction     String
   ownerRoleKey   String   @default("billing_rcm")
   createdAt      DateTime @default(now())
@@ -1309,6 +1326,9 @@ model RcmRevenueIntegrityFinding {
   actualCents     Int      @default(0)
   varianceCents   Int      @default(0)
   rootCause       String?
+  recoveryStatus  String   @default("OPEN")
+  connectorStatus String   @default("MANUAL_PROOF_REQUIRED")
+  proofRequired   Json?
   nextAction      String
   ownerRoleKey    String   @default("billing_rcm")
   createdAt       DateTime @default(now())
@@ -1600,6 +1620,11 @@ model ReputationReviewWorkflow {
   publicReviewText    String?
   responseDraft       String?
   recoveryStatus      String   @default("NOT_REQUIRED")
+  eligibilitySummary  Json?
+  suppressionReasons  String[] @default([])
+  privateSurveyRequired Boolean @default(false)
+  connectorStatus     String   @default("CONNECTOR_REQUIRED")
+  blockedReason       String?
   dueAt               DateTime?
   completedAt         DateTime?
   createdAt           DateTime @default(now())
@@ -1622,6 +1647,10 @@ model PatientSurvey {
   responseText     String?
   recoveryRequired Boolean  @default(false)
   ownerRoleKey     String   @default("marketing_growth")
+  connectorStatus  String   @default("CONNECTOR_REQUIRED")
+  blockedReason    String?
+  sourceObjectType String?
+  sourceObjectId   String?
   dueAt            DateTime?
   completedAt      DateTime?
   createdAt        DateTime @default(now())
@@ -1648,6 +1677,10 @@ model ReputationListingProfile {
   dataQualityScore Int      @default(0)
   issueSummary     String?
   nextAction       String
+  napConsistencyStatus String @default("NEEDS_REVIEW")
+  profileCompleteness Json?
+  syncReadiness    Json?
+  ownerAction      String?
   lastSyncedAt     DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -1666,6 +1699,8 @@ model ReputationReviewResponse {
   approvalStatus     String   @default("NEEDS_REVIEW")
   publicationStatus  String   @default("NOT_PUBLISHED")
   blockedReason      String?
+  hipaaGuardrails    Json?
+  sourceSiteStatus   String   @default("CONNECTOR_REQUIRED")
   approvedByRoleKey  String?
   approvedAt         DateTime?
   publishedAt        DateTime?
@@ -1711,6 +1746,11 @@ model ReputationReferralRequest {
   messageDraft     String
   consentStatus    String   @default("UNKNOWN")
   conversionStatus String   @default("NOT_SENT")
+  complianceText   String?
+  bookingAttributionStatus String @default("NOT_ATTRIBUTED")
+  attribution      Json?
+  connectorStatus  String   @default("CONNECTOR_REQUIRED")
+  blockedReason    String?
   dueAt            DateTime?
   completedAt      DateTime?
   createdAt        DateTime @default(now())
@@ -1733,6 +1773,13 @@ model MarketingLandingPage {
   primaryCta       String
   complianceStatus String   @default("NEEDS_REVIEW")
   publishedUrl     String?
+  providerId       String?
+  locationId       String?
+  trackingPlan     Json?
+  formMapping      Json?
+  bookingRouting   String?
+  attribution      Json?
+  connectorStatus  String   @default("CONNECTOR_REQUIRED")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -1752,6 +1799,11 @@ model MarketingCampaign {
   channelMix            String[]
   aiStudioBrief         String?
   complianceStatus      String   @default("NEEDS_REVIEW")
+  sourceAudience        String   @default("PMS")
+  channelPlan           Json?
+  connectorReadiness    Json?
+  attribution           Json?
+  blockedReason         String?
   estimatedAudience     Int      @default(0)
   attributedBookings    Int      @default(0)
   attributedProductionCents Int   @default(0)
@@ -1777,11 +1829,40 @@ model AiStudioAsset {
   approvalStatus  String   @default("NEEDS_REVIEW")
   complianceNotes String?
   ownerRoleKey    String   @default("marketing_growth")
+  brief           String?
+  sourceData      Json?
+  reviewerRoleKey String?
+  revisionState   String   @default("NO_REVISION")
+  useTarget       String?
+  approvalNotes   String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([tenantId, sourceModule, assetType])
   @@index([tenantId, approvalStatus])
+}
+
+model MarketingLocalSeoTask {
+  id              String   @id @default(cuid())
+  tenantId        String
+  locationId      String?
+  sourceListingId String?
+  taskType        String
+  title           String
+  status          String   @default("OPEN")
+  priority        String   @default("NORMAL")
+  platform        String?
+  serviceLine     String?
+  issueSummary    String
+  nextAction      String
+  connectorStatus String   @default("CONNECTOR_REQUIRED")
+  dueAt           DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status, dueAt])
+  @@index([locationId, taskType])
 }
 
 model PatientFinderSavedFilter {
