@@ -3,6 +3,7 @@ import fs from "node:fs";
 const requiredFiles = [
   "src/app/app/pms/page.tsx",
   "src/app/app/pms/schedule/page.tsx",
+  "src/app/app/pms/appointments/[appointmentId]/page.tsx",
   "src/app/app/pms/online-scheduling/page.tsx",
   "src/app/book/[slug]/page.tsx",
   "src/app/app/pms/patients/page.tsx",
@@ -39,6 +40,7 @@ const requiredSchemaModels = [
   "PmsProvider",
   "PmsOperatory",
   "PmsAppointment",
+  "PmsCheckoutSession",
   "PmsAppointmentCategory",
   "PmsBlockout",
   "PmsAppointmentRequest",
@@ -122,11 +124,20 @@ if (pmsPage.includes("workbenchAreas") || pmsPage.includes("getWorkbenchesForRol
 }
 
 const schedulePage = fs.readFileSync("src/app/app/pms/schedule/page.tsx", "utf8");
+const appointmentPage = fs.readFileSync("src/app/app/pms/appointments/[appointmentId]/page.tsx", "utf8");
 const onlineSchedulingPage = fs.readFileSync("src/app/app/pms/online-scheduling/page.tsx", "utf8");
 const publicBookingPage = fs.readFileSync("src/app/book/[slug]/page.tsx", "utf8");
 for (const token of ["Operatory day sheet", "Pinboard", "Recall", "Lab case", "AppointmentCategory"]) {
   if (!schedulePage.includes(token) && !schema.includes(token)) {
     console.error(`Schedule PMS depth token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["PmsCheckoutSession", "getAppointmentControl", "completeAppointmentCheckout", "APPOINTMENT_CHECKOUT_COMPLETED", "Appointment control", "Complete checkout", "internal claim draft", "Override hard blockers"]) {
+  const haystack = `${schema}\n${appointmentPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+  if (!haystack.includes(token)) {
+    console.error(`PMS appointment checkout token missing: ${token}`);
     process.exit(1);
   }
 }
@@ -246,14 +257,14 @@ for (const token of ["PhoneConversation", "PhoneOutboundMessage", "PhoneRoutingR
   }
 }
 
-for (const token of ["ReputationReviewWorkflow", "PatientSurvey", "ReputationListingProfile", "ReputationReviewResponse", "ReputationCampaignRule", "ReputationReferralRequest", "getReputationOperatingCenter", "Patient experience command center", "Listing accuracy and review sources", "Campaign rules and suppression logic", "Referral and testimonial queue", "BLOCKED_SERVICE_RECOVERY"]) {
+for (const token of ["ReputationReviewWorkflow", "PatientSurvey", "ReputationListingProfile", "ReputationReviewResponse", "ReputationCampaignRule", "ReputationReferralRequest", "getReputationOperatingCenter", "Patient experience command center", "Listing accuracy and review sources", "Listings issue queue", "Campaign rules and suppression logic", "Referral and testimonial queue", "BLOCKED_SERVICE_RECOVERY", "BLOCKED_PRIVATE_SURVEY", "private survey must be completed with positive score before public review request", "PmsAppointment completed visit + PatientSurvey private feedback eligibility", "HIPAA guardrails"]) {
   if (!`${schema}\n${reputationPage}\n${osRepository}`.includes(token)) {
     console.error(`Reputation operating-system token missing: ${token}`);
     process.exit(1);
   }
 }
 
-for (const token of ["MarketingCampaign", "MarketingLandingPage", "AiStudioAsset", "getMarketingOperatingCenter", "Marketing, AI Studio, Local SEO, and AI SEO", "landing-page copy"]) {
+for (const token of ["MarketingCampaign", "MarketingLandingPage", "AiStudioAsset", "MarketingLocalSeoTask", "getMarketingOperatingCenter", "Marketing, AI Studio, Local SEO, and AI SEO", "landing-page copy", "PMS/RCM/reputation audience validation", "marketingAudienceBlueprint", "updateLocalSeoTaskStatus", "PMS online scheduling plus CRM lead queue", "localSeoAction"]) {
   if (!`${schema}\n${marketingPage}\n${osRepository}`.includes(token)) {
     console.error(`Marketing operating-system token missing: ${token}`);
     process.exit(1);
@@ -263,14 +274,14 @@ for (const token of ["MarketingCampaign", "MarketingLandingPage", "AiStudioAsset
 const huddlePage = fs.readFileSync("src/app/app/huddle/page.tsx", "utf8");
 const patientFinderPage = fs.readFileSync("src/app/app/patient-finder/page.tsx", "utf8");
 const patientIntelligenceRepository = fs.readFileSync("src/lib/patient-intelligence-repository.ts", "utf8");
-for (const token of ["MorningHuddleSnapshot", "getMorningHuddle", "Morning huddle", "Perfect Time Slot opening map", "Yesterday, today, and tomorrow operating plan"]) {
+for (const token of ["MorningHuddleSnapshot", "getMorningHuddle", "Morning huddle", "Perfect Time Slot opening map", "Yesterday, today, and tomorrow operating plan", "Provider goals and clinical hours", "Service-line production", "Huddle work queue", "Suggested patients", "getProviderGoalPacing", "getServiceLineProduction", "getHuddleWorkQueue", "getSuggestedPatients"]) {
   if (!`${schema}\n${huddlePage}\n${patientIntelligenceRepository}`.includes(token)) {
     console.error(`Morning huddle token missing: ${token}`);
     process.exit(1);
   }
 }
 
-for (const token of ["PatientFinderSavedFilter", "PatientFinderFollowUp", "getPatientFinderCenter", "Opportunity recipes", "Follow-up work queue", "unscheduled_treatment", "high_intent_phone"]) {
+for (const token of ["PatientFinderSavedFilter", "PatientFinderFollowUp", "getPatientFinderCenter", "Opportunity recipes", "Follow-up work queue", "Create follow-up", "getRecipeSourceContext", "unscheduled_treatment", "high_intent_phone"]) {
   if (!`${schema}\n${patientFinderPage}\n${patientIntelligenceRepository}`.includes(token)) {
     console.error(`Patient Finder token missing: ${token}`);
     process.exit(1);

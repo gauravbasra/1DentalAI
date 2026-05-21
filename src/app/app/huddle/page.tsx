@@ -9,6 +9,10 @@ export const dynamic = "force-dynamic";
 type SnapshotRow = { id: string; tab: string; label: string; valueText: string; detailText: string | null; sourceModule: string; drilldownRoute: string | null; ownerRoleKey: string | null };
 type DayMetrics = Record<string, string>;
 type OpeningRow = { day: string; openings: string; scheduledProductionCents: string };
+type ProviderGoalRow = { id: string; displayName: string; providerType: string; dailyGoalCents: number; todayScheduledCents: number; yesterdayProductionCents: number; clinicalHours: number; readinessBlocks: number };
+type ServiceLineRow = { serviceLine: string; yesterdayCents: number; todayScheduledCents: number; tomorrowScheduledCents: number; readinessBlocks: number };
+type WorkQueueRow = { day: string; workType: string; patientId: string | null; firstName: string | null; lastName: string | null; eventAt: string | null; signal: string; opportunityCents: number; nextAction: string; route: string; ownerRoleKey: string };
+type SuggestedPatientRow = { id: string; firstName: string; lastName: string; chartNumber: string; phone: string | null; email: string | null; suggestionType: string; reason: string; opportunityCents: number; nextAction: string };
 
 export default async function HuddlePage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
@@ -16,6 +20,10 @@ export default async function HuddlePage({ searchParams }: { searchParams: Promi
   const huddle = await getMorningHuddle();
   const snapshots = huddle.snapshots as SnapshotRow[];
   const openings = huddle.openings as OpeningRow[];
+  const providerGoals = huddle.providerGoals as ProviderGoalRow[];
+  const serviceLines = huddle.serviceLines as ServiceLineRow[];
+  const workQueue = huddle.workQueue as WorkQueueRow[];
+  const suggestedPatients = huddle.suggestedPatients as SuggestedPatientRow[];
 
   return (
     <FoundationShell active="/app/huddle" roleKey={role.key}>
@@ -37,6 +45,94 @@ export default async function HuddlePage({ searchParams }: { searchParams: Promi
         <HuddleColumn title="Yesterday" rows={snapshots.filter((row) => row.tab === "YESTERDAY")} metrics={huddle.yesterday} />
         <HuddleColumn title="Today" rows={snapshots.filter((row) => row.tab === "TODAY")} metrics={huddle.today} />
         <HuddleColumn title="Tomorrow" rows={snapshots.filter((row) => row.tab === "TOMORROW")} metrics={huddle.tomorrow} />
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <PmsCard title="Provider goals and clinical hours" eyebrow="Live schedule and ledger pacing">
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="bg-neutral-50 text-[11px] uppercase tracking-[0.08em] text-neutral-500">
+                <tr><th className="px-3 py-2">Provider</th><th className="px-3 py-2">Goal pace</th><th className="px-3 py-2">Today</th><th className="px-3 py-2">Hours</th><th className="px-3 py-2">Blocks</th></tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {providerGoals.map((row) => {
+                  const pace = percent(row.todayScheduledCents, row.dailyGoalCents);
+                  return (
+                    <tr key={row.id} className="align-top">
+                      <td className="px-3 py-3"><p className="font-semibold text-neutral-950">{row.displayName}</p><p className="mt-1 text-xs text-neutral-500">{row.providerType}</p></td>
+                      <td className="px-3 py-3">
+                        <div className="h-2 w-28 overflow-hidden rounded-full bg-neutral-200"><div className="h-full bg-cyan-600" style={{ width: `${Math.min(100, pace)}%` }} /></div>
+                        <p className="mt-1 text-xs text-neutral-500">{pace}% of <Money cents={row.dailyGoalCents} /></p>
+                      </td>
+                      <td className="px-3 py-3 font-semibold text-neutral-950"><Money cents={row.todayScheduledCents} /></td>
+                      <td className="px-3 py-3 text-neutral-700">{row.clinicalHours.toFixed(1)}</td>
+                      <td className="px-3 py-3 text-neutral-700">{row.readinessBlocks}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </PmsCard>
+        <PmsCard title="Service-line production" eyebrow="Yesterday actual, today/tomorrow scheduled">
+          <div className="grid gap-2">
+            {serviceLines.map((row) => (
+              <div key={row.serviceLine} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-sm font-semibold text-neutral-950">{row.serviceLine}</p>
+                  <p className="text-xs text-neutral-500">{row.readinessBlocks} blocker(s)</p>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                  <MiniMoney label="Yesterday" cents={row.yesterdayCents} />
+                  <MiniMoney label="Today" cents={row.todayScheduledCents} />
+                  <MiniMoney label="Tomorrow" cents={row.tomorrowScheduledCents} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <PmsCard title="Huddle work queue" eyebrow="Today priorities and tomorrow fill">
+          <div className="grid gap-2">
+            {workQueue.map((item) => (
+              <div key={`${item.day}-${item.workType}-${item.patientId}-${item.signal}`} className="grid gap-3 rounded-md border border-neutral-200 bg-white p-3 md:grid-cols-[1fr_auto]">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-md bg-neutral-100 px-2 py-0.5 text-[11px] font-semibold text-neutral-700">{item.day}</span>
+                    <p className="text-sm font-semibold text-neutral-950">{item.workType}</p>
+                    <p className="text-xs text-neutral-500">{item.ownerRoleKey.replaceAll("_", " ")}</p>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-neutral-600">
+                    {item.firstName ? `${item.lastName}, ${item.firstName}: ` : null}{item.signal}. {item.nextAction}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 md:justify-end">
+                  <p className="text-sm font-semibold text-neutral-950"><Money cents={item.opportunityCents} /></p>
+                  <Link href={item.route} className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:border-neutral-500">Open</Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+        <PmsCard title="Suggested patients" eyebrow="Unscheduled active-patient analysis">
+          <div className="grid gap-2">
+            {suggestedPatients.map((patient) => (
+              <div key={`${patient.id}-${patient.suggestionType}`} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{patient.lastName}, {patient.firstName}</p>
+                    <p className="mt-1 text-xs text-neutral-500">{patient.chartNumber} · {patient.phone ?? patient.email ?? "no contact"}</p>
+                  </div>
+                  <p className="text-sm font-semibold text-neutral-950"><Money cents={patient.opportunityCents} /></p>
+                </div>
+                <p className="mt-2 text-xs font-semibold text-neutral-700">{patient.suggestionType}</p>
+                <p className="mt-1 text-xs leading-5 text-neutral-600">{patient.reason}. {patient.nextAction}</p>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
@@ -98,4 +194,13 @@ function RouteCard({ title, href, body }: { title: string; href: string; body: s
 
 function Metric({ label, value, detail }: { label: string; value: React.ReactNode; detail: React.ReactNode }) {
   return <div className="rounded-lg border border-neutral-200 bg-white px-4 py-3 shadow-sm"><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p><p className="mt-1 text-2xl font-semibold text-neutral-950">{value}</p><p className="mt-1 text-xs text-neutral-500">{detail}</p></div>;
+}
+
+function MiniMoney({ label, cents }: { label: string; cents: number }) {
+  return <div><p className="text-neutral-500">{label}</p><p className="mt-1 font-semibold text-neutral-950"><Money cents={cents} /></p></div>;
+}
+
+function percent(value: number, goal: number) {
+  if (!goal) return 0;
+  return Math.round((value / goal) * 100);
 }

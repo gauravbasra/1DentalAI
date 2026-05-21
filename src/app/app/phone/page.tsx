@@ -11,6 +11,8 @@ import {
   updatePhoneCallTaskStatus,
   updatePhoneConversationStatus,
   updatePhoneDeviceStatus,
+  updatePhoneExtensionStatus,
+  updatePhoneNumberStatus,
   updatePhoneOutboundMessageApproval,
   updatePhoneProviderStatus,
   updatePhoneVoicemailStatus,
@@ -43,8 +45,16 @@ type ConversationRow = {
   revenueOpportunityCents: number;
   keywords: string[] | null;
   riskFlags: string[] | null;
+  openBalanceCents: number;
+  overdueBalanceCents: number;
+  openPmsTasks: number;
+  nextAppointments: ScreenPopAppointment[];
+  openTreatmentPlans: ScreenPopTreatmentPlan[];
+  dueRecalls: ScreenPopRecall[];
+  openForms: ScreenPopForm[];
+  communicationPreferences: ScreenPopPreference[];
 };
-type MessageRow = { id: string; firstName: string | null; lastName: string | null; chartNumber: string | null; channel: string; recipientNumber: string | null; messageType: string; body: string; approvalStatus: string; deliveryStatus: string; consentStatus: string; blockedReason: string | null };
+type MessageRow = { id: string; firstName: string | null; lastName: string | null; chartNumber: string | null; channel: string; recipientNumber: string | null; messageType: string; body: string; approvalStatus: string; deliveryStatus: string; consentStatus: string; connectorStatus: string; linkType: string | null; linkTargetId: string | null; linkLabel: string | null; readiness: unknown; blockedReason: string | null; openBalanceCents: number; openFormCount: number };
 type RouteRow = { id: string; name: string; triggerType: string; destinationType: string; destination: string; priority: number; status: string; failoverAction: string | null; locationName: string | null };
 type TaskRow = { id: string; firstName: string | null; lastName: string | null; chartNumber: string | null; aiIntent: string | null; callerNumber: string | null; taskType: string; priority: string; status: string; dueAt: string | null; ownerRoleKey: string; nextAction: string };
 type AnalyticsRow = { id: string; callerName: string | null; callerNumber: string | null; aiIntent: string | null; firstName: string | null; lastName: string | null; chartNumber: string | null; bookingIntentScore: number; serviceRecoveryScore: number; revenueOpportunityCents: number; keywords: string[] | null; riskFlags: string[] | null; summaryQuality: string };
@@ -55,6 +65,12 @@ type ProviderRow = { id: string; providerType: string; name: string; trunkDomain
 type ActiveCallRow = { id: string; conversationId: string | null; fromNumber: string; toNumber: string; direction: string; callState: string; extensionNumber: string | null; extensionName: string | null; callerName: string | null; aiIntent: string | null; parkedSlot: string | null; holdStartedAt: string | null; startedAt: string };
 type ControlRow = { id: string; actionType: string; requestedByRole: string; targetNumber: string | null; targetParkSlot: string | null; providerStatus: string; blockedReason: string | null; resultSummary: string | null; targetExtensionName: string | null; extensionNumber: string | null; createdAt: string };
 type VoicemailRow = { id: string; callerNumber: string | null; callerName: string | null; status: string; durationSeconds: number | null; transcription: string | null; ownerRoleKey: string; dueAt: string | null; extensionNumber: string | null; extensionName: string | null };
+type ScreenPopAppointment = { id: string; appointmentType: string; startsAt: string; status: string; readinessStatus: string; productionCents: number };
+type ScreenPopTreatmentPlan = { id: string; name: string; status: string; totalFeeCents: number; patientEstimateCents: number };
+type ScreenPopRecall = { id: string; recallType: string; dueDate: string; status: string };
+type ScreenPopForm = { id: string; templateName: string | null; status: string; dueAt: string | null };
+type ScreenPopPreference = { channel: string; destination: string; consentStatus: string; quietHoursStart: string | null; quietHoursEnd: string | null };
+type SetupReadiness = { status: string; blocked: number; checks: Array<{ label: string; status: string; nextAction: string }> };
 
 async function createAction(formData: FormData) {
   "use server";
@@ -88,6 +104,9 @@ async function messageAction(formData: FormData) {
     messageType: String(formData.get("messageType") ?? "FOLLOW_UP"),
     body: String(formData.get("body") ?? ""),
     consentStatus: String(formData.get("consentStatus") ?? "UNKNOWN"),
+    linkType: String(formData.get("linkType") ?? "") || undefined,
+    linkTargetId: String(formData.get("linkTargetId") ?? "") || undefined,
+    linkLabel: String(formData.get("linkLabel") ?? "") || undefined,
     blockedReason: String(formData.get("blockedReason") ?? "") || undefined,
   });
   revalidatePath("/app/phone");
@@ -138,6 +157,25 @@ async function deviceAction(formData: FormData) {
   revalidatePath("/app/phone");
 }
 
+async function numberAction(formData: FormData) {
+  "use server";
+  await updatePhoneNumberStatus(
+    String(formData.get("id") ?? ""),
+    String(formData.get("portStatus") ?? "NOT_STARTED"),
+    String(formData.get("voiceStatus") ?? "NOT_CONFIGURED"),
+    String(formData.get("smsStatus") ?? "NOT_CONFIGURED"),
+    String(formData.get("e911Status") ?? "NOT_CONFIGURED"),
+    String(formData.get("status") ?? "SETUP_REQUIRED"),
+  );
+  revalidatePath("/app/phone");
+}
+
+async function extensionAction(formData: FormData) {
+  "use server";
+  await updatePhoneExtensionStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "ACTIVE"), String(formData.get("voicemailEnabled") ?? "true") === "true");
+  revalidatePath("/app/phone");
+}
+
 async function providerAction(formData: FormData) {
   "use server";
   await updatePhoneProviderStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "SETUP_REQUIRED"), String(formData.get("credentialStatus") ?? "MISSING"), String(formData.get("webhookStatus") ?? "NOT_CONFIGURED"));
@@ -168,6 +206,7 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
   const activeCalls = center.activeCalls as ActiveCallRow[];
   const controls = center.controls as ControlRow[];
   const voicemails = center.voicemails as VoicemailRow[];
+  const setupReadiness = center.setupReadiness as SetupReadiness;
 
   return (
     <FoundationShell active="/app/phone" roleKey={role.key}>
@@ -187,6 +226,26 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
         <Metric label="Voicemails" value={metrics.newVoicemails} />
         <Metric label="Open tasks" value={metrics.openTasks} />
         <Metric label="Opportunity" value={<Money cents={Number(metrics.opportunityCents)} />} />
+      </section>
+
+      <section className="mt-4">
+        <PmsCard title="Phone setup readiness" eyebrow="No live calling, texting, payment links, or form links until every required connector check passes">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-neutral-950">{clean(setupReadiness.status)} · {setupReadiness.blocked} blocked readiness checks</p>
+            <StatusFor value={setupReadiness.status} />
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {setupReadiness.checks.map((check) => (
+              <div key={check.label} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-sm font-semibold text-neutral-950">{check.label}</p>
+                  <StatusFor value={check.status} />
+                </div>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{check.nextAction}</p>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
@@ -232,6 +291,15 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <MiniMetric label="E911" value={clean(number.e911Status)} />
                   <MiniMetric label="Recording" value={clean(number.recordingPolicy)} />
                 </div>
+                <form action={numberAction} className="mt-3 grid gap-2 sm:grid-cols-6">
+                  <input type="hidden" name="id" value={number.id} />
+                  <Select name="portStatus" label="Port" options={["NOT_STARTED", "READY_TO_PORT", "PORTING", "PORTED", "BLOCKED"]} compact />
+                  <Select name="voiceStatus" label="Voice" options={["NOT_CONFIGURED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} compact />
+                  <Select name="smsStatus" label="SMS" options={["NOT_CONFIGURED", "REGISTRATION_REQUIRED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} compact />
+                  <Select name="e911Status" label="E911" options={["NOT_CONFIGURED", "NEEDS_VALIDATION", "VALIDATED", "ACTIVE", "BLOCKED"]} compact />
+                  <Select name="status" label="Number" options={["SETUP_REQUIRED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED"]} compact />
+                  <label className="grid gap-1 text-xs font-semibold text-transparent">Update<button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700">Update number</button></label>
+                </form>
               </div>
             ))}
           </div>
@@ -248,6 +316,12 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   </div>
                   <StatusFor value={extension.status} />
                 </div>
+                <form action={extensionAction} className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <input type="hidden" name="id" value={extension.id} />
+                  <Select name="status" label="Extension" options={["ACTIVE", "SETUP_REQUIRED", "DISABLED", "BLOCKED"]} compact />
+                  <Select name="voicemailEnabled" label="Voicemail" options={["true", "false"]} compact />
+                  <label className="grid gap-1 text-xs font-semibold text-transparent">Update<button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700">Update extension</button></label>
+                </form>
               </div>
             ))}
             {devices.map((device) => (
@@ -344,7 +418,7 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
               <Select name="aiIntent" label="Intent" options={["NEW_PATIENT_BOOKING", "IMPLANT_CONSULT_PRICE", "CONFIRM_APPOINTMENT", "EMERGENCY", "INSURANCE_QUESTION", "PAYMENT_QUESTION", "TREATMENT_INTEREST", "REPUTATION_RECOVERY"]} />
               <Input name="callerName" label="Caller name" />
               <Input name="callerNumber" label="Caller number" />
-              <Select name="outcome" label="Outcome" options={["MISSED_CALL", "CALL_SUMMARY_REVIEW", "BOOKING_HANDOFF", "BILLING_HANDOFF", "SERVICE_RECOVERY", "AI_VOICE_REVIEW"]} />
+                  <Select name="outcome" label="Outcome" options={["MISSED_CALL", "CALL_SUMMARY_REVIEW", "BOOKING_HANDOFF", "BILLING_HANDOFF", "SERVICE_RECOVERY", "AI_VOICE_REVIEW"]} />
             </div>
             <Textarea name="transcriptSummary" label="Transcript summary" required />
             <button className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white">Create phone work item</button>
@@ -369,11 +443,13 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <MiniMetric label="Recovery risk" value={`${call.serviceRecoveryScore ?? 0}%`} />
                   <MiniMetric label="Opportunity" value={<Money cents={Number(call.revenueOpportunityCents ?? 0)} />} />
                 </div>
+                <ScreenPop call={call} />
                 <p className="mt-2 text-xs leading-5 text-neutral-500">{list("Keywords", call.keywords)} {list("Risks", call.riskFlags)}</p>
                 <div className="mt-3 grid gap-2 md:grid-cols-4">
                   <StatusButton id={call.id} status="OPEN" followUpStatus="READY_FOR_APPROVAL" label="Ready follow-up" />
                   <StatusButton id={call.id} status="OPEN" followUpStatus="BLOCKED_RCM_REVIEW" label="Send to RCM" />
                   <StatusButton id={call.id} status="OPEN" followUpStatus="PATIENT_FINDER" label="Patient Finder" />
+                  <StatusButton id={call.id} status="OPEN" followUpStatus="CHART_NOTE_REVIEW" label="Chart review" />
                   <StatusButton id={call.id} status="CLOSED" followUpStatus="COMPLETED" label="Close" />
                 </div>
               </div>
@@ -388,8 +464,11 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
             <label className="grid gap-1 text-xs font-semibold text-neutral-700">Conversation<select name="conversationKey" className="rounded-md border border-neutral-300 px-3 py-2 text-sm">{conversations.map((call) => <option key={call.id} value={`${call.id}|${call.patientId ?? ""}|${call.appointmentId ?? ""}|${call.callerNumber ?? ""}`}>{call.callerName ?? call.callerNumber ?? call.id} - {clean(call.aiIntent ?? "call")}</option>)}</select></label>
             <div className="grid gap-3 sm:grid-cols-3">
               <Select name="channel" label="Channel" options={["SMS", "EMAIL"]} />
-              <Select name="messageType" label="Type" options={["MISSED_CALL_TEXT", "APPOINTMENT_CONFIRMATION_REPLY", "BILLING_HANDOFF_REPLY", "RECALL_REPLY", "REVIEW_RECOVERY"]} />
+              <Select name="messageType" label="Type" options={["MISSED_CALL_TEXT", "APPOINTMENT_CONFIRMATION_REPLY", "OVERDUE_BALANCE_REMINDER", "PAYMENT_LINK", "FORM_PACKET_LINK", "ONLINE_SCHEDULING_LINK", "BILLING_HANDOFF_REPLY", "RECALL_REPLY", "REVIEW_RECOVERY"]} />
               <Select name="consentStatus" label="Consent" options={["UNKNOWN", "VERIFIED", "OPTED_OUT"]} />
+              <Select name="linkType" label="Staged link" options={["", "PAYMENT_LINK", "FORM_PACKET_LINK", "ONLINE_SCHEDULING_LINK"]} />
+              <Input name="linkTargetId" label="Link target ID" />
+              <Input name="linkLabel" label="Link label" />
             </div>
             <Textarea name="body" label="Message body" required />
             <Input name="blockedReason" label="Blocked reason" />
@@ -403,7 +482,14 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                   <StatusFor value={message.approvalStatus} />
                 </div>
                 <p className="mt-1 text-xs text-neutral-600">{message.lastName ? `${message.lastName}, ${message.firstName} - ${message.chartNumber}` : message.recipientNumber ?? "No recipient"} · {clean(message.deliveryStatus)}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  <MiniMetric label="Consent" value={clean(message.consentStatus)} />
+                  <MiniMetric label="Connector" value={clean(message.connectorStatus)} />
+                  <MiniMetric label="Link" value={message.linkLabel ?? clean(message.linkType ?? "none")} />
+                  <MiniMetric label="PMS context" value={message.linkType === "PAYMENT_LINK" ? <Money cents={Number(message.openBalanceCents ?? 0)} /> : `${message.openFormCount ?? 0} forms`} />
+                </div>
                 <p className="mt-2 text-sm leading-6 text-neutral-700">{message.body}</p>
+                <p className="mt-2 text-xs leading-5 text-neutral-500">{readinessSummary(message.readiness)}</p>
                 {message.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{message.blockedReason}</p> : null}
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   <MessageButton id={message.id} approvalStatus="NEEDS_APPROVAL" label="Needs approval" />
@@ -496,6 +582,48 @@ function VoicemailButton({ id, status, label }: { id: string; status: string; la
   return <form action={voicemailAction}><input type="hidden" name="id" value={id} /><input type="hidden" name="status" value={status} /><ActionButton label={label} /></form>;
 }
 
+function ScreenPop({ call }: { call: ConversationRow }) {
+  const appointments = asList<ScreenPopAppointment>(call.nextAppointments);
+  const treatmentPlans = asList<ScreenPopTreatmentPlan>(call.openTreatmentPlans);
+  const recalls = asList<ScreenPopRecall>(call.dueRecalls);
+  const forms = asList<ScreenPopForm>(call.openForms);
+  const preferences = asList<ScreenPopPreference>(call.communicationPreferences);
+  return (
+    <div className="mt-3 rounded-md border border-neutral-200 bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-500">PMS screen pop</p>
+        <p className="text-xs font-semibold text-neutral-700">Tasks {call.openPmsTasks ?? 0} · Balance <Money cents={Number(call.openBalanceCents ?? 0)} /> · Overdue <Money cents={Number(call.overdueBalanceCents ?? 0)} /></p>
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <ScreenPopList title="Appointments" empty="No upcoming appointment" rows={appointments.map((item) => `${fmtDate(item.startsAt)} · ${item.appointmentType} · ${clean(item.readinessStatus)}`)} />
+        <ScreenPopList title="Treatment" empty="No open treatment plan" rows={treatmentPlans.map((item) => `${item.name} · ${clean(item.status)} · ${moneyText(item.patientEstimateCents)} patient est.`)} />
+        <ScreenPopList title="Recall" empty="No due recall" rows={recalls.map((item) => `${clean(item.recallType)} · ${fmtDate(item.dueDate)} · ${clean(item.status)}`)} />
+        <ScreenPopList title="Forms and consent" empty="No open forms" rows={forms.map((item) => `${item.templateName ?? "Form packet"} · ${clean(item.status)}${item.dueAt ? ` · due ${fmtDate(item.dueAt)}` : ""}`)} />
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {preferences.length ? preferences.map((pref) => (
+          <div key={`${pref.channel}-${pref.destination}`} className="rounded-md bg-neutral-50 p-2 ring-1 ring-neutral-200">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">{clean(pref.channel)} preference</p>
+            <p className="mt-1 truncate text-xs font-semibold text-neutral-900">{pref.destination}</p>
+            <p className="mt-1 text-xs text-neutral-600">Consent {clean(pref.consentStatus)} · Quiet {pref.quietHoursStart ?? "none"}-{pref.quietHoursEnd ?? "none"}</p>
+          </div>
+        )) : <p className="text-xs leading-5 text-neutral-500">No communication preference is recorded for this PMS patient.</p>}
+      </div>
+    </div>
+  );
+}
+
+function ScreenPopList({ title, rows, empty }: { title: string; rows: string[]; empty: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">{title}</p>
+      <div className="mt-1 grid gap-1">
+        {rows.length ? rows.map((row) => <p key={row} className="text-xs leading-5 text-neutral-700">{row}</p>) : <p className="text-xs leading-5 text-neutral-500">{empty}</p>}
+      </div>
+    </div>
+  );
+}
+
 function ActionButton({ label }: { label: string }) {
   return <button className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 hover:bg-neutral-50">{label}</button>;
 }
@@ -518,6 +646,26 @@ function Select({ name, label, options, compact = false }: { name: string; label
 
 function Textarea({ name, label, required = false }: { name: string; label: string; required?: boolean }) {
   return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<textarea name={name} required={required} rows={4} className="min-w-0 rounded-md border border-neutral-300 px-3 py-2 text-sm" /></label>;
+}
+
+function asList<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value as T[] : [];
+}
+
+function fmtDate(value: string | Date) {
+  return new Date(value).toLocaleDateString();
+}
+
+function moneyText(cents: number) {
+  return `$${(Number(cents || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function readinessSummary(value: unknown) {
+  if (!value || typeof value !== "object") return "Readiness not recorded.";
+  const readiness = value as { missing?: unknown; semantics?: unknown; externalSendBlocked?: unknown };
+  const missing = Array.isArray(readiness.missing) ? readiness.missing.filter(Boolean).join(", ") : "";
+  const semantics = typeof readiness.semantics === "string" ? readiness.semantics : "Internal queue only; no external transport is claimed.";
+  return missing ? `${semantics} Missing: ${missing}.` : semantics;
 }
 
 function clean(value: string) {

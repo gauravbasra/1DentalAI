@@ -17,6 +17,7 @@ const appNav = [
   { href: "/app/engagement", label: "Engagement" },
   { href: "/app/reputation", label: "Reputation" },
   { href: "/app/marketing", label: "Marketing" },
+  { href: "/app/connectors", label: "Connectors" },
   { href: "/app/locations", label: "Locations" },
   { href: "/app/team", label: "Team" },
   { href: "/app/rooms", label: "Rooms" },

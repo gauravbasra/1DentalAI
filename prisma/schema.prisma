@@ -171,6 +171,147 @@ model ConnectorReadinessItem {
   @@index([status])
 }
 
+model ConnectorDefinition {
+  id              String   @id @default(cuid())
+  tenantId        String
+  slug            String
+  name            String
+  category        String
+  vendorType      String   @default("DIRECT_OR_VENDOR")
+  status          String   @default("AVAILABLE")
+  summary         String
+  dataClasses     String[] @default([])
+  supportedScopes String[] @default([])
+  setupChecklist  Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  installations ConnectorInstallation[]
+  capabilities  ConnectorCapability[]
+  routeDecisions ConnectorRouteDecision[]
+  healthChecks  ConnectorHealthCheck[]
+  costEvents    ConnectorCostEvent[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, category, status])
+}
+
+model ConnectorInstallation {
+  id             String   @id @default(cuid())
+  tenantId       String
+  definitionId   String
+  locationId     String?
+  status         String   @default("SETUP_REQUIRED")
+  credentialStatus String @default("MISSING")
+  webhookStatus  String   @default("NOT_CONFIGURED")
+  approvalStatus String   @default("NEEDS_APPROVAL")
+  healthStatus   String   @default("NOT_TESTED")
+  fallbackMode   String   @default("MANUAL_QUEUE")
+  costPolicy     Json?
+  nextAction     String
+  lastHealthyAt  DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  definition ConnectorDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  capabilities ConnectorCapability[]
+  routeDecisions ConnectorRouteDecision[]
+  healthChecks ConnectorHealthCheck[]
+  costEvents ConnectorCostEvent[]
+
+  @@index([tenantId, status, healthStatus])
+  @@index([definitionId, locationId])
+}
+
+model ConnectorCapability {
+  id             String   @id @default(cuid())
+  tenantId       String
+  definitionId   String
+  installationId String?
+  capabilityKey  String
+  workflowArea   String
+  direction      String
+  status         String   @default("NOT_CONFIGURED")
+  supportedTransactions String[] @default([])
+  requiredFields String[] @default([])
+  missingFields  String[] @default([])
+  approvalPolicy Json?
+  fallbackPolicy Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  definition ConnectorDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  installation ConnectorInstallation? @relation(fields: [installationId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, workflowArea, status])
+  @@index([definitionId, capabilityKey])
+}
+
+model ConnectorRouteDecision {
+  id             String   @id @default(cuid())
+  tenantId       String
+  definitionId   String?
+  installationId String?
+  workflowArea   String
+  sourceObjectType String
+  sourceObjectId String?
+  requestedCapability String
+  routeStatus    String   @default("BLOCKED_CONNECTOR_REQUIRED")
+  selectedRoute  String?
+  fallbackRoute  String   @default("MANUAL_QUEUE")
+  estimatedCostCents Int  @default(0)
+  blockedReason  String?
+  decisionContext Json?
+  actorRole      String   @default("system")
+  createdAt      DateTime @default(now())
+
+  definition ConnectorDefinition? @relation(fields: [definitionId], references: [id], onDelete: SetNull)
+  installation ConnectorInstallation? @relation(fields: [installationId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, workflowArea, createdAt])
+  @@index([sourceObjectType, sourceObjectId])
+}
+
+model ConnectorHealthCheck {
+  id             String   @id @default(cuid())
+  tenantId       String
+  definitionId   String
+  installationId String?
+  checkType      String
+  status         String
+  resultSummary  String
+  latencyMs      Int?
+  checkedAt      DateTime @default(now())
+
+  definition ConnectorDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  installation ConnectorInstallation? @relation(fields: [installationId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, checkedAt])
+  @@index([definitionId, checkType])
+}
+
+model ConnectorCostEvent {
+  id             String   @id @default(cuid())
+  tenantId       String
+  definitionId   String?
+  installationId String?
+  workflowArea   String
+  capabilityKey  String
+  sourceObjectType String?
+  sourceObjectId String?
+  costCents      Int      @default(0)
+  pricingUnit    String
+  status         String   @default("ESTIMATED")
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  definition ConnectorDefinition? @relation(fields: [definitionId], references: [id], onDelete: SetNull)
+  installation ConnectorInstallation? @relation(fields: [installationId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, workflowArea, createdAt])
+  @@index([definitionId, capabilityKey])
+}
+
 model WorkbenchAuditEvent {
   id          String                  @id @default(cuid())
   tenantId    String
@@ -349,6 +490,28 @@ model PmsAppointmentStatusHistory {
   createdAt     DateTime @default(now())
 
   @@index([appointmentId, createdAt])
+}
+
+model PmsCheckoutSession {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  appointmentId         String
+  patientId             String
+  actorRole             String
+  status                String   @default("COMPLETED")
+  completedProcedureIds String[]
+  readinessOverride     Boolean  @default(false)
+  blockerSummary        Json?
+  chargeCents           Int      @default(0)
+  patientPaymentCents   Int      @default(0)
+  claimId               String?
+  paymentId             String?
+  checkoutNote          String?
+  createdAt             DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([appointmentId, createdAt])
+  @@index([patientId, createdAt])
 }
 
 model PmsAppointmentRequest {
@@ -1379,6 +1542,11 @@ model PhoneOutboundMessage {
   approvalStatus  String   @default("DRAFT")
   deliveryStatus  String   @default("NOT_SENT")
   consentStatus   String   @default("UNKNOWN")
+  connectorStatus String   @default("CONNECTOR_REQUIRED")
+  linkType        String?
+  linkTargetId    String?
+  linkLabel       String?
+  readiness       Json?
   blockedReason   String?
   ownerRoleKey    String   @default("front_desk")
   createdAt       DateTime @default(now())

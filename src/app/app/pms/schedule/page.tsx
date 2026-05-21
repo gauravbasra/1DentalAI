@@ -145,7 +145,7 @@ function ScheduleGrid({ board, roleKey }: { board: PmsScheduleBoard; roleKey: st
 
 function AppointmentTile({ appt, roleKey }: { appt: PmsAppointmentRow; roleKey: string }) {
   return (
-    <Link href={appt.patientId ? `/app/pms/patients/${appt.patientId}?role=${roleKey}` : `/app/pms/schedule?role=${roleKey}`} className="mb-2 block rounded-md border-l-4 border-cyan-500 bg-cyan-50 p-2 text-sm shadow-sm">
+    <Link href={`/app/pms/appointments/${appt.id}?role=${roleKey}`} className="mb-2 block rounded-md border-l-4 border-cyan-500 bg-cyan-50 p-2 text-sm shadow-sm">
       <div className="flex items-start justify-between gap-2">
         <p className="font-semibold text-neutral-950">{appt.patientName ?? "Held appointment"}</p>
         <StatusPill tone={appt.status === "COMPLETED" ? "green" : appt.status === "BROKEN" ? "red" : "amber"}>{appt.status.toLowerCase()}</StatusPill>

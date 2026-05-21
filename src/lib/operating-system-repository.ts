@@ -10,11 +10,12 @@ async function addAudit(tenantId: string, actorRole: string, eventType: string, 
 }
 
 const verifiedConsentStatuses = new Set(["VERIFIED", "CONSENTED", "OPTED_IN", "ACTIVE"]);
-const allowedReviewStatuses = new Set(["READY_FOR_APPROVAL", "APPROVED_STAGED", "BLOCKED_SERVICE_RECOVERY", "BLOCKED_ELIGIBILITY", "COMPLETED"]);
+const allowedReviewStatuses = new Set(["READY_FOR_APPROVAL", "APPROVED_STAGED", "BLOCKED_SERVICE_RECOVERY", "BLOCKED_PRIVATE_SURVEY", "BLOCKED_ELIGIBILITY", "COMPLETED"]);
 const allowedResponseStatuses = new Set(["NEEDS_REVIEW", "APPROVED", "APPROVED_STAGED", "REVISION_REQUIRED"]);
 const allowedListingStatuses = new Set(["CONNECTED_REVIEW_SYNC", "DATA_MISMATCH", "NEEDS_CONNECTION", "MANUAL_REVIEW", "SYNC_ERROR"]);
-const allowedReferralStatuses = new Set(["READY_FOR_APPROVAL", "APPROVED_TO_SEND", "BLOCKED_NEEDS_REVIEW", "BLOCKED_CONSENT", "COMPLETED", "CLOSED"]);
+const allowedReferralStatuses = new Set(["READY_FOR_APPROVAL", "APPROVED_TO_SEND", "BLOCKED_NEEDS_REVIEW", "BLOCKED_CONSENT", "BLOCKED_TREATMENT_NOT_COMPLETE", "COMPLETED", "CLOSED"]);
 const allowedMarketingStatuses = new Set(["DRAFT", "READY_FOR_APPROVAL", "APPROVED_STAGED", "ACTIVE_INTERNAL", "BLOCKED_CONNECTOR_REQUIRED", "REVISION_REQUIRED", "APPROVED"]);
+const allowedLocalSeoStatuses = new Set(["OPEN", "READY_FOR_APPROVAL", "APPROVED_STAGED", "BLOCKED_CONNECTOR_REQUIRED", "COMPLETED", "CLOSED"]);
 const allowedRcmWorkStatuses = new Set(["OPEN", "READY_FOR_REVIEW", "APPROVED_STAGED", "BLOCKED_CONNECTOR_REQUIRED", "MANUAL_PROOF_REQUIRED", "COMPLETED", "CLOSED"]);
 const allowedPriorAuthStatuses = new Set(["EVIDENCE_NEEDED", "READY_FOR_REVIEW", "APPROVED_STAGED", "BLOCKED_CONNECTOR_REQUIRED", "MANUAL_PROOF_REQUIRED", "APPROVED", "CLOSED"]);
 const allowedDenialStatuses = new Set(["OPEN", "APPEAL_READY", "APPROVED_STAGED", "BLOCKED_CONNECTOR_REQUIRED", "MANUAL_PROOF_REQUIRED", "WON", "CLOSED"]);
@@ -463,20 +464,132 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
         coalesce(ca."bookingIntentScore", 0)::int as "bookingIntentScore",
         coalesce(ca."serviceRecoveryScore", 0)::int as "serviceRecoveryScore",
         coalesce(ca."revenueOpportunityCents", 0)::int as "revenueOpportunityCents",
-        ca."keywords", ca."riskFlags"
+        ca."keywords", ca."riskFlags",
+        coalesce(ledger."openBalanceCents", 0)::int as "openBalanceCents",
+        coalesce(ledger."overdueBalanceCents", 0)::int as "overdueBalanceCents",
+        coalesce(pms_tasks."openPmsTasks", 0)::int as "openPmsTasks",
+        coalesce(appts."nextAppointments", '[]'::jsonb) as "nextAppointments",
+        coalesce(treatment."openTreatmentPlans", '[]'::jsonb) as "openTreatmentPlans",
+        coalesce(recalls."dueRecalls", '[]'::jsonb) as "dueRecalls",
+        coalesce(forms."openForms", '[]'::jsonb) as "openForms",
+        coalesce(prefs."communicationPreferences", '[]'::jsonb) as "communicationPreferences"
        from "PhoneConversation" c
        left join "PmsPatient" p on p."id" = c."patientId"
        left join "PmsAppointment" a on a."id" = c."appointmentId"
        left join "PhoneCallAnalytics" ca on ca."conversationId" = c."id"
+       left join lateral (
+         select
+          coalesce(sum(le."balanceCents") filter (where le."balanceCents" > 0), 0) as "openBalanceCents",
+          coalesce(sum(le."balanceCents") filter (where le."balanceCents" > 0 and coalesce(le."serviceDate", le."postedAt") < current_timestamp - interval '30 days'), 0) as "overdueBalanceCents"
+         from "PmsLedgerEntry" le
+         where le."tenantId" = $1 and le."patientId" = p."id"
+       ) ledger on true
+       left join lateral (
+         select count(*) as "openPmsTasks"
+         from "PmsTask" t
+         where t."tenantId" = $1 and t."patientId" = p."id" and t."status" = 'OPEN'
+       ) pms_tasks on true
+       left join lateral (
+         select jsonb_agg(jsonb_build_object(
+           'id', rows."id",
+           'appointmentType', rows."appointmentType",
+           'startsAt', rows."startsAt",
+           'status', rows."status",
+           'readinessStatus', rows."readinessStatus",
+           'productionCents', rows."productionCents"
+         )) as "nextAppointments"
+         from (
+           select "id", "appointmentType", "startsAt", "status", "readinessStatus", "productionCents"
+           from "PmsAppointment"
+           where "tenantId" = $1 and "patientId" = p."id" and "startsAt" >= current_timestamp and "status" not in ('CANCELED','NO_SHOW','BROKEN')
+           order by "startsAt" asc
+           limit 3
+         ) rows
+       ) appts on true
+       left join lateral (
+         select jsonb_agg(jsonb_build_object(
+           'id', rows."id",
+           'name', rows."name",
+           'status', rows."status",
+           'totalFeeCents', rows."totalFeeCents",
+           'patientEstimateCents', rows."patientEstimateCents"
+         )) as "openTreatmentPlans"
+         from (
+           select "id", "name", "status", "totalFeeCents", "patientEstimateCents"
+           from "PmsTreatmentPlan"
+           where "tenantId" = $1 and "patientId" = p."id" and "status" in ('DRAFT','PRESENTED','ACCEPTED')
+           order by "updatedAt" desc
+           limit 3
+         ) rows
+       ) treatment on true
+       left join lateral (
+         select jsonb_agg(jsonb_build_object(
+           'id', rows."id",
+           'recallType', rows."recallType",
+           'dueDate', rows."dueDate",
+           'status', rows."status"
+         )) as "dueRecalls"
+         from (
+           select "id", "recallType", "dueDate", "status"
+           from "PmsRecall"
+           where "tenantId" = $1 and "patientId" = p."id" and "status" in ('DUE','OVERDUE')
+           order by "dueDate" asc
+           limit 3
+         ) rows
+       ) recalls on true
+       left join lateral (
+         select jsonb_agg(jsonb_build_object(
+           'id', rows."id",
+           'templateName', rows."templateName",
+           'status', rows."status",
+           'dueAt', rows."dueAt"
+         )) as "openForms"
+         from (
+           select fa."id", ft."name" as "templateName", fa."status", fa."dueAt"
+           from "PmsFormAssignment" fa
+           left join "PmsFormTemplate" ft on ft."id" = fa."templateId"
+           where fa."tenantId" = $1 and fa."patientId" = p."id" and fa."status" in ('ASSIGNED','IN_PROGRESS','NEEDS_REVIEW')
+           order by fa."dueAt" asc nulls last
+           limit 3
+         ) rows
+       ) forms on true
+       left join lateral (
+         select jsonb_agg(jsonb_build_object(
+           'channel', rows."channel",
+           'destination', rows."destination",
+           'consentStatus', rows."consentStatus",
+           'quietHoursStart', rows."quietHoursStart",
+           'quietHoursEnd', rows."quietHoursEnd"
+         )) as "communicationPreferences"
+         from (
+           select "channel", "destination", "consentStatus", "quietHoursStart", "quietHoursEnd", "priority"
+           from "PmsPatientCommunicationPreference"
+           where "patientId" = p."id"
+           order by "priority" asc, "channel"
+           limit 5
+         ) rows
+       ) prefs on true
        where c."tenantId" = $1
        order by c."startedAt" desc`,
       [tenantId],
     ),
     query(
-      `select m.*, p."firstName", p."lastName", p."chartNumber", c."aiIntent"
+      `select m.*, p."firstName", p."lastName", p."chartNumber", c."aiIntent",
+        coalesce(ledger."openBalanceCents", 0)::int as "openBalanceCents",
+        coalesce(forms."openFormCount", 0)::int as "openFormCount"
        from "PhoneOutboundMessage" m
        left join "PmsPatient" p on p."id" = m."patientId"
        left join "PhoneConversation" c on c."id" = m."conversationId"
+       left join lateral (
+         select coalesce(sum("balanceCents") filter (where "balanceCents" > 0), 0) as "openBalanceCents"
+         from "PmsLedgerEntry"
+         where "tenantId" = $1 and "patientId" = p."id"
+       ) ledger on true
+       left join lateral (
+         select count(*) as "openFormCount"
+         from "PmsFormAssignment"
+         where "tenantId" = $1 and "patientId" = p."id" and "status" in ('ASSIGNED','IN_PROGRESS','NEEDS_REVIEW')
+       ) forms on true
        where m."tenantId" = $1
        order by case m."approvalStatus" when 'BLOCKED' then 0 when 'NEEDS_APPROVAL' then 1 when 'DRAFT' then 2 else 3 end, m."createdAt" desc`,
       [tenantId],
@@ -579,6 +692,12 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
     ),
     listPatientOptions(tenantId),
   ]);
+  const setupReadiness = buildPhoneSetupReadiness({
+    providers: providers.rows,
+    numbers: numbers.rows,
+    extensions: extensions.rows,
+    devices: devices.rows,
+  });
   return {
     conversations: conversations.rows,
     messages: messages.rows,
@@ -593,7 +712,31 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
     controls: controls.rows,
     voicemails: voicemails.rows,
     metrics: metrics.rows[0],
+    setupReadiness,
     patients,
+  };
+}
+
+function buildPhoneSetupReadiness(input: { providers: Record<string, unknown>[]; numbers: Record<string, unknown>[]; extensions: Record<string, unknown>[]; devices: Record<string, unknown>[] }) {
+  const readyProviders = input.providers.filter((row) => row.status === "ACTIVE" && row.credentialStatus === "VALIDATED" && row.webhookStatus === "VERIFIED");
+  const activeVoiceNumbers = input.numbers.filter((row) => row.status === "ACTIVE" && row.voiceStatus === "ACTIVE");
+  const smsReadyNumbers = input.numbers.filter((row) => row.status === "ACTIVE" && row.smsStatus === "ACTIVE");
+  const e911ReadyNumbers = input.numbers.filter((row) => row.e911Status === "VALIDATED" || row.e911Status === "ACTIVE");
+  const provisionedExtensions = input.extensions.filter((row) => row.status === "ACTIVE");
+  const registeredDevices = input.devices.filter((row) => row.provisioningStatus === "PROVISIONED" && row.registrationStatus === "ONLINE");
+  const checks = [
+    { label: "Carrier credentials", status: readyProviders.length ? "READY" : "BLOCKED_CONNECTOR_REQUIRED", nextAction: readyProviders.length ? "Provider credentials and webhooks are ready for smoke testing." : "Store SIP/WebRTC credentials, verify call-control webhooks, and run provider smoke tests." },
+    { label: "Voice numbers", status: activeVoiceNumbers.length ? "READY" : "SETUP_REQUIRED", nextAction: activeVoiceNumbers.length ? "At least one office number is active for voice." : "Complete number porting, caller ID, default route, and inbound voice validation." },
+    { label: "SMS texting", status: smsReadyNumbers.length ? "READY" : "BLOCKED_CONNECTOR_REQUIRED", nextAction: smsReadyNumbers.length ? "At least one number is SMS-ready." : "Register messaging use case, validate opt-in policy, and enable SMS webhooks before sending texts." },
+    { label: "E911", status: e911ReadyNumbers.length ? "READY" : "SETUP_REQUIRED", nextAction: e911ReadyNumbers.length ? "Emergency address validation is ready." : "Validate emergency address and failover route for every live office number." },
+    { label: "Extensions", status: provisionedExtensions.length ? "READY" : "SETUP_REQUIRED", nextAction: provisionedExtensions.length ? "Extensions exist for role routing and voicemail." : "Create extensions for front desk, billing, clinical triage, and AI receptionist fallback." },
+    { label: "Desk phones and softphones", status: registeredDevices.length ? "READY" : "SETUP_REQUIRED", nextAction: registeredDevices.length ? "At least one provisioned device is registered." : "Assign devices, capture MAC/SIP credentials, and confirm online registration." },
+  ];
+  const blocked = checks.filter((check) => check.status !== "READY").length;
+  return {
+    status: blocked ? "SETUP_REQUIRED" : "READY_FOR_CONNECTOR",
+    blocked,
+    checks,
   };
 }
 
@@ -619,11 +762,94 @@ export async function createPhoneConversation(input: {
 }
 
 export async function updatePhoneConversationStatus(id: string, status: string, followUpStatus: string) {
-  const result = await query<{ tenantId: string }>(
-    `update "PhoneConversation" set "status" = $2, "followUpStatus" = $3, "updatedAt" = current_timestamp where "id" = $1 returning "tenantId"`,
+  const result = await query<{ tenantId: string; patientId: string | null; appointmentId: string | null; aiIntent: string | null; transcriptSummary: string | null }>(
+    `update "PhoneConversation" set "status" = $2, "followUpStatus" = $3, "updatedAt" = current_timestamp where "id" = $1 returning "tenantId", "patientId", "appointmentId", "aiIntent", "transcriptSummary"`,
     [id, status, followUpStatus],
   );
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "front_desk", "PHONE_WORK_STATUS_UPDATED", "PhoneConversation", id, "ALLOWED", { status, followUpStatus });
+  if (result.rows[0]) {
+    const row = result.rows[0];
+    await createPhoneHandoffTasks({
+      tenantId: row.tenantId,
+      conversationId: id,
+      patientId: row.patientId ?? undefined,
+      appointmentId: row.appointmentId ?? undefined,
+      followUpStatus,
+      aiIntent: row.aiIntent ?? "PHONE_CALL",
+      transcriptSummary: row.transcriptSummary ?? "",
+    });
+    await addAudit(row.tenantId, "front_desk", "PHONE_WORK_STATUS_UPDATED", "PhoneConversation", id, "ALLOWED", { status, followUpStatus });
+  }
+}
+
+async function createPhoneHandoffTasks(input: { tenantId: string; conversationId: string; patientId?: string; appointmentId?: string; followUpStatus: string; aiIntent: string; transcriptSummary: string }) {
+  const handoff = classifyPhoneHandoff(input.followUpStatus);
+  if (!handoff) return;
+  const phoneTaskExists = (await query<{ count: string }>(
+    `select count(*)::text as count from "PhoneCallTask" where "tenantId" = $1 and "conversationId" = $2 and "taskType" = $3 and "status" = 'OPEN'`,
+    [input.tenantId, input.conversationId, handoff.taskType],
+  )).rows[0];
+  if (Number(phoneTaskExists?.count ?? 0) === 0) {
+    await query(
+      `insert into "PhoneCallTask" ("id", "tenantId", "conversationId", "patientId", "taskType", "priority", "status", "dueAt", "ownerRoleKey", "nextAction", "updatedAt")
+       values ($1, $2, $3, $4, $5, $6, 'OPEN', current_timestamp + ($7::text)::interval, $8, $9, current_timestamp)`,
+      [newId("ptask"), input.tenantId, input.conversationId, input.patientId || null, handoff.taskType, handoff.priority, handoff.dueIn, handoff.ownerRoleKey, handoff.nextAction()],
+    );
+  }
+  const pmsTaskExists = (await query<{ count: string }>(
+    `select count(*)::text as count
+     from "PmsTask"
+     where "tenantId" = $1 and coalesce("patientId", '') = coalesce($2::text, '') and "taskType" = $3 and "status" = 'OPEN' and "title" = $4`,
+    [input.tenantId, input.patientId || null, handoff.taskType, handoff.title(input.aiIntent)],
+  )).rows[0];
+  if (Number(pmsTaskExists?.count ?? 0) === 0) {
+    await query(
+      `insert into "PmsTask" ("id", "tenantId", "patientId", "appointmentId", "ownerRoleKey", "title", "taskType", "priority", "dueAt", "updatedAt")
+       values ($1, $2, $3, $4, $5, $6, $7, $8, current_timestamp + ($9::text)::interval, current_timestamp)`,
+      [newId("task"), input.tenantId, input.patientId || null, input.appointmentId || null, handoff.ownerRoleKey, handoff.title(input.aiIntent), handoff.taskType, handoff.priority, handoff.dueIn],
+    );
+  }
+  await addAudit(input.tenantId, "front_desk", "PHONE_HANDOFF_TASK_STAGED", "PhoneConversation", input.conversationId, "ALLOWED", {
+    followUpStatus: input.followUpStatus,
+    ownerRoleKey: handoff.ownerRoleKey,
+    taskType: handoff.taskType,
+    chartSummaryReadyForReview: input.followUpStatus === "CHART_NOTE_REVIEW",
+  });
+}
+
+function classifyPhoneHandoff(followUpStatus: string) {
+  if (followUpStatus === "BLOCKED_RCM_REVIEW") return {
+    ownerRoleKey: "billing_rcm",
+    taskType: "PHONE_BILLING_HANDOFF",
+    priority: "HIGH",
+    dueIn: "1 hour",
+    title: (intent: string) => `Phone billing handoff: ${intent}`,
+    nextAction: () => "Review PMS ledger, claim/EOB context, and patient balance before any payment link or billing SMS is staged.",
+  };
+  if (followUpStatus === "PATIENT_FINDER") return {
+    ownerRoleKey: "front_desk",
+    taskType: "PHONE_PATIENT_FINDER_FOLLOW_UP",
+    priority: "NORMAL",
+    dueIn: "2 hours",
+    title: (intent: string) => `Phone follow-up for Patient Finder: ${intent}`,
+    nextAction: () => "Convert high-intent call to a Patient Finder follow-up using schedule, recall, and unscheduled treatment context.",
+  };
+  if (followUpStatus === "CHART_NOTE_REVIEW") return {
+    ownerRoleKey: "associate_provider",
+    taskType: "PHONE_SUMMARY_CHART_REVIEW",
+    priority: "NORMAL",
+    dueIn: "1 day",
+    title: (intent: string) => `Review AI phone summary for chart: ${intent}`,
+    nextAction: () => "Review the AI call summary and copy clinically appropriate content to the chart only after staff approval.",
+  };
+  if (followUpStatus === "READY_FOR_APPROVAL") return {
+    ownerRoleKey: "front_desk",
+    taskType: "PHONE_OUTREACH_APPROVAL",
+    priority: "NORMAL",
+    dueIn: "4 hours",
+    title: (intent: string) => `Approve staged phone follow-up: ${intent}`,
+    nextAction: () => "Review consent, quiet hours, connector readiness, and PMS context before approving any outbound message.",
+  };
+  return null;
 }
 
 export async function createPhoneOutboundMessage(input: {
@@ -636,31 +862,89 @@ export async function createPhoneOutboundMessage(input: {
   messageType: string;
   body: string;
   consentStatus?: string;
+  linkType?: string;
+  linkTargetId?: string;
+  linkLabel?: string;
   blockedReason?: string;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("pmsg");
   const consentStatus = input.consentStatus || "UNKNOWN";
-  const blockedReason =
+  const connectorReadiness = await getPhoneOutboundConnectorReadiness(tenantId, input.channel, input.linkType);
+  const consentBlockedReason =
     input.blockedReason ||
     (consentStatus === "VERIFIED"
       ? null
       : consentStatus === "OPTED_OUT"
         ? "Patient has opted out of this channel. Message cannot be approved or sent."
         : "Patient communication consent is not verified. Message must stay blocked until consent is confirmed.");
+  const connectorStatus = connectorReadiness.ready ? "READY_FOR_CONNECTOR" : "BLOCKED_CONNECTOR_REQUIRED";
+  const readiness = {
+    ...connectorReadiness,
+    consentVerified: consentStatus === "VERIFIED",
+    linkType: input.linkType || null,
+    linkTargetId: input.linkTargetId || null,
+    externalSendBlocked: true,
+    semantics: "Internal approval and connector queue only. No SMS, payment link, form link, or scheduling link is sent from this mutation.",
+  };
   await query(
     `insert into "PhoneOutboundMessage"
-       ("id", "tenantId", "conversationId", "patientId", "appointmentId", "channel", "recipientNumber", "messageType", "body", "approvalStatus", "deliveryStatus", "consentStatus", "blockedReason", "updatedAt")
+       ("id", "tenantId", "conversationId", "patientId", "appointmentId", "channel", "recipientNumber", "messageType", "body", "approvalStatus", "deliveryStatus", "consentStatus", "connectorStatus", "linkType", "linkTargetId", "linkLabel", "readiness", "blockedReason", "updatedAt")
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9,
-       case when coalesce($11, '') <> '' then 'BLOCKED' else 'NEEDS_APPROVAL' end,
-       'NOT_SENT', coalesce($10, 'UNKNOWN'), $11, current_timestamp)`,
-    [id, tenantId, input.conversationId || null, input.patientId || null, input.appointmentId || null, input.channel, input.recipientNumber || null, input.messageType, input.body.trim(), consentStatus, blockedReason],
+       case when coalesce($16, '') <> '' then 'BLOCKED' else 'NEEDS_APPROVAL' end,
+       'NOT_SENT', coalesce($10, 'UNKNOWN'), $11, $12, $13, $14, $15::jsonb, $16, current_timestamp)`,
+    [
+      id,
+      tenantId,
+      input.conversationId || null,
+      input.patientId || null,
+      input.appointmentId || null,
+      input.channel,
+      input.recipientNumber || null,
+      input.messageType,
+      input.body.trim(),
+      consentStatus,
+      connectorStatus,
+      input.linkType || null,
+      input.linkTargetId || null,
+      input.linkLabel || null,
+      JSON.stringify(readiness),
+      consentBlockedReason,
+    ],
   );
-  await addAudit(tenantId, "front_desk", "PHONE_OUTBOUND_MESSAGE_STAGED", "PhoneOutboundMessage", id, blockedReason ? "BLOCKED" : "ALLOWED", { consentStatus, blockedReason });
+  await addAudit(tenantId, "front_desk", "PHONE_OUTBOUND_MESSAGE_STAGED", "PhoneOutboundMessage", id, consentBlockedReason ? "BLOCKED" : "ALLOWED", { consentStatus, blockedReason: consentBlockedReason, connectorStatus, readiness });
+}
+
+async function getPhoneOutboundConnectorReadiness(tenantId: string, channel: string, linkType?: string) {
+  const checks = await query<{ smsReady: string; voiceReady: string; paymentReady: string; formsReady: string; schedulingReady: string }>(
+    `select
+      (select count(*) from "PhoneNumber" where "tenantId" = $1 and "status" = 'ACTIVE' and "smsStatus" = 'ACTIVE')::text as "smsReady",
+      (select count(*) from "PhoneNumber" where "tenantId" = $1 and "status" = 'ACTIVE' and "voiceStatus" = 'ACTIVE')::text as "voiceReady",
+      0::text as "paymentReady",
+      0::text as "formsReady",
+      (select count(*) from "PmsOnlineSchedulingLink" where "tenantId" = $1 and "status" = 'ACTIVE')::text as "schedulingReady"`,
+    [tenantId],
+  );
+  const row = checks.rows[0] ?? { smsReady: "0", voiceReady: "0", paymentReady: "0", formsReady: "0", schedulingReady: "0" };
+  const missing = [
+    channel === "SMS" && Number(row.smsReady) === 0 ? "active SMS number and messaging connector" : null,
+    linkType === "PAYMENT_LINK" && Number(row.paymentReady) === 0 ? "payment connector and payment-link generator" : null,
+    linkType === "FORM_PACKET_LINK" && Number(row.formsReady) === 0 ? "forms portal connector and secure form-link generator" : null,
+    linkType === "ONLINE_SCHEDULING_LINK" && Number(row.schedulingReady) === 0 ? "active online scheduling link" : null,
+  ].filter(Boolean);
+  return {
+    ready: missing.length === 0,
+    missing,
+    smsConnectorReady: Number(row.smsReady) > 0,
+    voiceConnectorReady: Number(row.voiceReady) > 0,
+    paymentConnectorReady: Number(row.paymentReady) > 0,
+    formsConnectorReady: Number(row.formsReady) > 0,
+    onlineSchedulingReady: Number(row.schedulingReady) > 0,
+  };
 }
 
 export async function updatePhoneOutboundMessageApproval(id: string, approvalStatus: string, actorRole = "front_desk") {
-  const result = await query<{ tenantId: string; appliedStatus: string; deliveryStatus: string; blockedReason: string | null }>(
+  const result = await query<{ tenantId: string; appliedStatus: string; deliveryStatus: string; connectorStatus: string; blockedReason: string | null }>(
     `update "PhoneOutboundMessage"
      set "approvalStatus" = case
          when $2 = 'APPROVED_STAGED' and "consentStatus" <> 'VERIFIED' then 'BLOCKED'
@@ -668,17 +952,19 @@ export async function updatePhoneOutboundMessageApproval(id: string, approvalSta
          else $2
        end,
        "deliveryStatus" = case
-         when $2 = 'APPROVED_STAGED' and "consentStatus" = 'VERIFIED' and coalesce("blockedReason", '') = '' then 'READY_FOR_CONNECTOR'
+         when $2 = 'APPROVED_STAGED' and "consentStatus" = 'VERIFIED' and coalesce("blockedReason", '') = '' and "connectorStatus" = 'READY_FOR_CONNECTOR' then 'READY_FOR_CONNECTOR'
+         when $2 = 'APPROVED_STAGED' and "consentStatus" = 'VERIFIED' and coalesce("blockedReason", '') = '' and "connectorStatus" <> 'READY_FOR_CONNECTOR' then 'BLOCKED_CONNECTOR_REQUIRED'
          else "deliveryStatus"
        end,
        "blockedReason" = case
          when $2 = 'APPROVED_STAGED' and "consentStatus" <> 'VERIFIED' then 'Cannot approve outbound message until patient channel consent is verified.'
          else "blockedReason"
        end,
+       "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('approvedByRole', $3, 'approvedAt', current_timestamp, 'externalSendBlocked', "connectorStatus" <> 'READY_FOR_CONNECTOR'),
        "updatedAt" = current_timestamp
      where "id" = $1
-     returning "tenantId", "approvalStatus" as "appliedStatus", "deliveryStatus", "blockedReason"`,
-    [id, approvalStatus],
+     returning "tenantId", "approvalStatus" as "appliedStatus", "deliveryStatus", "connectorStatus", "blockedReason"`,
+    [id, approvalStatus, actorRole],
   );
   if (result.rows[0]) {
     const row = result.rows[0];
@@ -686,6 +972,7 @@ export async function updatePhoneOutboundMessageApproval(id: string, approvalSta
       requestedStatus: approvalStatus,
       appliedStatus: row.appliedStatus,
       deliveryStatus: row.deliveryStatus,
+      connectorStatus: row.connectorStatus,
       blockedReason: row.blockedReason,
     });
   }
@@ -787,6 +1074,36 @@ export async function updatePhoneDeviceStatus(id: string, provisioningStatus: st
   if (result.rows[0]) await addAudit(result.rows[0].tenantId, "practice_manager", "PHONE_DEVICE_STATUS_UPDATED", "PhoneDevice", id, "ALLOWED", { provisioningStatus, registrationStatus });
 }
 
+export async function updatePhoneNumberStatus(id: string, portStatus: string, voiceStatus: string, smsStatus: string, e911Status: string, status: string) {
+  const result = await query<{ tenantId: string }>(
+    `update "PhoneNumber"
+     set "portStatus" = $2,
+       "voiceStatus" = $3,
+       "smsStatus" = $4,
+       "e911Status" = $5,
+       "status" = $6,
+       "lastVerifiedAt" = case when $3 = 'ACTIVE' and $4 = 'ACTIVE' and $5 in ('VALIDATED','ACTIVE') then current_timestamp else "lastVerifiedAt" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId"`,
+    [id, portStatus, voiceStatus, smsStatus, e911Status, status],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "practice_manager", "PHONE_NUMBER_PROVISIONING_UPDATED", "PhoneNumber", id, "ALLOWED", { portStatus, voiceStatus, smsStatus, e911Status, status });
+}
+
+export async function updatePhoneExtensionStatus(id: string, status: string, voicemailEnabled: boolean) {
+  const result = await query<{ tenantId: string }>(
+    `update "PhoneExtension"
+     set "status" = $2,
+       "voicemailEnabled" = $3,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId"`,
+    [id, status, voicemailEnabled],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "practice_manager", "PHONE_EXTENSION_PROVISIONING_UPDATED", "PhoneExtension", id, "ALLOWED", { status, voicemailEnabled });
+}
+
 export async function updatePhoneProviderStatus(id: string, status: string, credentialStatus: string, webhookStatus: string) {
   const result = await query<{ tenantId: string }>(
     `update "PhoneProviderConnection"
@@ -811,10 +1128,10 @@ export async function updatePhoneVoicemailStatus(id: string, status: string) {
 }
 
 export async function getReputationOperatingCenter(tenantId = defaultTenantId) {
-  const [reviews, surveys, recoveryCases, listings, responses, campaignRules, referralRequests, metrics, patients] = await Promise.all([
+  const [reviews, surveys, recoveryCases, listings, listingIssueQueue, responses, campaignRules, referralRequests, metrics, patients] = await Promise.all([
     query(
       `select r.*, p."firstName", p."lastName", p."chartNumber", pr."displayName" as "providerName", l."name" as "locationName",
-        a."startsAt", a."appointmentType",
+        a."startsAt", a."appointmentType", a."status" as "appointmentStatus", a."readinessStatus" as "appointmentReadiness",
         rr."id" as "responseId", rr."approvalStatus" as "responseApprovalStatus", rr."publicationStatus", rr."blockedReason" as "responseBlockedReason"
        from "ReputationReviewWorkflow" r
        left join "PmsPatient" p on p."id" = r."patientId"
@@ -848,6 +1165,17 @@ export async function getReputationOperatingCenter(tenantId = defaultTenantId) {
        left join "Location" l on l."id" = lp."locationId"
        where lp."tenantId" = $1
        order by case lp."syncStatus" when 'DATA_MISMATCH' then 0 when 'NEEDS_CONNECTION' then 1 else 2 end, lp."platform"`,
+      [tenantId],
+    ),
+    query(
+      `select t.*, l."name" as "locationName", lp."platform", lp."syncStatus" as "listingSyncStatus", lp."napConsistencyStatus"
+       from "MarketingLocalSeoTask" t
+       left join "Location" l on l."id" = t."locationId"
+       left join "ReputationListingProfile" lp on lp."id" = t."sourceListingId"
+       where t."tenantId" = $1
+         and (t."sourceListingId" is not null or t."taskType" in ('NAP_SYNC','GBP_POST','LOCATION_PAGE','SERVICE_CATEGORY','CITATION_CLEANUP'))
+         and t."status" not in ('COMPLETED','CLOSED')
+       order by case t."priority" when 'HIGH' then 0 when 'NORMAL' then 1 else 2 end, t."dueAt" asc nulls last`,
       [tenantId],
     ),
     query(
@@ -894,6 +1222,7 @@ export async function getReputationOperatingCenter(tenantId = defaultTenantId) {
     surveys: surveys.rows,
     recoveryCases: recoveryCases.rows,
     listings: listings.rows,
+    listingIssueQueue: listingIssueQueue.rows,
     responses: responses.rows,
     campaignRules: campaignRules.rows,
     referralRequests: referralRequests.rows,
@@ -913,7 +1242,26 @@ export async function createReviewWorkflow(input: {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("rep");
   const eligibility = input.patientId
-    ? await query<{ openRecovery: string; optedOut: string; verifiedConsent: string; recentReview: string; billingDispute: string; completedVisit: string; clinicalIncident: string }>(
+    ? await query<{
+        openRecovery: string;
+        optedOut: string;
+        verifiedConsent: string;
+        recentReview: string;
+        billingDispute: string;
+        completedVisit: string;
+        clinicalIncident: string;
+        unsignedClinicalNotes: string;
+        completedAppointmentId: string | null;
+        completedProviderId: string | null;
+        completedLocationId: string | null;
+        completedAppointmentType: string | null;
+        completedVisitAt: string | null;
+        privateSurveyId: string | null;
+        privateSurveyStatus: string | null;
+        privateSurveyScore: number | null;
+        privateSurveyRecoveryRequired: boolean | null;
+        positiveReviewSignal: string;
+      }>(
         `select
            (select count(*) from "ReputationRecoveryCase" where "tenantId" = $1 and "patientId" = $2 and "status" not in ('COMPLETED','CLOSED'))::text as "openRecovery",
            (select count(*) from "PmsPatientCommunicationPreference" where "patientId" = $2 and "channel" = $3 and "consentStatus" in ('OPTED_OUT','DO_NOT_CONTACT'))::text as "optedOut",
@@ -921,37 +1269,82 @@ export async function createReviewWorkflow(input: {
            (select count(*) from "ReputationReviewWorkflow" where "tenantId" = $1 and "patientId" = $2 and "createdAt" > current_timestamp - interval '90 days')::text as "recentReview",
            (select count(*) from "PmsClaim" where "tenantId" = $1 and "patientId" = $2 and "patientDueCents" > 0 and "status" in ('NEEDS_REVIEW','DENIED','PARTIAL','OPEN'))::text as "billingDispute",
            (select count(*) from "PmsAppointment" where "tenantId" = $1 and "patientId" = $2 and "status" = 'COMPLETED')::text as "completedVisit",
-           (select count(*) from "ReputationRecoveryCase" where "tenantId" = $1 and "patientId" = $2 and "sentiment" in ('CLINICAL_RISK','FRUSTRATED','NEGATIVE') and "status" not in ('COMPLETED','CLOSED'))::text as "clinicalIncident"`,
+           (select count(*) from "ReputationRecoveryCase" where "tenantId" = $1 and "patientId" = $2 and "sentiment" in ('CLINICAL_RISK','FRUSTRATED','NEGATIVE') and "status" not in ('COMPLETED','CLOSED'))::text as "clinicalIncident",
+           (select count(*) from "PmsClinicalNote" where "patientId" = $2 and "status" <> 'SIGNED' and "signedAt" is null)::text as "unsignedClinicalNotes",
+           completed."id" as "completedAppointmentId",
+           completed."providerId" as "completedProviderId",
+           completed."locationId" as "completedLocationId",
+           completed."appointmentType" as "completedAppointmentType",
+           completed."startsAt"::text as "completedVisitAt",
+           survey."id" as "privateSurveyId",
+           survey."status" as "privateSurveyStatus",
+           survey."score" as "privateSurveyScore",
+           survey."recoveryRequired" as "privateSurveyRecoveryRequired",
+           case when survey."score" >= 8 and survey."recoveryRequired" = false then 'POSITIVE_PRIVATE_SURVEY' else 'NO_PUBLIC_ASK_SIGNAL' end as "positiveReviewSignal"
+         from (select 1) base
+         left join lateral (
+           select a."id", a."providerId", op."locationId", a."appointmentType", a."startsAt"
+           from "PmsAppointment" a
+           left join "PmsOperatory" op on op."id" = a."operatoryId"
+           where a."tenantId" = $1 and a."patientId" = $2 and a."status" = 'COMPLETED'
+           order by a."startsAt" desc
+           limit 1
+         ) completed on true
+         left join lateral (
+           select "id", "status", "score", "recoveryRequired"
+           from "PatientSurvey"
+           where "tenantId" = $1 and "patientId" = $2
+             and ("appointmentId" = completed."id" or completed."id" is null)
+           order by "createdAt" desc
+           limit 1
+         ) survey on true`,
         [tenantId, input.patientId, input.requestChannel],
       )
-    : { rows: [{ openRecovery: "0", optedOut: "0", verifiedConsent: "0", recentReview: "0", billingDispute: "0", completedVisit: "0", clinicalIncident: "0" }] };
+    : { rows: [{ openRecovery: "0", optedOut: "0", verifiedConsent: "0", recentReview: "0", billingDispute: "0", completedVisit: "0", clinicalIncident: "0", unsignedClinicalNotes: "0", completedAppointmentId: null, completedProviderId: null, completedLocationId: null, completedAppointmentType: null, completedVisitAt: null, privateSurveyId: null, privateSurveyStatus: null, privateSurveyScore: null, privateSurveyRecoveryRequired: null, positiveReviewSignal: "PRACTICE_LEVEL_MANUAL" }] };
+  const row = eligibility.rows[0];
+  const privateSurveyPassed = !input.patientId || (row?.privateSurveyStatus && ["RECEIVED", "COMPLETED", "APPROVED"].includes(row.privateSurveyStatus) && Number(row.privateSurveyScore ?? 0) >= 8 && row.privateSurveyRecoveryRequired === false);
   const blockedReasons = [
-    Number(eligibility.rows[0]?.openRecovery ?? 0) > 0 ? "open service recovery case" : null,
-    Number(eligibility.rows[0]?.optedOut ?? 0) > 0 ? "patient channel opt-out" : null,
-    input.patientId && Number(eligibility.rows[0]?.verifiedConsent ?? 0) === 0 ? "patient consent not verified for channel" : null,
-    Number(eligibility.rows[0]?.recentReview ?? 0) > 0 ? "duplicate review cooldown" : null,
-    Number(eligibility.rows[0]?.billingDispute ?? 0) > 0 ? "billing dispute or balance sensitivity" : null,
-    input.patientId && Number(eligibility.rows[0]?.completedVisit ?? 0) === 0 ? "no completed PMS visit found" : null,
-    Number(eligibility.rows[0]?.clinicalIncident ?? 0) > 0 ? "clinical incident or service-risk hold" : null,
+    Number(row?.openRecovery ?? 0) > 0 ? "open service recovery case" : null,
+    Number(row?.optedOut ?? 0) > 0 ? "patient channel opt-out" : null,
+    input.patientId && Number(row?.verifiedConsent ?? 0) === 0 ? "patient consent not verified for channel" : null,
+    Number(row?.recentReview ?? 0) > 0 ? "duplicate review cooldown" : null,
+    Number(row?.billingDispute ?? 0) > 0 ? "billing dispute or balance sensitivity" : null,
+    input.patientId && Number(row?.completedVisit ?? 0) === 0 ? "no completed PMS visit found" : null,
+    Number(row?.unsignedClinicalNotes ?? 0) > 0 ? "unsigned clinical note after visit" : null,
+    input.patientId && !privateSurveyPassed ? "private survey must be completed with positive score before public review request" : null,
+    Number(row?.clinicalIncident ?? 0) > 0 || row?.privateSurveyRecoveryRequired ? "clinical incident, low survey, or service-risk hold" : null,
   ].filter(Boolean);
-  const requestStatus = blockedReasons.length ? "BLOCKED_ELIGIBILITY" : "READY_FOR_APPROVAL";
-  const recoveryStatus = Number(eligibility.rows[0]?.openRecovery ?? 0) > 0 ? "REQUIRED" : "NOT_REQUIRED";
+  const requestStatus = blockedReasons.some((reason) => String(reason).includes("private survey")) ? "BLOCKED_PRIVATE_SURVEY" : blockedReasons.length ? "BLOCKED_ELIGIBILITY" : "READY_FOR_APPROVAL";
+  const recoveryStatus = Number(row?.openRecovery ?? 0) > 0 || row?.privateSurveyRecoveryRequired ? "REQUIRED" : "NOT_REQUIRED";
   const eligibilitySummary = {
-    source: input.patientId ? "PmsPatient completed visit eligibility" : "practice-level manual workflow",
+    source: input.patientId ? "PmsAppointment completed visit + PatientSurvey private feedback eligibility" : "practice-level manual workflow",
+    completedVisit: {
+      appointmentId: row?.completedAppointmentId,
+      appointmentType: row?.completedAppointmentType,
+      startsAt: row?.completedVisitAt,
+    },
+    privateSurvey: {
+      surveyId: row?.privateSurveyId,
+      status: row?.privateSurveyStatus,
+      score: row?.privateSurveyScore,
+      recoveryRequired: row?.privateSurveyRecoveryRequired,
+      positiveReviewSignal: row?.positiveReviewSignal,
+    },
     checks: {
-      completedVisit: Number(eligibility.rows[0]?.completedVisit ?? 0),
-      verifiedConsent: Number(eligibility.rows[0]?.verifiedConsent ?? 0),
-      optOut: Number(eligibility.rows[0]?.optedOut ?? 0),
-      openRecovery: Number(eligibility.rows[0]?.openRecovery ?? 0),
-      billingDispute: Number(eligibility.rows[0]?.billingDispute ?? 0),
-      clinicalIncident: Number(eligibility.rows[0]?.clinicalIncident ?? 0),
-      duplicateCooldown: Number(eligibility.rows[0]?.recentReview ?? 0),
+      completedVisit: Number(row?.completedVisit ?? 0),
+      verifiedConsent: Number(row?.verifiedConsent ?? 0),
+      optOut: Number(row?.optedOut ?? 0),
+      openRecovery: Number(row?.openRecovery ?? 0),
+      billingDispute: Number(row?.billingDispute ?? 0),
+      unsignedClinicalNotes: Number(row?.unsignedClinicalNotes ?? 0),
+      clinicalIncident: Number(row?.clinicalIncident ?? 0),
+      duplicateCooldown: Number(row?.recentReview ?? 0),
     },
   };
   await query(
     `insert into "ReputationReviewWorkflow"
-       ("id", "tenantId", "patientId", "locationId", "status", "serviceLine", "reviewSite", "requestChannel", "requestStatus", "responseDraft", "recoveryStatus", "eligibilitySummary", "suppressionReasons", "privateSurveyRequired", "connectorStatus", "blockedReason", "dueAt", "updatedAt")
-     values ($1, $2, $3, 'loc_primary', 'OPEN', $4, $5, $6, $7, $8, $9, $10::jsonb, $11::text[], $12, $13, $14, current_timestamp + interval '1 day', current_timestamp)`,
+       ("id", "tenantId", "patientId", "appointmentId", "providerId", "locationId", "status", "serviceLine", "reviewSite", "requestChannel", "requestStatus", "responseDraft", "recoveryStatus", "eligibilitySummary", "suppressionReasons", "privateSurveyRequired", "connectorStatus", "blockedReason", "dueAt", "updatedAt")
+     values ($1, $2, $3, $15, $16, coalesce($17, 'loc_primary'), 'OPEN', $4, $5, $6, $7, $8, $9, $10::jsonb, $11::text[], $12, $13, $14, current_timestamp + interval '1 day', current_timestamp)`,
     [
       id,
       tenantId,
@@ -964,9 +1357,12 @@ export async function createReviewWorkflow(input: {
       recoveryStatus,
       JSON.stringify(eligibilitySummary),
       blockedReasons,
-      blockedReasons.some((reason) => String(reason).includes("service") || String(reason).includes("clinical") || String(reason).includes("billing")),
+      input.patientId ? !privateSurveyPassed || blockedReasons.some((reason) => String(reason).includes("service") || String(reason).includes("clinical") || String(reason).includes("billing")) : false,
       blockedReasons.length ? "CONNECTOR_REQUIRED" : "READY_FOR_CONNECTOR",
       blockedReasons.length ? blockedReasons.join("; ") : null,
+      row?.completedAppointmentId,
+      row?.completedProviderId,
+      row?.completedLocationId,
     ],
   );
   await addAudit(tenantId, "marketing_growth", "REPUTATION_WORKFLOW_CREATED", "ReputationReviewWorkflow", id, blockedReasons.length ? "BLOCKED" : "ALLOWED", {
@@ -983,14 +1379,16 @@ export async function updateReviewWorkflowStatus(id: string, requestStatus: stri
     `update "ReputationReviewWorkflow"
      set "requestStatus" = case
          when $2 in ('APPROVED_STAGED','READY_FOR_APPROVAL') and "recoveryStatus" in ('REQUIRED','OPEN') then 'BLOCKED_SERVICE_RECOVERY'
+         when $2 = 'APPROVED_STAGED' and "privateSurveyRequired" = true then 'BLOCKED_PRIVATE_SURVEY'
          when $2 = 'APPROVED_STAGED' and cardinality("suppressionReasons") > 0 then 'BLOCKED_ELIGIBILITY'
          else $2
        end,
        "connectorStatus" = case
-         when $2 = 'APPROVED_STAGED' and "recoveryStatus" not in ('REQUIRED','OPEN') and cardinality("suppressionReasons") = 0 then 'READY_FOR_CONNECTOR'
+         when $2 = 'APPROVED_STAGED' and "privateSurveyRequired" = false and "recoveryStatus" not in ('REQUIRED','OPEN') and cardinality("suppressionReasons") = 0 then 'READY_FOR_CONNECTOR'
          else "connectorStatus"
        end,
        "blockedReason" = case
+         when $2 = 'APPROVED_STAGED' and "privateSurveyRequired" = true then 'Private survey must be completed and service recovery cleared before any public review request.'
          when $2 = 'APPROVED_STAGED' and cardinality("suppressionReasons") > 0 then array_to_string("suppressionReasons", '; ')
          when $2 in ('APPROVED_STAGED','READY_FOR_APPROVAL') and "recoveryStatus" in ('REQUIRED','OPEN') then 'Service recovery must close before any public review request.'
          else "blockedReason"
@@ -1093,16 +1491,29 @@ export async function createReferralRequest(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("repref");
+  const source = input.patientId
+    ? await query<{ sourceReviewId: string | null; completedTreatment: string; positiveSurvey: string }>(
+        `select
+           (select "id" from "ReputationReviewWorkflow" where "tenantId" = $1 and "patientId" = $2 and ("sentiment" in ('POSITIVE','POSITIVE_SIGNAL') or "rating" >= 4) order by "createdAt" desc limit 1) as "sourceReviewId",
+           (select count(*) from "PmsProcedureLog" where "patientId" = $2 and "status" = 'COMPLETED')::text as "completedTreatment",
+           (select count(*) from "PatientSurvey" where "tenantId" = $1 and "patientId" = $2 and "score" >= 8 and "recoveryRequired" = false)::text as "positiveSurvey"`,
+        [tenantId, input.patientId],
+      )
+    : { rows: [{ sourceReviewId: null, completedTreatment: "0", positiveSurvey: "0" }] };
+  const sourceRow = source.rows[0];
   const blockedReason =
-    isConsentVerified(input.consentStatus)
-      ? null
-      : input.consentStatus === "OPTED_OUT"
+    !isConsentVerified(input.consentStatus)
+      ? input.consentStatus === "OPTED_OUT"
         ? "Patient has opted out of this channel. Referral request cannot be sent."
-        : "Patient referral communication consent is not verified.";
+        : "Patient referral communication consent is not verified."
+      : ["TESTIMONIAL", "CASE_STORY"].includes(input.requestType) && input.patientId && Number(sourceRow?.completedTreatment ?? 0) === 0
+        ? "Testimonial or case story request requires a completed treatment milestone."
+        : null;
+  const blockedStatus = blockedReason?.includes("completed treatment") ? "BLOCKED_TREATMENT_NOT_COMPLETE" : blockedReason ? "BLOCKED_CONSENT" : "READY_FOR_APPROVAL";
   await query(
     `insert into "ReputationReferralRequest"
-       ("id", "tenantId", "patientId", "requestType", "channel", "status", "offerSummary", "messageDraft", "consentStatus", "conversionStatus", "complianceText", "bookingAttributionStatus", "attribution", "connectorStatus", "blockedReason", "dueAt", "updatedAt")
-     values ($1, $2, $3, $4, $5, $9, $6, $7, $8, $10, 'Use compliance-approved referral language; no inducement, guarantee, or PHI.', 'NOT_ATTRIBUTED', $11::jsonb, 'CONNECTOR_REQUIRED', $12, current_timestamp + interval '1 day', current_timestamp)`,
+       ("id", "tenantId", "patientId", "sourceReviewId", "requestType", "channel", "status", "offerSummary", "messageDraft", "consentStatus", "conversionStatus", "complianceText", "bookingAttributionStatus", "attribution", "connectorStatus", "blockedReason", "dueAt", "updatedAt")
+     values ($1, $2, $3, $13, $4, $5, $9, $6, $7, $8, $10, 'Use compliance-approved referral language; no inducement, guarantee, or PHI.', 'NOT_ATTRIBUTED', $11::jsonb, 'CONNECTOR_REQUIRED', $12, current_timestamp + interval '1 day', current_timestamp)`,
     [
       id,
       tenantId,
@@ -1112,10 +1523,11 @@ export async function createReferralRequest(input: {
       input.offerSummary?.trim() || null,
       input.messageDraft.trim(),
       input.consentStatus,
-      blockedReason ? "BLOCKED_CONSENT" : "READY_FOR_APPROVAL",
+      blockedStatus,
       blockedReason ? `BLOCKED: ${blockedReason}` : "READY_FOR_CONNECTOR",
-      JSON.stringify({ newPatientBookings: 0, acceptedTreatmentCents: 0, source: "booking-link pending" }),
+      JSON.stringify({ newPatientBookings: 0, acceptedTreatmentCents: 0, source: "booking-link pending", sourceReviewId: sourceRow?.sourceReviewId, completedTreatmentCount: Number(sourceRow?.completedTreatment ?? 0), positiveSurveyCount: Number(sourceRow?.positiveSurvey ?? 0) }),
       blockedReason,
+      sourceRow?.sourceReviewId,
     ],
   );
   await addAudit(tenantId, "marketing_growth", "REPUTATION_REFERRAL_REQUEST_CREATED", "ReputationReferralRequest", id, blockedReason ? "BLOCKED" : "ALLOWED", { consentStatus: input.consentStatus, blockedReason });
@@ -1204,15 +1616,18 @@ export async function createMarketingCampaign(input: {
   const id = newId("campaign");
   const channels = parseList(input.channelMix);
   const sourceAudience = marketingSourceAudience(input.campaignType);
+  const estimatedAudience = await estimateMarketingAudience(tenantId, input.campaignType);
+  const audienceBlueprint = marketingAudienceBlueprint(input.campaignType);
   const channelPlan = {
     channels,
     sourceAudience,
-    checks: ["consent", "channel preference", "quiet hours", "service recovery hold", "balance sensitivity", "approval policy"],
+    audienceBlueprint,
+    checks: ["PMS cohort freshness", "RCM balance sensitivity", "reputation recovery hold", "consent", "channel preference", "quiet hours", "approval policy"],
   };
   await query(
     `insert into "MarketingCampaign"
-       ("id", "tenantId", "landingPageId", "name", "campaignType", "status", "audienceDefinition", "primaryGoal", "channelMix", "aiStudioBrief", "complianceStatus", "sourceAudience", "channelPlan", "connectorReadiness", "attribution", "blockedReason", "startsAt", "updatedAt")
-     values ($1, $2, $3, $4, $5, 'DRAFT', $6, $7, $8, $9, 'NEEDS_REVIEW', $10, $11::jsonb, $12::jsonb, $13::jsonb, 'External activation blocked until audience validation, consent checks, approval, and channel connectors are ready.', current_date + interval '1 day', current_timestamp)`,
+       ("id", "tenantId", "landingPageId", "name", "campaignType", "status", "audienceDefinition", "primaryGoal", "channelMix", "aiStudioBrief", "complianceStatus", "sourceAudience", "channelPlan", "connectorReadiness", "attribution", "blockedReason", "estimatedAudience", "startsAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, 'DRAFT', $6, $7, $8, $9, 'NEEDS_REVIEW', $10, $11::jsonb, $12::jsonb, $13::jsonb, 'External activation blocked until PMS/RCM/reputation audience validation, consent checks, approval, and channel connectors are ready.', $14, current_date + interval '1 day', current_timestamp)`,
     [
       id,
       tenantId,
@@ -1227,6 +1642,7 @@ export async function createMarketingCampaign(input: {
       JSON.stringify(channelPlan),
       JSON.stringify({ sms: "CONNECTOR_REQUIRED", email: "CONNECTOR_REQUIRED", phone: "CONNECTOR_REQUIRED", landingPage: input.landingPageId ? "STAGED" : "NOT_SELECTED", aiVoice: "CONNECTOR_REQUIRED" }),
       JSON.stringify({ bookedAppointments: 0, acceptedTreatmentCents: 0, productionCents: 0, collectionCents: 0, reviewOutcomes: 0, referralOutcomes: 0 }),
+      estimatedAudience,
     ],
   );
   await addAudit(tenantId, "marketing_growth", "MARKETING_CAMPAIGN_CREATED", "MarketingCampaign", id);
@@ -1260,8 +1676,9 @@ export async function updateMarketingStatus(target: "campaign" | "landingPage" |
     await query(
       `update "MarketingLandingPage"
        set "connectorStatus" = case when "status" = 'APPROVED_STAGED' then 'STAGED' else "connectorStatus" end,
-         "bookingRouting" = coalesce("bookingRouting", 'Route form and booking CTA into PMS/CRM lead queue; no lead marked booked until appointment exists.'),
-         "trackingPlan" = coalesce("trackingPlan", '{"utmSource":"1dentalai","utmMedium":"campaign","callTracking":"connector_required","formTracking":"staged","bookingTracking":"pms_booking_route"}'::jsonb)
+         "bookingRouting" = coalesce("bookingRouting", 'Route form, phone tracking number, and booking CTA into PMS online scheduling plus CRM lead queue; no lead is marked booked until a PMS appointment exists.'),
+         "trackingPlan" = coalesce("trackingPlan", '{"utmSource":"1dentalai","utmMedium":"campaign","callTracking":"connector_required","formTracking":"staged","bookingTracking":"pms_booking_route","localSeoAction":"validate NAP, service category, schema, and GBP post before publication"}'::jsonb),
+         "formMapping" = coalesce("formMapping", '{"name":"lead.name","phone":"lead.phone","email":"lead.email","service":"lead.serviceLine","preferredTime":"booking.preference","sourceListing":"localSeo.sourceListing","utmCampaign":"attribution.utmCampaign"}'::jsonb)
        where "id" = $1`,
       [id],
     );
@@ -1281,10 +1698,60 @@ export async function updateMarketingStatus(target: "campaign" | "landingPage" |
 }
 
 function marketingSourceAudience(campaignType: string) {
-  if (["UNSCHEDULED_TREATMENT", "RECALL_REACTIVATION", "FAILED_APPOINTMENTS", "MEMBERSHIP"].includes(campaignType)) return "PMS";
-  if (["BALANCE_FOLLOW_UP"].includes(campaignType)) return "RCM";
-  if (["REFERRAL_GROWTH", "TESTIMONIALS"].includes(campaignType)) return "REPUTATION";
+  if (["UNSCHEDULED_TREATMENT", "RECALL_REACTIVATION", "FAILED_APPOINTMENTS", "INACTIVE_PATIENTS", "MEMBERSHIP"].includes(campaignType)) return "PMS cohort from appointments, recall, treatment plans, and patient status";
+  if (["BALANCE_FOLLOW_UP"].includes(campaignType)) return "RCM cohort from balances, claims, ERA exceptions, and collection sensitivity";
+  if (["REFERRAL_GROWTH", "TESTIMONIALS"].includes(campaignType)) return "REPUTATION cohort from positive private surveys, review signals, referrals, and recovery-free patients";
   return "PMS+RCM+REPUTATION";
+}
+
+function marketingAudienceBlueprint(campaignType: string) {
+  if (["UNSCHEDULED_TREATMENT", "IMPLANTS", "CLEAR_ALIGNERS"].includes(campaignType)) return { pms: "presented or accepted treatment without future appointment", rcm: "benefits/financing sensitivity checked", reputation: "no open recovery case" };
+  if (["RECALL_REACTIVATION", "INACTIVE_PATIENTS", "FAILED_APPOINTMENTS"].includes(campaignType)) return { pms: "recall, no-show/cancel, and inactive-patient cohorts", rcm: "exclude unresolved billing disputes", reputation: "exclude low-survey and service-recovery holds" };
+  if (campaignType === "BALANCE_FOLLOW_UP") return { pms: "active patient and appointment context", rcm: "patient-due balance with claim/ERA context", reputation: "public review asks suppressed during balance sensitivity" };
+  if (["REFERRAL_GROWTH", "TESTIMONIALS"].includes(campaignType)) return { pms: "completed visit or treatment milestone", rcm: "financial clearance before testimonial ask", reputation: "positive private survey or review signal" };
+  return { pms: "appointment, patient, and treatment context", rcm: "balance and payer sensitivity", reputation: "review, survey, referral, and service recovery context" };
+}
+
+async function estimateMarketingAudience(tenantId: string, campaignType: string) {
+  if (["UNSCHEDULED_TREATMENT", "IMPLANTS", "CLEAR_ALIGNERS"].includes(campaignType)) {
+    const result = await query<{ count: string }>(`select count(distinct "patientId")::text as count from "PmsTreatmentPlan" where "tenantId" = $1 and "status" in ('PRESENTED','ACCEPTED')`, [tenantId]);
+    return Number(result.rows[0]?.count ?? 0);
+  }
+  if (["RECALL_REACTIVATION", "INACTIVE_PATIENTS"].includes(campaignType)) {
+    const result = await query<{ count: string }>(`select count(distinct "patientId")::text as count from "PmsRecall" where "tenantId" = $1 and "status" in ('DUE','OVERDUE')`, [tenantId]);
+    return Number(result.rows[0]?.count ?? 0);
+  }
+  if (campaignType === "FAILED_APPOINTMENTS") {
+    const result = await query<{ count: string }>(`select count(distinct "patientId")::text as count from "PmsAppointment" where "tenantId" = $1 and "status" in ('NO_SHOW','CANCELLED')`, [tenantId]);
+    return Number(result.rows[0]?.count ?? 0);
+  }
+  if (campaignType === "BALANCE_FOLLOW_UP") {
+    const result = await query<{ count: string }>(`select count(distinct "patientId")::text as count from "PmsClaim" where "tenantId" = $1 and "patientDueCents" > 0 and "status" not in ('PAID','CLOSED','VOID')`, [tenantId]);
+    return Number(result.rows[0]?.count ?? 0);
+  }
+  if (["REFERRAL_GROWTH", "TESTIMONIALS"].includes(campaignType)) {
+    const result = await query<{ count: string }>(`select count(distinct "patientId")::text as count from "PatientSurvey" where "tenantId" = $1 and "score" >= 8 and "recoveryRequired" = false`, [tenantId]);
+    return Number(result.rows[0]?.count ?? 0);
+  }
+  return 0;
+}
+
+export async function updateLocalSeoTaskStatus(id: string, status: string) {
+  const nextStatus = requireAllowed(status, allowedLocalSeoStatuses, "OPEN");
+  const result = await query<{ tenantId: string; appliedStatus: string; connectorStatus: string }>(
+    `update "MarketingLocalSeoTask"
+     set "status" = case when $2 = 'APPROVED_STAGED' and "connectorStatus" = 'CONNECTOR_REQUIRED' then 'BLOCKED_CONNECTOR_REQUIRED' else $2 end,
+       "nextAction" = case
+         when $2 = 'APPROVED_STAGED' and "connectorStatus" = 'CONNECTOR_REQUIRED' then 'Local SEO action is approved internally, but publication or listing sync requires connector/manual owner proof.'
+         else "nextAction"
+       end,
+       "completedAt" = case when $2 in ('COMPLETED','CLOSED') then current_timestamp else "completedAt" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning "tenantId", "status" as "appliedStatus", "connectorStatus"`,
+    [id, nextStatus],
+  );
+  if (result.rows[0]) await addAudit(result.rows[0].tenantId, "marketing_growth", "LOCAL_SEO_TASK_STATUS_UPDATED", "MarketingLocalSeoTask", id, result.rows[0].appliedStatus.startsWith("BLOCKED") ? "BLOCKED" : "ALLOWED", { requestedStatus: status, appliedStatus: result.rows[0].appliedStatus, connectorStatus: result.rows[0].connectorStatus });
 }
 
 async function listPatientOptions(tenantId: string) {

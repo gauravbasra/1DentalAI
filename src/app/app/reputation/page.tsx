@@ -45,6 +45,8 @@ type ReviewRow = {
   recoveryStatus: string;
   dueAt: string | null;
   appointmentType: string | null;
+  appointmentStatus: string | null;
+  appointmentReadiness: string | null;
   startsAt: string | null;
   responseApprovalStatus: string | null;
   publicationStatus: string | null;
@@ -88,6 +90,22 @@ type ListingRow = {
   issueSummary: string | null;
   nextAction: string;
   lastSyncedAt: string | null;
+};
+type ListingIssueRow = {
+  id: string;
+  title: string;
+  taskType: string;
+  status: string;
+  priority: string;
+  platform: string | null;
+  serviceLine: string | null;
+  issueSummary: string;
+  nextAction: string;
+  connectorStatus: string;
+  dueAt: string | null;
+  locationName: string | null;
+  listingSyncStatus: string | null;
+  napConsistencyStatus: string | null;
 };
 type ResponseRow = {
   id: string;
@@ -214,6 +232,7 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
   const surveys = center.surveys as SurveyRow[];
   const recoveryCases = center.recoveryCases as RecoveryRow[];
   const listings = center.listings as ListingRow[];
+  const listingIssueQueue = center.listingIssueQueue as ListingIssueRow[];
   const responses = center.responses as ResponseRow[];
   const campaignRules = center.campaignRules as RuleRow[];
   const referralRequests = center.referralRequests as ReferralRow[];
@@ -247,7 +266,7 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-neutral-950">{person(review)} · {clean(review.reviewSite)}</p>
                     <p className="mt-1 text-xs text-neutral-600">{review.serviceLine ?? "General dentistry"} · {review.providerName ?? "No provider"} · {review.locationName ?? "No location"} · {review.requestChannel}</p>
-                    {review.appointmentType ? <p className="mt-1 text-xs text-neutral-600">{review.appointmentType} {review.startsAt ? `on ${formatDate(review.startsAt)}` : ""}</p> : null}
+                    {review.appointmentType ? <p className="mt-1 text-xs text-neutral-600">{review.appointmentType} {review.startsAt ? `on ${formatDate(review.startsAt)}` : ""} · visit {clean(review.appointmentStatus ?? "not completed")} · readiness {clean(review.appointmentReadiness ?? "unknown")}</p> : null}
                   </div>
                   <StatusFor value={review.requestStatus} />
                 </div>
@@ -259,7 +278,7 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
                 </div>
                 <div className="mt-2 grid gap-2 sm:grid-cols-3">
                   <Mini label="Connector" value={clean(review.connectorStatus)} />
-                  <Mini label="Private survey" value={review.privateSurveyRequired ? "Required first" : "Not required"} />
+                  <Mini label="Private survey" value={review.privateSurveyRequired ? "Required before public ask" : "Positive survey cleared"} />
                   <Mini label="Suppressions" value={review.suppressionReasons?.length ? review.suppressionReasons.length : "none"} />
                 </div>
                 {review.suppressionReasons?.length ? <p className="mt-2 text-xs leading-5 text-red-700">Suppressed: {review.suppressionReasons.join("; ")}</p> : null}
@@ -393,7 +412,34 @@ export default async function ReputationPage({ searchParams }: { searchParams: P
           </div>
         </PmsCard>
 
-        <PmsCard title="Campaign rules and suppression logic" eyebrow="Review automation policy">
+        <PmsCard title="Listings issue queue" eyebrow="Rankings, Local SEO actions, owner proof">
+          <div className="grid gap-3">
+            {listingIssueQueue.map((task) => (
+              <div key={task.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{task.title}</p>
+                    <p className="mt-1 text-xs text-neutral-600">{clean(task.taskType)} · {task.platform ?? "Website"} · {task.locationName ?? "Practice"}</p>
+                  </div>
+                  <StatusFor value={task.status} />
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <Mini label="Priority" value={clean(task.priority)} />
+                  <Mini label="Connector" value={clean(task.connectorStatus)} />
+                  <Mini label="Listing state" value={clean(task.listingSyncStatus ?? task.napConsistencyStatus ?? "not linked")} />
+                </div>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">{task.issueSummary}</p>
+                <p className="mt-2 text-xs leading-5 text-neutral-600">{task.nextAction}</p>
+                <p className="mt-1 text-xs text-neutral-500">Due {formatDate(task.dueAt)}</p>
+              </div>
+            ))}
+            {!listingIssueQueue.length ? <p className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">No open listing or Local SEO issues.</p> : null}
+          </div>
+        </PmsCard>
+      </section>
+
+      <section className="mt-4">
+        <PmsCard title="Campaign rules and suppression logic" eyebrow="Automated review, referral, and survey requests">
           <form action={ruleAction} className="mb-3 grid gap-3 rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <Input name="name" label="Rule name" placeholder="Emergency visit follow-up" />

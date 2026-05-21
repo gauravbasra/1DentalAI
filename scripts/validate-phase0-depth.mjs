@@ -8,7 +8,9 @@ const requiredFiles = [
   "src/app/app/reputation/page.tsx",
   "src/app/app/marketing/page.tsx",
   "src/app/app/engagement/page.tsx",
+  "src/app/app/connectors/page.tsx",
   "src/lib/operating-system-repository.ts",
+  "src/lib/connector-control-repository.ts",
   "prisma/schema.prisma",
 ];
 
@@ -41,6 +43,12 @@ const requiredSchemaModels = [
   "MarketingLandingPage",
   "AiStudioAsset",
   "PmsAuditEvent",
+  "ConnectorDefinition",
+  "ConnectorInstallation",
+  "ConnectorCapability",
+  "ConnectorRouteDecision",
+  "ConnectorHealthCheck",
+  "ConnectorCostEvent",
 ];
 
 const moduleTokens = {
@@ -53,9 +61,21 @@ const moduleTokens = {
     "PhoneCallControlAction",
     "PhoneVoicemail",
     "blockedReason",
+    "connectorStatus",
+    "readiness",
+    "linkType",
     "READY_FOR_CONNECTOR",
     "BLOCKED_CONNECTOR_REQUIRED",
     "PMS screen pop",
+    "Phone setup readiness",
+    "updatePhoneNumberStatus",
+    "updatePhoneExtensionStatus",
+    "PHONE_HANDOFF_TASK_STAGED",
+    "PAYMENT_LINK",
+    "FORM_PACKET_LINK",
+    "CHART_NOTE_REVIEW",
+    "openTreatmentPlans",
+    "communicationPreferences",
   ],
   rcm: [
     "getRcmOperatingCenter",
@@ -106,6 +126,22 @@ const moduleTokens = {
     "no-show",
     "forms",
   ],
+  connectors: [
+    "getConnectorControlCenter",
+    "updateConnectorInstallation",
+    "createConnectorRouteDecision",
+    "ConnectorDefinition",
+    "ConnectorInstallation",
+    "ConnectorCapability",
+    "ConnectorRouteDecision",
+    "ConnectorHealthCheck",
+    "ConnectorCostEvent",
+    "capability map",
+    "cost telemetry",
+    "BLOCKED_CONNECTOR_REQUIRED",
+    "READY_FOR_CONNECTOR",
+    "MANUAL_QUEUE",
+  ],
 };
 
 const failures = [];
@@ -123,6 +159,8 @@ const haystack = [
   read("src/app/app/reputation/page.tsx"),
   read("src/app/app/marketing/page.tsx"),
   read("src/app/app/engagement/page.tsx"),
+  read("src/app/app/connectors/page.tsx"),
+  read("src/lib/connector-control-repository.ts"),
   read("docs/PHASE_0_FEATURE_COMPLETENESS_MATRIX.md"),
 ].join("\n");
 

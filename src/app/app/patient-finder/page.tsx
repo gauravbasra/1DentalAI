@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
 type FilterRow = { id: string; name: string; description: string | null; goal: string; status: string; defaultOwnerRoleKey: string; lastResultCount: number };
 type FollowUpRow = {
   id: string;
+  patientId: string;
   firstName: string;
   lastName: string;
   chartNumber: string;
@@ -31,8 +32,12 @@ type FollowUpRow = {
   lastAttemptOutcome: string | null;
   nextAction: string;
   opportunityCents: number;
+  treatmentPlanName: string | null;
+  claimNumber: string | null;
+  payerName: string | null;
 };
 type RecipeRow = { key: string; label: string; reason: string; priority: string; channel: string; patients: Array<{ id: string; firstName: string; lastName: string; chartNumber: string; phone: string | null; email: string | null; opportunityCents: string }> };
+type RecipePatient = RecipeRow["patients"][number] & { signal?: string | null; suggestedAction?: string | null; treatmentPlanName?: string | null; dueDate?: string | null; startsAt?: string | null };
 
 async function filterAction(formData: FormData) {
   "use server";
@@ -123,21 +128,39 @@ export default async function PatientFinderPage({ searchParams }: { searchParams
 
       <section className="mt-4">
         <PmsCard title="Opportunity recipes" eyebrow="Generate owner-assigned work from PMS criteria">
-          <div className="grid gap-3 xl:grid-cols-5">
+          <div className="grid gap-3 xl:grid-cols-2">
             {recipes.map((recipe) => (
               <div key={recipe.key} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
-                <p className="text-sm font-semibold text-neutral-950">{recipe.label}</p>
-                <p className="mt-1 text-xs leading-5 text-neutral-600">{recipe.reason}</p>
-                <p className="mt-2 text-xs font-semibold text-neutral-500">{recipe.patients.length} candidates · {recipe.channel}</p>
-                {recipe.patients[0] ? (
-                  <form action={recipeAction} className="mt-3 grid gap-2">
-                    <input type="hidden" name="recipeKey" value={recipe.key} />
-                    <input type="hidden" name="patientId" value={recipe.patients[0].id} />
-                    <input type="hidden" name="ownerRoleKey" value={recipe.key === "ar_followup" ? "billing_rcm" : recipe.key === "unscheduled_treatment" ? "treatment_coordinator" : "front_desk"} />
-                    <input type="hidden" name="nextAction" value={`Contact ${recipe.patients[0].firstName} ${recipe.patients[0].lastName}: ${recipe.reason}`} />
-                    <button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 hover:border-neutral-500">Create first follow-up</button>
-                  </form>
-                ) : null}
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-950">{recipe.label}</p>
+                    <p className="mt-1 text-xs leading-5 text-neutral-600">{recipe.reason}</p>
+                  </div>
+                  <p className="shrink-0 rounded-md bg-white px-2 py-1 text-xs font-semibold text-neutral-600">{recipe.patients.length} · {recipe.channel}</p>
+                </div>
+                <div className="mt-3 grid max-h-80 gap-2 overflow-y-auto pr-1">
+                  {(recipe.patients as RecipePatient[]).slice(0, 6).map((patient) => (
+                    <div key={`${recipe.key}-${patient.id}`} className="rounded-md border border-neutral-200 bg-white p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-neutral-950">{patient.lastName}, {patient.firstName}</p>
+                          <p className="mt-1 text-xs text-neutral-500">{patient.chartNumber} · {patient.phone ?? patient.email ?? "no contact"}</p>
+                        </div>
+                        <p className="text-sm font-semibold text-neutral-950"><Money cents={Number(patient.opportunityCents ?? 0)} /></p>
+                      </div>
+                      <p className="mt-2 text-xs font-semibold text-neutral-700">{patient.signal ?? patient.treatmentPlanName ?? "PMS match"}</p>
+                      <p className="mt-1 text-xs leading-5 text-neutral-600">{patient.suggestedAction ?? recipe.reason}</p>
+                      <form action={recipeAction} className="mt-3">
+                        <input type="hidden" name="recipeKey" value={recipe.key} />
+                        <input type="hidden" name="patientId" value={patient.id} />
+                        <input type="hidden" name="ownerRoleKey" value={ownerForRecipe(recipe.key)} />
+                        <input type="hidden" name="nextAction" value={`Contact ${patient.firstName} ${patient.lastName}: ${patient.suggestedAction ?? recipe.reason}`} />
+                        <button className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:border-neutral-500">Create follow-up</button>
+                      </form>
+                    </div>
+                  ))}
+                  {recipe.patients.length === 0 ? <p className="rounded-md border border-neutral-200 bg-white p-3 text-xs leading-5 text-neutral-600">No candidates match this source-backed recipe right now.</p> : null}
+                </div>
               </div>
             ))}
           </div>
@@ -149,7 +172,7 @@ export default async function PatientFinderPage({ searchParams }: { searchParams
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className="bg-neutral-50 text-[11px] uppercase tracking-[0.08em] text-neutral-500">
-                <tr><th className="px-3 py-2">Patient</th><th className="px-3 py-2">Reason</th><th className="px-3 py-2">Owner</th><th className="px-3 py-2">Opportunity</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Attempt</th></tr>
+                <tr><th className="px-3 py-2">Patient</th><th className="px-3 py-2">Reason</th><th className="px-3 py-2">Owner</th><th className="px-3 py-2">Opportunity</th><th className="px-3 py-2">Source</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Attempt</th></tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
                 {followUps.map((item) => (
@@ -165,6 +188,13 @@ export default async function PatientFinderPage({ searchParams }: { searchParams
                     </td>
                     <td className="px-3 py-3 text-xs text-neutral-600">{item.ownerRoleKey.replaceAll("_", " ")} · {item.recommendedChannel}</td>
                     <td className="px-3 py-3 font-semibold text-neutral-950"><Money cents={Number(item.opportunityCents ?? 0)} /></td>
+                    <td className="px-3 py-3 text-xs text-neutral-600">
+                      <div className="grid gap-1">
+                        <a href={`/app/pms/patients/${item.patientId}`} className="font-semibold text-cyan-800 hover:text-cyan-950">Patient</a>
+                        {item.treatmentPlanName ? <span>{item.treatmentPlanName}</span> : null}
+                        {item.claimNumber ? <span>{item.payerName ?? "Claim"} {item.claimNumber}</span> : null}
+                      </div>
+                    </td>
                     <td className="px-3 py-3"><StatusFor value={item.status} /><p className="mt-2 text-xs text-neutral-500">{item.attemptCount} attempts</p></td>
                     <td className="px-3 py-3">
                       <div className="grid min-w-44 gap-2">
@@ -202,4 +232,10 @@ function Select({ name, label, options }: { name: string; label: string; options
 
 function Textarea({ name, label, required = false }: { name: string; label: string; required?: boolean }) {
   return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}<textarea name={name} required={required} rows={3} className="rounded-md border border-neutral-300 px-3 py-2 text-sm" /></label>;
+}
+
+function ownerForRecipe(recipeKey: string) {
+  if (recipeKey === "ar_followup") return "billing_rcm";
+  if (recipeKey === "unscheduled_treatment") return "treatment_coordinator";
+  return "front_desk";
 }

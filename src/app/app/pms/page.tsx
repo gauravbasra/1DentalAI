@@ -64,7 +64,7 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
                   <tr key={appt.id} className="hover:bg-cyan-50/50">
                     <td className="whitespace-nowrap px-3 py-2 font-medium text-neutral-700">{time(appt.startsAt)}</td>
                     <td className="px-3 py-2">
-                      <Link href={appt.patientId ? `/app/pms/patients/${appt.patientId}?role=${role.key}` : `/app/pms/schedule?role=${role.key}`} className="font-semibold text-neutral-950 hover:text-cyan-700">
+                      <Link href={`/app/pms/appointments/${appt.id}?role=${role.key}`} className="font-semibold text-neutral-950 hover:text-cyan-700">
                         {appt.patientName ?? "Held appointment"}
                       </Link>
                     </td>
