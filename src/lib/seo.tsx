@@ -8,6 +8,7 @@ export const defaultDescription =
 export const publicRoutes = [
   "",
   "/product",
+  "/solutions",
   "/features",
   "/use-cases",
   "/demos",
@@ -92,6 +93,13 @@ export const organizationSchema = {
   },
   description: defaultDescription,
   sameAs: ["https://www.1dentalai.com", "https://1dentalai.com"],
+  contactPoint: {
+    "@type": "ContactPoint",
+    contactType: "sales",
+    email: "hello@1dentalai.com",
+    areaServed: "US",
+    availableLanguage: "English",
+  },
 };
 
 export const softwareSchema = {

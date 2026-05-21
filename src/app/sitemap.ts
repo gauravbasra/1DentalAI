@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { blogPosts } from "@/lib/blog-data";
 import { publicRoutes, siteUrl } from "@/lib/seo";
+import { solutionPages } from "@/lib/solution-data";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
@@ -18,5 +19,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.75,
   }));
 
-  return [...staticRoutes, ...blogRoutes];
+  const solutionRoutes = solutionPages.map((solution) => ({
+    url: `${siteUrl}/solutions/${solution.slug}`,
+    lastModified: now,
+    changeFrequency: "monthly" as const,
+    priority: 0.85,
+  }));
+
+  return [...staticRoutes, ...solutionRoutes, ...blogRoutes];
 }

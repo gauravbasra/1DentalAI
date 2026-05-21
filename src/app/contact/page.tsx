@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { LeadForm } from "@/components/lead-form";
 import { MarketingShell, PageHero } from "@/components/marketing-shell";
 import { pageMetadata } from "@/lib/seo";
 
@@ -44,6 +45,9 @@ export default function ContactPage() {
             </Link>
           </aside>
           <div className="grid gap-5 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <LeadForm />
+            </div>
             {contactPaths.map(([title, body]) => (
               <article key={title} className="rounded-[2rem] bg-white p-7 shadow-sm">
                 <h2 className="text-2xl font-semibold text-neutral-950">{title}</h2>

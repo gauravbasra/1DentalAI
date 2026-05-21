@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { blogPosts } from "@/lib/blog-data";
 import { siteUrl } from "@/lib/seo";
+import { solutionPages } from "@/lib/solution-data";
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -10,6 +11,8 @@ export default function robots(): MetadataRoute.Robots {
         allow: [
           "/",
           "/product",
+          "/solutions",
+          ...solutionPages.map((solution) => `/solutions/${solution.slug}`),
           "/features",
           "/use-cases",
           "/demos",

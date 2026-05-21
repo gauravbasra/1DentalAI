@@ -4,6 +4,7 @@ import { MarketingShell, ProductVisual, SectionIntro } from "@/components/market
 import { blogPosts } from "@/lib/blog-data";
 import { imageUrls, productPillars, stats, useCases } from "@/lib/site-data";
 import { pageMetadata } from "@/lib/seo";
+import { solutionPages } from "@/lib/solution-data";
 
 export const metadata: Metadata = pageMetadata({
   title: "Dental AI Operating System for Practices and DSOs",
@@ -119,6 +120,27 @@ export default function Home() {
         </section>
 
         <section className="bg-white px-6 py-24 sm:px-8">
+          <SectionIntro
+            eyebrow="Solutions"
+            title="High-intent dental AI workflows."
+            body="Dedicated solution pages help practices find the exact problem they are trying to solve: phones, insurance, RCM, clinical notes, reputation, analytics, and multi-location operations."
+          />
+          <div className="mx-auto mt-14 grid max-w-7xl gap-5 md:grid-cols-2 lg:grid-cols-3">
+            {solutionPages.slice(0, 6).map((solution) => (
+              <article key={solution.slug} className="rounded-[2rem] bg-[#f5f5f7] p-7">
+                <p className="text-sm font-semibold text-cyan-700">{solution.eyebrow}</p>
+                <h2 className="mt-4 text-2xl font-semibold text-neutral-950">
+                  <Link href={`/solutions/${solution.slug}`} className="transition hover:text-cyan-700">
+                    {solution.title}
+                  </Link>
+                </h2>
+                <p className="mt-4 text-sm leading-7 text-neutral-600">{solution.description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="bg-[#f5f5f7] px-6 py-24 sm:px-8">
           <SectionIntro
             eyebrow="Dental AI education"
             title="Guides for practices comparing AI platforms."
