@@ -425,6 +425,9 @@ function buildReply(analysis: WebchatAnalysis, knowledge: Array<{ content: strin
 function summarizeKnowledge(row?: { content: string; heading: string | null; pageTitle: string }) {
   if (!row?.content) return "";
   const title = row.heading || row.pageTitle;
+  if (/1DentalAI is the operating system|From first ring to final payment|Product\s+Solutions\s+Features/i.test(row.content)) {
+    return "";
+  }
   const text = row.content
     .replace(/\s+/g, " ")
     .replace(/\b(Product|Solutions|Features|Use Cases|Workflows|Resources|Blog|About|Contact|Open platform|Request access)\b/gi, "")
