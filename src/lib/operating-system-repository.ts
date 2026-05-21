@@ -547,28 +547,55 @@ export async function createPhoneOutboundMessage(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("pmsg");
+  const consentStatus = input.consentStatus || "UNKNOWN";
+  const blockedReason =
+    input.blockedReason ||
+    (consentStatus === "VERIFIED"
+      ? null
+      : consentStatus === "OPTED_OUT"
+        ? "Patient has opted out of this channel. Message cannot be approved or sent."
+        : "Patient communication consent is not verified. Message must stay blocked until consent is confirmed.");
   await query(
     `insert into "PhoneOutboundMessage"
        ("id", "tenantId", "conversationId", "patientId", "appointmentId", "channel", "recipientNumber", "messageType", "body", "approvalStatus", "deliveryStatus", "consentStatus", "blockedReason", "updatedAt")
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9,
        case when coalesce($11, '') <> '' then 'BLOCKED' else 'NEEDS_APPROVAL' end,
        'NOT_SENT', coalesce($10, 'UNKNOWN'), $11, current_timestamp)`,
-    [id, tenantId, input.conversationId || null, input.patientId || null, input.appointmentId || null, input.channel, input.recipientNumber || null, input.messageType, input.body.trim(), input.consentStatus || "UNKNOWN", input.blockedReason || null],
+    [id, tenantId, input.conversationId || null, input.patientId || null, input.appointmentId || null, input.channel, input.recipientNumber || null, input.messageType, input.body.trim(), consentStatus, blockedReason],
   );
-  await addAudit(tenantId, "front_desk", "PHONE_OUTBOUND_MESSAGE_STAGED", "PhoneOutboundMessage", id);
+  await addAudit(tenantId, "front_desk", "PHONE_OUTBOUND_MESSAGE_STAGED", "PhoneOutboundMessage", id, blockedReason ? "BLOCKED" : "ALLOWED", { consentStatus, blockedReason });
 }
 
 export async function updatePhoneOutboundMessageApproval(id: string, approvalStatus: string, actorRole = "front_desk") {
-  const result = await query<{ tenantId: string }>(
+  const result = await query<{ tenantId: string; appliedStatus: string; deliveryStatus: string; blockedReason: string | null }>(
     `update "PhoneOutboundMessage"
-     set "approvalStatus" = $2,
-       "deliveryStatus" = case when $2 = 'APPROVED_STAGED' then 'READY_FOR_CONNECTOR' else "deliveryStatus" end,
+     set "approvalStatus" = case
+         when $2 = 'APPROVED_STAGED' and "consentStatus" <> 'VERIFIED' then 'BLOCKED'
+         when $2 = 'APPROVED_STAGED' and coalesce("blockedReason", '') <> '' then 'BLOCKED'
+         else $2
+       end,
+       "deliveryStatus" = case
+         when $2 = 'APPROVED_STAGED' and "consentStatus" = 'VERIFIED' and coalesce("blockedReason", '') = '' then 'READY_FOR_CONNECTOR'
+         else "deliveryStatus"
+       end,
+       "blockedReason" = case
+         when $2 = 'APPROVED_STAGED' and "consentStatus" <> 'VERIFIED' then 'Cannot approve outbound message until patient channel consent is verified.'
+         else "blockedReason"
+       end,
        "updatedAt" = current_timestamp
      where "id" = $1
-     returning "tenantId"`,
+     returning "tenantId", "approvalStatus" as "appliedStatus", "deliveryStatus", "blockedReason"`,
     [id, approvalStatus],
   );
-  if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "PHONE_MESSAGE_APPROVAL_UPDATED", "PhoneOutboundMessage", id, "ALLOWED", { approvalStatus });
+  if (result.rows[0]) {
+    const row = result.rows[0];
+    await addAudit(row.tenantId, actorRole, "PHONE_MESSAGE_APPROVAL_UPDATED", "PhoneOutboundMessage", id, row.appliedStatus === "BLOCKED" ? "BLOCKED" : "ALLOWED", {
+      requestedStatus: approvalStatus,
+      appliedStatus: row.appliedStatus,
+      deliveryStatus: row.deliveryStatus,
+      blockedReason: row.blockedReason,
+    });
+  }
 }
 
 export async function updatePhoneCallTaskStatus(id: string, status: string, actorRole = "front_desk") {
