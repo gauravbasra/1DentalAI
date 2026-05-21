@@ -15,6 +15,9 @@ export type PmsPatientSummary = {
   privacyLevel: string;
   familyAccountId: string | null;
   responsibleParty: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  referralSource?: string | null;
   patientNote: string | null;
   openTasks: number;
   balanceCents: number;
@@ -241,7 +244,8 @@ export async function getPatient(patientId: string) {
   const result = await query<PmsPatientSummary>(
     `select
       p."id", p."chartNumber", p."firstName", p."lastName", p."preferredName", p."dateOfBirth"::text as "dateOfBirth",
-      p."phone", p."email", p."status", p."privacyLevel", p."familyAccountId", p."responsibleParty", p."patientNote",
+      p."phone", p."email", p."status", p."privacyLevel", p."familyAccountId", p."responsibleParty",
+      p."emergencyContactName", p."emergencyContactPhone", p."referralSource", p."patientNote",
       coalesce(t.open_tasks, 0)::int as "openTasks",
       coalesce(l.balance_cents, 0)::int as "balanceCents"
      from "PmsPatient" p
@@ -254,6 +258,53 @@ export async function getPatient(patientId: string) {
      where p."id" = $1`,
     [patientId],
   );
+  return result.rows[0] ?? null;
+}
+
+export async function updatePatientAdministrativeProfile(input: {
+  patientId: string;
+  preferredName?: string;
+  phone?: string;
+  email?: string;
+  genderIdentity?: string;
+  responsibleParty?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  referralSource?: string;
+  privacyLevel?: string;
+  patientNote?: string;
+  actorRole?: string;
+}) {
+  const result = await query(
+    `update "PmsPatient"
+     set "preferredName" = $2,
+       "phone" = $3,
+       "email" = $4,
+       "genderIdentity" = $5,
+       "responsibleParty" = $6,
+       "emergencyContactName" = $7,
+       "emergencyContactPhone" = $8,
+       "referralSource" = $9,
+       "privacyLevel" = $10,
+       "patientNote" = $11,
+       "updatedAt" = current_timestamp
+     where "id" = $1
+     returning *`,
+    [
+      input.patientId,
+      input.preferredName?.trim() || null,
+      input.phone?.trim() || null,
+      input.email?.trim() || null,
+      input.genderIdentity?.trim() || null,
+      input.responsibleParty?.trim() || null,
+      input.emergencyContactName?.trim() || null,
+      input.emergencyContactPhone?.trim() || null,
+      input.referralSource?.trim() || null,
+      input.privacyLevel?.trim() || "STANDARD",
+      input.patientNote?.trim() || null,
+    ],
+  );
+  await addAudit(defaultTenantId, input.actorRole ?? "front_desk", "PATIENT_PROFILE_UPDATED", "PmsPatient", input.patientId, result.rowCount ? "ALLOWED" : "BLOCKED");
   return result.rows[0] ?? null;
 }
 
@@ -323,6 +374,204 @@ export async function getPatientAccount(patientId: string) {
     prescriptions: prescriptions.rows,
     referrals: referrals.rows,
   };
+}
+
+export async function getPatientProfile(patientId: string) {
+  const [communicationPreferences, consents, medicalHistory, pharmacies, alerts, allergies, medications] = await Promise.all([
+    query(`select * from "PmsPatientCommunicationPreference" where "patientId" = $1 order by "priority", "channel"`, [patientId]),
+    query(`select * from "PmsPatientConsent" where "patientId" = $1 order by "updatedAt" desc`, [patientId]),
+    query(`select * from "PmsMedicalHistoryEntry" where "patientId" = $1 order by "status", "category", "condition"`, [patientId]),
+    query(`select * from "PmsPatientPharmacy" where "patientId" = $1 order by "isPreferred" desc, "pharmacyName"`, [patientId]),
+    query(`select * from "PmsMedicalAlert" where "patientId" = $1 order by "active" desc, "severity" desc, "title"`, [patientId]),
+    query(`select * from "PmsAllergy" where "patientId" = $1 order by "active" desc, "severity" desc, "allergen"`, [patientId]),
+    query(`select * from "PmsMedication" where "patientId" = $1 order by "status", "name"`, [patientId]),
+  ]);
+
+  return {
+    communicationPreferences: communicationPreferences.rows,
+    consents: consents.rows,
+    medicalHistory: medicalHistory.rows,
+    pharmacies: pharmacies.rows,
+    alerts: alerts.rows,
+    allergies: allergies.rows,
+    medications: medications.rows,
+  };
+}
+
+export async function addCommunicationPreference(input: {
+  patientId: string;
+  channel: string;
+  destination: string;
+  consentStatus: string;
+  priority?: number;
+  quietHoursStart?: string;
+  quietHoursEnd?: string;
+  source?: string;
+  actorRole?: string;
+}) {
+  const id = newId("comm");
+  const result = await query(
+    `insert into "PmsPatientCommunicationPreference"
+       ("id", "patientId", "channel", "destination", "consentStatus", "priority", "quietHoursStart", "quietHoursEnd", "source", "lastConfirmedAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, coalesce($6::int, 1), $7, $8, $9, current_timestamp, current_timestamp)
+     on conflict ("patientId", "channel", "destination")
+     do update set "consentStatus" = excluded."consentStatus", "priority" = excluded."priority", "quietHoursStart" = excluded."quietHoursStart",
+       "quietHoursEnd" = excluded."quietHoursEnd", "source" = excluded."source", "lastConfirmedAt" = current_timestamp, "updatedAt" = current_timestamp
+     returning *`,
+    [
+      id,
+      input.patientId,
+      input.channel.trim(),
+      input.destination.trim(),
+      input.consentStatus.trim(),
+      input.priority ?? 1,
+      input.quietHoursStart?.trim() || null,
+      input.quietHoursEnd?.trim() || null,
+      input.source?.trim() || null,
+    ],
+  );
+  await addAudit(defaultTenantId, input.actorRole ?? "front_desk", "COMMUNICATION_PREFERENCE_SAVED", "PmsPatientCommunicationPreference", result.rows[0]?.id ?? id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function addPatientConsent(input: {
+  patientId: string;
+  consentType: string;
+  status: string;
+  signedByName?: string;
+  signedAt?: string;
+  expiresAt?: string;
+  sourceDocumentId?: string;
+  actorRole?: string;
+}) {
+  const id = newId("consent");
+  const result = await query(
+    `insert into "PmsPatientConsent"
+       ("id", "patientId", "consentType", "status", "sourceDocumentId", "signedByName", "signedAt", "expiresAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7::timestamp, $8::timestamp, current_timestamp)
+     returning *`,
+    [
+      id,
+      input.patientId,
+      input.consentType.trim(),
+      input.status.trim(),
+      input.sourceDocumentId?.trim() || null,
+      input.signedByName?.trim() || null,
+      input.signedAt || null,
+      input.expiresAt || null,
+    ],
+  );
+  await addAudit(defaultTenantId, input.actorRole ?? "front_desk", "PATIENT_CONSENT_RECORDED", "PmsPatientConsent", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function addMedicalHistoryEntry(input: {
+  patientId: string;
+  category: string;
+  condition: string;
+  status: string;
+  severity?: string;
+  onsetDate?: string;
+  resolvedDate?: string;
+  notes?: string;
+  reviewedByRole?: string;
+  actorRole?: string;
+}) {
+  const id = newId("mh");
+  const result = await query(
+    `insert into "PmsMedicalHistoryEntry"
+       ("id", "patientId", "category", "condition", "status", "severity", "onsetDate", "resolvedDate", "notes", "source", "reviewedByRole", "reviewedAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7::timestamp, $8::timestamp, $9, 'STAFF_ENTERED', $10, current_timestamp, current_timestamp)
+     returning *`,
+    [
+      id,
+      input.patientId,
+      input.category.trim(),
+      input.condition.trim(),
+      input.status.trim(),
+      input.severity?.trim() || null,
+      input.onsetDate || null,
+      input.resolvedDate || null,
+      input.notes?.trim() || null,
+      input.reviewedByRole?.trim() || input.actorRole || null,
+    ],
+  );
+  await addAudit(defaultTenantId, input.actorRole ?? "associate_provider", "MEDICAL_HISTORY_RECORDED", "PmsMedicalHistoryEntry", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function addPatientPharmacy(input: {
+  patientId: string;
+  pharmacyName: string;
+  phone?: string;
+  fax?: string;
+  addressLine1?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  isPreferred?: boolean;
+  notes?: string;
+  actorRole?: string;
+}) {
+  const id = newId("pharm");
+  const preferred = input.isPreferred ?? true;
+  if (preferred) {
+    await query(`update "PmsPatientPharmacy" set "isPreferred" = false, "updatedAt" = current_timestamp where "patientId" = $1`, [input.patientId]);
+  }
+  const result = await query(
+    `insert into "PmsPatientPharmacy"
+       ("id", "patientId", "pharmacyName", "phone", "fax", "addressLine1", "city", "state", "postalCode", "isPreferred", "notes", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, current_timestamp)
+     returning *`,
+    [
+      id,
+      input.patientId,
+      input.pharmacyName.trim(),
+      input.phone?.trim() || null,
+      input.fax?.trim() || null,
+      input.addressLine1?.trim() || null,
+      input.city?.trim() || null,
+      input.state?.trim() || null,
+      input.postalCode?.trim() || null,
+      preferred,
+      input.notes?.trim() || null,
+    ],
+  );
+  await addAudit(defaultTenantId, input.actorRole ?? "front_desk", "PATIENT_PHARMACY_SAVED", "PmsPatientPharmacy", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function addMedicalAlert(input: { patientId: string; severity: string; title: string; details?: string; actorRole?: string }) {
+  const id = newId("alert");
+  const result = await query(
+    `insert into "PmsMedicalAlert" ("id", "patientId", "severity", "title", "details", "updatedAt")
+     values ($1, $2, $3, $4, $5, current_timestamp) returning *`,
+    [id, input.patientId, input.severity.trim(), input.title.trim(), input.details?.trim() || null],
+  );
+  await addAudit(defaultTenantId, input.actorRole ?? "associate_provider", "MEDICAL_ALERT_CREATED", "PmsMedicalAlert", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function addAllergy(input: { patientId: string; allergen: string; reaction?: string; severity: string; actorRole?: string }) {
+  const id = newId("allergy");
+  const result = await query(
+    `insert into "PmsAllergy" ("id", "patientId", "allergen", "reaction", "severity", "updatedAt")
+     values ($1, $2, $3, $4, $5, current_timestamp) returning *`,
+    [id, input.patientId, input.allergen.trim(), input.reaction?.trim() || null, input.severity.trim()],
+  );
+  await addAudit(defaultTenantId, input.actorRole ?? "associate_provider", "ALLERGY_CREATED", "PmsAllergy", id, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function addMedication(input: { patientId: string; name: string; dosage?: string; status?: string; actorRole?: string }) {
+  const id = newId("med");
+  const result = await query(
+    `insert into "PmsMedication" ("id", "patientId", "name", "dosage", "status", "updatedAt")
+     values ($1, $2, $3, $4, coalesce($5, 'ACTIVE'), current_timestamp) returning *`,
+    [id, input.patientId, input.name.trim(), input.dosage?.trim() || null, input.status?.trim() || null],
+  );
+  await addAudit(defaultTenantId, input.actorRole ?? "associate_provider", "MEDICATION_CREATED", "PmsMedication", id, "ALLOWED");
+  return result.rows[0];
 }
 
 export async function listSchedule(tenantId = defaultTenantId, date?: string) {

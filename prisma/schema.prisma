@@ -448,6 +448,77 @@ model PmsAllergy {
   @@index([patientId, active])
 }
 
+model PmsPatientCommunicationPreference {
+  id            String   @id @default(cuid())
+  patientId     String
+  channel       String
+  destination   String
+  consentStatus String   @default("UNKNOWN")
+  priority      Int      @default(1)
+  quietHoursStart String?
+  quietHoursEnd   String?
+  source        String?
+  lastConfirmedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([patientId, channel])
+  @@unique([patientId, channel, destination])
+}
+
+model PmsPatientConsent {
+  id             String   @id @default(cuid())
+  patientId      String
+  consentType    String
+  status         String   @default("NEEDS_SIGNATURE")
+  sourceDocumentId String?
+  signedByName   String?
+  signedAt       DateTime?
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([patientId, consentType, status])
+}
+
+model PmsMedicalHistoryEntry {
+  id          String   @id @default(cuid())
+  patientId   String
+  category    String
+  condition   String
+  status      String   @default("ACTIVE")
+  severity    String?
+  onsetDate   DateTime?
+  resolvedDate DateTime?
+  notes       String?
+  source      String   @default("STAFF_ENTERED")
+  reviewedByRole String?
+  reviewedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([patientId, category, status])
+}
+
+model PmsPatientPharmacy {
+  id          String   @id @default(cuid())
+  patientId   String
+  pharmacyName String
+  phone       String?
+  fax         String?
+  addressLine1 String?
+  city        String?
+  state       String?
+  postalCode  String?
+  isPreferred Boolean  @default(true)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([patientId, isPreferred])
+}
+
 model PmsClinicalNote {
   id         String    @id @default(cuid())
   patientId  String

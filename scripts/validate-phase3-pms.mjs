@@ -34,6 +34,10 @@ const requiredSchemaModels = [
   "PmsAppointmentRequest",
   "PmsRecall",
   "PmsProcedureCode",
+  "PmsPatientCommunicationPreference",
+  "PmsPatientConsent",
+  "PmsMedicalHistoryEntry",
+  "PmsPatientPharmacy",
   "PmsClinicalNote",
   "PmsPerioExam",
   "PmsTreatmentPlan",
@@ -93,6 +97,14 @@ for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addT
   const haystack = `${schema}\n${patientsPage}\n${patientRecordPage}\n${chartPage}\n${treatmentPlanPage}\n${insurancePage}\n${ledgerPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS family/chart production token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["updatePatientAdministrativeProfile", "addCommunicationPreference", "addPatientConsent", "addMedicalHistoryEntry", "addPatientPharmacy", "Administrative profile", "Communication and consent", "Medical history", "Preferred pharmacy"]) {
+  const haystack = `${schema}\n${patientRecordPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+  if (!haystack.includes(token)) {
+    console.error(`PMS patient profile depth token missing: ${token}`);
     process.exit(1);
   }
 }
