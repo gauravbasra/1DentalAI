@@ -115,19 +115,14 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y nginx certbot python3-certbot-nginx
             if sudo systemctl is-active --quiet nginx || ! sudo ss -ltnp | grep -q ':80 '; then
+              test -f /etc/letsencrypt/live/1dentalai.com/fullchain.pem
+              test -f /etc/letsencrypt/live/1dentalai.com/privkey.pem
               sudo cp ops/nginx/1dentalai.conf /etc/nginx/sites-available/1dentalai.conf
               sudo ln -sf /etc/nginx/sites-available/1dentalai.conf /etc/nginx/sites-enabled/1dentalai.conf
               sudo rm -f /etc/nginx/sites-enabled/default
               sudo nginx -t
               sudo systemctl enable --now nginx || true
               sudo systemctl reload nginx || sudo nginx -s reload || true
-              if sudo systemctl is-active --quiet nginx && getent ahosts 1dentalai.com www.1dentalai.com app.1dentalai.com | awk '{print \$1}' | grep -Eq '^(162\.243\.186\.191|2604:a880:800:14:0:2:eca0:e000)$'; then
-                sudo certbot --nginx --non-interactive --agree-tos --redirect --expand \
-                  -m hello@1dentalai.com \
-                  -d 1dentalai.com -d www.1dentalai.com -d app.1dentalai.com -d go.1dentalai.com || true
-                sudo nginx -t
-                sudo systemctl reload nginx || true
-              fi
             else
               echo "Port 80 is already handled by an existing proxy; leaving it in place."
               sudo ss -ltnp | grep ':80 ' || true
@@ -140,7 +135,7 @@ jobs:
       - name: Verify public health
         run: |
           for i in 1 2 3 4 5; do
-            code=$(curl -s -o /tmp/1dentalai-health.json -w "%{http_code}" "http://${{ secrets.DO_SSH_HOST }}/api/health" || true)
+            code=$(curl -s -o /tmp/1dentalai-health.json -w "%{http_code}" "https://app.1dentalai.com/api/health" || true)
             if [ "$code" = "200" ] && grep -q '"app":"1DentalAI"' /tmp/1dentalai-health.json; then
               cat /tmp/1dentalai-health.json
               exit 0
@@ -152,4 +147,4 @@ jobs:
 
       - name: Verify public database health
         run: |
-          curl -fsS "http://${{ secrets.DO_SSH_HOST }}/api/database/health"
+          curl -fsS "https://app.1dentalai.com/api/database/health"
