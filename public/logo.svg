@@ -1,6 +1,37 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="512" height="512" rx="104" fill="#0E7490"/>
-  <path d="M155 244C155 175.517 199.817 128 256 128C312.183 128 357 175.517 357 244V384H309V246C309 204.25 286.5 174 256 174C225.5 174 203 204.25 203 246V384H155V244Z" fill="white"/>
-  <path d="M243 245H269V384H243V245Z" fill="#A7F3D0"/>
-  <path d="M232 128H280L294 178H218L232 128Z" fill="#ECFEFF"/>
+  <defs>
+    <linearGradient id="base" x1="72" y1="48" x2="440" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#031B2F"/>
+      <stop offset="0.54" stop-color="#063D55"/>
+      <stop offset="1" stop-color="#0E7490"/>
+    </linearGradient>
+    <linearGradient id="aura" x1="96" y1="88" x2="416" y2="424" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9"/>
+      <stop offset="0.55" stop-color="#5EEAD4"/>
+      <stop offset="1" stop-color="#A7F3D0"/>
+    </linearGradient>
+    <linearGradient id="tooth" x1="164" y1="126" x2="348" y2="392" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DFFBFF"/>
+    </linearGradient>
+    <filter id="softGlow" x="54" y="48" width="404" height="416" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+      <feGaussianBlur stdDeviation="7" result="effect1_foregroundBlur_1_1"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#base)"/>
+  <path d="M97 170C119 99 185 60 256 60C327 60 393 99 415 170" stroke="url(#aura)" stroke-width="16" stroke-linecap="round"/>
+  <path d="M415 342C393 413 327 452 256 452C185 452 119 413 97 342" stroke="url(#aura)" stroke-width="16" stroke-linecap="round" opacity="0.72"/>
+  <path d="M94 256H136M376 256H418M256 94V136M256 376V418" stroke="#A7F3D0" stroke-width="12" stroke-linecap="round" opacity="0.7"/>
+  <g filter="url(#softGlow)" opacity="0.7">
+    <path d="M150 198C150 151.6 184.4 118 228 118C239.1 118 248.4 121 256 126.3C263.6 121 272.9 118 284 118C327.6 118 362 151.6 362 198C362 232.4 349.7 262.2 337.5 291.5C325.7 319.9 314 347.8 314 380C314 396.6 300.6 410 284 410C267.4 410 254 396.6 254 380V302C254 291.5 245.5 283 235 283C224.5 283 216 291.5 216 302V380C216 396.6 202.6 410 186 410C169.4 410 156 396.6 156 380C156 347.8 144.3 319.9 132.5 291.5C120.3 262.2 108 232.4 108 198Z" fill="#67E8F9"/>
+  </g>
+  <path d="M158 198C158 156 189.1 126 228 126C241.2 126 249.3 132.1 256 139.4C262.7 132.1 270.8 126 284 126C322.9 126 354 156 354 198C354 230.3 342.2 258.5 330 287.8C317.8 317.1 305 347.9 305 380C305 391.6 295.6 401 284 401C272.4 401 263 391.6 263 380V302C263 286.5 250.5 274 235 274C219.5 274 207 286.5 207 302V380C207 391.6 197.6 401 186 401C174.4 401 165 391.6 165 380C165 347.9 152.2 317.1 140 287.8C127.8 258.5 116 230.3 116 198C116 156 147.1 126 186 126C197.5 126 207.1 130.7 215 137.4C222.9 130.7 232.5 126 244 126" fill="url(#tooth)"/>
+  <path d="M236 202L258 176H286M258 176V358" stroke="#083344" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M239 200L258 178H284M258 178V358" stroke="url(#aura)" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="126" cy="256" r="16" fill="#A7F3D0"/>
+  <circle cx="386" cy="256" r="16" fill="#A7F3D0"/>
+  <circle cx="256" cy="126" r="16" fill="#67E8F9"/>
+  <circle cx="256" cy="386" r="16" fill="#A7F3D0"/>
 </svg>

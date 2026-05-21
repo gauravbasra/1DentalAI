@@ -1,5 +1,24 @@
 <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="64" height="64" rx="14" fill="#0E7490"/>
-  <path d="M20 31C20 22.1 25.6 16 32 16C38.4 16 44 22.1 44 31V48H38V31C38 26.1 35.5 22 32 22C28.5 22 26 26.1 26 31V48H20V31Z" fill="white"/>
-  <path d="M30.5 31H33.5V48H30.5V31Z" fill="#A7F3D0"/>
+  <defs>
+    <linearGradient id="base" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#031B2F"/>
+      <stop offset="0.55" stop-color="#063D55"/>
+      <stop offset="1" stop-color="#0E7490"/>
+    </linearGradient>
+    <linearGradient id="aura" x1="12" y1="10" x2="52" y2="54" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9"/>
+      <stop offset="1" stop-color="#A7F3D0"/>
+    </linearGradient>
+    <linearGradient id="tooth" x1="20" y1="15" x2="44" y2="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DFFBFF"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#base)"/>
+  <path d="M12 22C15 13 23 8 32 8C41 8 49 13 52 22M52 42C49 51 41 56 32 56C23 56 15 51 12 42" stroke="url(#aura)" stroke-width="2.8" stroke-linecap="round"/>
+  <path d="M20 25C20 19.5 24.1 15.5 29.3 15.5C30.7 15.5 31.8 15.9 32.8 16.7C33.8 15.9 34.9 15.5 36.3 15.5C41.5 15.5 45.6 19.5 45.6 25C45.6 29.1 44.1 32.7 42.5 36.4C41 40 39.4 43.8 39.4 47.8C39.4 49.5 38 51 36.2 51C34.5 51 33 49.5 33 47.8V37.8C33 36.2 31.8 35 30.2 35C28.7 35 27.4 36.2 27.4 37.8V47.8C27.4 49.5 26 51 24.2 51C22.5 51 21 49.5 21 47.8C21 43.8 19.4 40 17.9 36.4C16.3 32.7 14.8 29.1 14.8 25C14.8 19.5 18.9 15.5 24.1 15.5C25.6 15.5 26.8 16.1 27.8 16.9C28.8 16.1 30 15.5 31.5 15.5" fill="url(#tooth)"/>
+  <path d="M29 25L32 22H36M32 22V45" stroke="#083344" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M29.5 24.7L32 22H35.5M32 22V45" stroke="url(#aura)" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="14" cy="32" r="2" fill="#A7F3D0"/>
+  <circle cx="50" cy="32" r="2" fill="#A7F3D0"/>
 </svg>
