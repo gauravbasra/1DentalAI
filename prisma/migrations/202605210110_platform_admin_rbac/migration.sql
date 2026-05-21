@@ -137,6 +137,7 @@ VALUES
   ('auth_user_super_admin', 'tenant_1dentalai_production', 'gaurav@basraconsultingservices.com', encode(digest(lower('gaurav@basraconsultingservices.com'), 'sha256'), 'hex'), 'Gaurav Basra', 'super_admin', 'ACTIVE', 'PpHiK0-biwRmNPmbcjBYx1dzvB28N5MDHnARvtxyO0g', '0X9fMUeqACu5K-80ZhFsgw', 310000, true, true),
   ('auth_user_demo_practice_admin', 'tenant_1dentalai_production', 'demo@1dentalai.com', encode(digest(lower('demo@1dentalai.com'), 'sha256'), 'Demo Practice Admin', 'practice_admin', 'ACTIVE', 'WBWxQgkpNiYBTEApfV06bWUFcMmv_JTuQ2Xt3IrwcB4', 'Q3vPZ_-DgEFlnZGP4IcjaQ', 310000, true, true),
   ('auth_user_practice_admin', 'tenant_1dentalai_production', 'practiceadmin@1dentalai.com', encode(digest(lower('practiceadmin@1dentalai.com'), 'sha256'), 'Practice Admin Demo', 'practice_admin', 'ACTIVE', 'b9tzyhGaJb6kXdwQJpyPTmfpA-K5KrLqoJThotaX1fM', 'snbu9bMmkSJZ612UAK12DA', 310000, true, true)
+)
 ON CONFLICT ("tenantId", "emailHash") DO UPDATE SET
   "displayName" = excluded."displayName",
   "roleKey" = excluded."roleKey",

@@ -82,7 +82,7 @@ jobs:
               chmod 600 .env
             fi
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
-            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate < /dev/null
+            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm ci && (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true) && npx prisma migrate deploy' < /dev/null
           EOF
             sleep 10
           done
