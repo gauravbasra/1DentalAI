@@ -17,10 +17,23 @@ jobs:
           chmod 600 ~/.ssh/do_deploy_key
           ssh-keyscan -p "${DEPLOY_PORT}" -H "${{ secrets.DO_SSH_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Print app logs
+      - name: Print app logs and online scheduling state
         run: |
           ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" <<EOF
             set -e
             cd "${DEPLOY_PATH}"
             docker compose -f docker-compose.yml -f docker-compose.public.yml logs --tail=120 app
+            docker compose -f docker-compose.yml -f docker-compose.public.yml exec -T postgres psql -U dentalai_app -d dentalai_prod -c "
+              select b.\"id\", b.\"firstName\", b.\"lastName\", b.\"insurancePayerName\", b.\"eligibilityStatus\", b.\"appointmentId\", b.\"providerId\", b.\"operatoryId\", b.\"startsAt\"
+              from \"PmsOnlineBooking\" b
+              where b.\"email\" like 'qa-online-booking%'
+              order by b.\"createdAt\" desc;
+            "
+            docker compose -f docker-compose.yml -f docker-compose.public.yml exec -T postgres psql -U dentalai_app -d dentalai_prod -c "
+              select a.\"id\", p.\"firstName\", p.\"lastName\", a.\"providerId\", a.\"operatoryId\", a.\"startsAt\", a.\"endsAt\", a.\"status\", a.\"appointmentType\"
+              from \"PmsAppointment\" a
+              left join \"PmsPatient\" p on p.\"id\" = a.\"patientId\"
+              where p.\"email\" like 'qa-online-booking%' or a.\"notes\" ilike '%QA validation booking%'
+              order by a.\"startsAt\";
+            "
           EOF
