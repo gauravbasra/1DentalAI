@@ -658,14 +658,26 @@ export async function createPhoneCallControlAction(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("pctrl");
-  const blockedReason = "Live call control requires configured SIP/WebRTC provider credentials, active call webhooks, and successful smoke test. Internal work item was recorded; no fake call action was sent.";
+  const readiness = await query<{ missing: string[] }>(
+    `select array_remove(array[
+       case when not exists (select 1 from "PhoneProviderConnection" where "tenantId" = $1 and "status" = 'ACTIVE') then 'active carrier/provider connection' end,
+       case when not exists (select 1 from "PhoneProviderConnection" where "tenantId" = $1 and "credentialStatus" = 'VALIDATED') then 'validated SIP/WebRTC credentials' end,
+       case when not exists (select 1 from "PhoneProviderConnection" where "tenantId" = $1 and "webhookStatus" = 'VERIFIED') then 'verified call-control webhooks' end,
+       case when not exists (select 1 from "PhoneNumber" where "tenantId" = $1 and "voiceStatus" = 'ACTIVE' and "status" = 'ACTIVE') then 'active voice number' end
+     ], null) as missing`,
+    [tenantId],
+  );
+  const missing = readiness.rows[0]?.missing ?? [];
+  const blockedReason = missing.length
+    ? `Live call control is blocked until ${missing.join(", ")} are configured. Internal work item was recorded; no fake call action was sent.`
+    : "Live call control still requires provider API execution. Internal work item was recorded for smoke-test verification; no fake call action was sent.";
   await query(
     `insert into "PhoneCallControlAction"
        ("id", "tenantId", "activeCallId", "conversationId", "actionType", "requestedByRole", "targetExtensionId", "targetNumber", "targetParkSlot", "providerStatus", "blockedReason", "resultSummary", "updatedAt")
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'CONNECTOR_REQUIRED', $10, $11, current_timestamp)`,
     [id, tenantId, input.activeCallId || null, input.conversationId || null, input.actionType, input.requestedByRole || "front_desk", input.targetExtensionId || null, input.targetNumber || null, input.targetParkSlot || null, blockedReason, `${input.actionType} staged for provider execution.`],
   );
-  await addAudit(tenantId, input.requestedByRole || "front_desk", "PHONE_CALL_CONTROL_STAGED", "PhoneCallControlAction", id, "BLOCKED", { actionType: input.actionType });
+  await addAudit(tenantId, input.requestedByRole || "front_desk", "PHONE_CALL_CONTROL_STAGED", "PhoneCallControlAction", id, "BLOCKED", { actionType: input.actionType, missingReadiness: missing });
 }
 
 export async function updatePhoneDeviceStatus(id: string, provisioningStatus: string, registrationStatus: string) {
