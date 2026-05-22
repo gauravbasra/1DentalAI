@@ -51,6 +51,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     voiceStatus: '',
     draft: '',
     pendingPrompt: '',
+    bookingMode: false,
     lastConversationStatus: '',
     lastSchedulingOutcome: '',
   };
@@ -106,7 +107,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       '.identity{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border-bottom:1px solid #e5e5e5;background:#fafafa}.identity input,.identity select{min-width:0;border:1px solid #d4d4d4;border-radius:9px;padding:10px;font-size:13px;background:#fff}.identity input:first-child{grid-column:1/-1}.wide{grid-column:1/-1}.consent{grid-column:1/-1;display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start;border:1px solid #e5e5e5;border-radius:9px;background:#fff;padding:9px;font-size:11px;line-height:1.35;color:#525252}.consent input{margin-top:2px}.consent b{color:#171717}' +
       '.contactbar{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e5e5e5;background:#fff;padding:10px 12px}.contacttext{min-width:0}.contactname{font-size:13px;font-weight:850;color:#171717;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.contactmeta{margin-top:2px;font-size:11px;color:#737373;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.editbtn{border:1px solid #d4d4d4;border-radius:999px;background:#fff;padding:7px 10px;font-size:11px;font-weight:850;color:#171717;cursor:pointer}' +
       '.chips{display:flex;gap:7px;overflow-x:auto;padding:10px 12px;border-bottom:1px solid #e5e5e5;background:#fff}.chip{white-space:nowrap;border:1px solid #d4d4d4;background:#fff;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}.chip:hover{border-color:'+primary+';color:'+primary+'}' +
-      '.msgs{flex:1;overflow:auto;padding:14px;background:#f5f5f4;display:flex;flex-direction:column;gap:10px}.msg{max-width:88%;border-radius:13px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap}.bot{align-self:flex-start;background:#fff;border:1px solid #e5e5e5}.me{align-self:flex-end;background:'+primary+';color:#fff}.guided{align-self:stretch;border:1px solid #bfdbfe;background:#eff6ff;border-radius:14px;padding:12px}.guidedTitle{font-size:12px;font-weight:900;color:#172554}.guidedText{margin-top:3px;font-size:12px;line-height:1.45;color:#1e3a8a}.slotlist{display:grid;gap:8px;margin-top:10px}.slotbtn{width:100%;text-align:left;border:1px solid #bfdbfe;background:#fff;border-radius:12px;padding:10px 11px;color:#111827;cursor:pointer;font-size:12px;line-height:1.35}.slotbtn:hover{border-color:'+primary+'}.slotidx{display:inline-grid;width:22px;height:22px;place-items:center;border-radius:999px;background:'+primary+';color:#fff;font-size:11px;font-weight:900;margin-right:8px}.status{align-self:stretch;border-radius:13px;padding:10px 12px;font-size:12px;line-height:1.45;border:1px solid #bbf7d0;background:#f0fdf4;color:#14532d}.status b{display:block;margin-bottom:2px}' +
+      '.msgs{flex:1;overflow:auto;padding:14px;background:#f5f5f4;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth}.msg{max-width:88%;border-radius:13px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap}.bot{align-self:flex-start;background:#fff;border:1px solid #e5e5e5}.me{align-self:flex-end;background:'+primary+';color:#fff}.guided{align-self:stretch;border:1px solid #bfdbfe;background:#eff6ff;border-radius:14px;padding:12px}.guidedTitle{font-size:12px;font-weight:900;color:#172554}.guidedText{margin-top:3px;font-size:12px;line-height:1.45;color:#1e3a8a}.slotlist,.servicelist{display:grid;gap:8px;margin-top:10px}.slotbtn,.servicebtn{width:100%;text-align:left;border:1px solid #bfdbfe;background:#fff;border-radius:12px;padding:10px 11px;color:#111827;cursor:pointer;font-size:12px;line-height:1.35}.slotbtn:hover,.servicebtn:hover{border-color:'+primary+'}.slotidx{display:inline-grid;width:22px;height:22px;place-items:center;border-radius:999px;background:'+primary+';color:#fff;font-size:11px;font-weight:900;margin-right:8px}.serviceName{display:block;font-weight:900;color:#111827}.serviceHint{display:block;margin-top:2px;color:#525252}.status{align-self:stretch;border-radius:13px;padding:10px 12px;font-size:12px;line-height:1.45;border:1px solid #bbf7d0;background:#f0fdf4;color:#14532d}.status b{display:block;margin-bottom:2px}' +
       '.composer{display:grid;grid-template-columns:1fr auto auto;gap:8px;padding:12px;border-top:1px solid #e5e5e5;background:#fff}.composer textarea{height:44px;resize:none;border:1px solid #d4d4d4;border-radius:10px;padding:10px;font-size:13px;font-family:inherit}.composer button{border:0;border-radius:10px;background:#0a0a0a;color:#fff;font-weight:850;padding:0 14px;cursor:pointer}.composer button:disabled{opacity:.55;cursor:not-allowed}.iconbtn{width:44px;height:44px;display:grid;place-items:center;border-radius:999px!important;border:1px solid #d4d4d4!important;background:#fff!important;color:#111827!important;padding:0!important}.iconbtn svg{width:20px;height:20px}.iconbtn.listening{border-color:#fecaca!important;background:#fef2f2!important;color:#b91c1c!important}.voiceStatus{grid-column:1/-1;font-size:11px;font-weight:700;color:#525252;min-height:14px}.meta{padding:9px 12px;font-size:10px;line-height:1.35;color:#525252;border-top:1px solid #eee;background:#fff;white-space:pre-line}' +
       '@media(max-width:520px){.wrap{right:12px;bottom:12px}.panel{width:calc(100vw - 24px);height:calc(100vh - 88px)}.identity{grid-template-columns:1fr}}' +
       '</style>';
@@ -117,6 +118,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     if (state.open) {
       var input = shadow.querySelector('textarea');
       if (input) input.focus();
+      window.setTimeout(scrollMessagesToBottom, 0);
     }
   }
 
@@ -187,6 +189,8 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
         h('b', { text:'Appointment booked' }, []),
         document.createTextNode('This conversation has a confirmed appointment in the practice calendar. Start a new chat for another request.')
       ]));
+    } else if (state.bookingMode && readyForChat) {
+      messages.appendChild(servicePicker());
     }
     return h('div', { class: 'panel' }, [
       h('div', { class: 'head' }, [
@@ -244,6 +248,34 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
         ]);
       }))
     ]);
+  }
+
+  function servicePicker(){
+    var services = [
+      { value:'Preventive dentistry', label:'Cleaning or hygiene visit', hint:'Routine cleaning, exam, x-rays, or recall visit.' },
+      { value:'New patient exam', label:'New patient exam', hint:'First visit, comprehensive exam, records, and treatment discussion.' },
+      { value:'Emergency', label:'Tooth pain or urgent visit', hint:'Pain, swelling, broken tooth, infection concern, or same-day triage.' },
+      { value:'Implants', label:'Implant or cosmetic consult', hint:'Implants, veneers, whitening, aligners, or larger treatment questions.' }
+    ];
+    return h('div', { class:'guided' }, [
+      h('div', { class:'guidedTitle', text:'What type of visit should I check?' }, []),
+      h('div', { class:'guidedText', text:'Pick a service and I will read available times from the practice schedule.' }, []),
+      h('div', { class:'servicelist' }, services.map(function(service){
+        return h('button', { class:'servicebtn', type:'button', onclick:function(){ chooseBookingService(service.value, service.label); } }, [
+          h('span', { class:'serviceName', text:service.label }, []),
+          h('span', { class:'serviceHint', text:service.hint }, [])
+        ]);
+      }))
+    ]);
+  }
+
+  function chooseBookingService(serviceLine, serviceLabel){
+    state.bookingMode = false;
+    state.visitor.serviceLine = serviceLine;
+    state.visitor.preferredTime = state.visitor.preferredTime || 'Today or next available';
+    state.visitor.urgency = serviceLine === 'Emergency' ? 'URGENT' : 'ROUTINE';
+    saveVisitorState();
+    submitText('I want to schedule a ' + serviceLabel + '. Please show available appointment times.');
   }
 
   function appendTranscript(text){
@@ -321,11 +353,21 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
 
   function quickChips(){
     return h('div', { class:'chips' }, [
-      h('button', { class:'chip', type:'button', onclick:function(){ submitText('I want to schedule a dental appointment.'); }, text:'Book visit' }, []),
-      h('button', { class:'chip', type:'button', onclick:function(){ submitText('I have tooth pain or swelling and need help.'); }, text:'Urgent pain' }, []),
+      h('button', { class:'chip', type:'button', onclick:startBookingFlow, text:'Book visit' }, []),
+      h('button', { class:'chip', type:'button', onclick:function(){ chooseBookingService('Emergency', 'tooth pain or urgent visit'); }, text:'Urgent pain' }, []),
       h('button', { class:'chip', type:'button', onclick:function(){ submitText('I want to know insurance or financing options.'); }, text:'Insurance/cost' }, []),
       h('button', { class:'chip', type:'button', onclick:function(){ submitText('I need to reschedule my appointment.'); }, text:'Reschedule' }, [])
     ]);
+  }
+
+  function startBookingFlow(){
+    if (state.lastSchedulingOutcome === 'PMS_APPOINTMENT_BOOKED') {
+      state.messages.push({ senderType:'ASSISTANT', body:'This appointment is already booked. Start a new chat if you need another visit or a different request.' });
+      render();
+      return;
+    }
+    state.bookingMode = true;
+    render();
   }
 
   function seedPrompt(text){
@@ -390,8 +432,13 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     state.messages = [];
     state.draft = '';
     state.pendingPrompt = '';
+    state.bookingMode = false;
     state.lastConversationStatus = '';
     state.lastSchedulingOutcome = '';
+    state.visitor.serviceLine = '';
+    state.visitor.preferredTime = '';
+    state.visitor.urgency = 'ROUTINE';
+    saveVisitorState();
     localStorage.removeItem(storageKey);
     ensureSession();
     render();
@@ -540,6 +587,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     }
 
     state.sending = true;
+    state.bookingMode = false;
     var session = await ensureSession();
     if (state.lastSchedulingOutcome === 'PMS_APPOINTMENT_BOOKED') {
       state.messages.push({ senderType:'ASSISTANT', body:'This appointment is already booked. Start a new chat if you need another visit or a different request.' });
@@ -579,6 +627,11 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     state.sending = false;
     await loadTranscript();
     render();
+  }
+
+  function scrollMessagesToBottom(){
+    var scroller = shadow.querySelector('.msgs');
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
   }
 
   function capturePayload(extra){
