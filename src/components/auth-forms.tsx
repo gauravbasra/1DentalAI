@@ -5,7 +5,7 @@ import { signupFormAction } from "@/lib/auth-actions";
 
 const initialState = { ok: false, message: "" };
 
-export function LoginForm({ next = "/app/overview", error = false }: { next?: string; error?: boolean }) {
+export function LoginForm({ next = "/wrapper", error = false }: { next?: string; error?: boolean }) {
   return (
     <form action="/login" method="post" className="mt-6 space-y-5">
       <input type="hidden" name="next" value={next} />

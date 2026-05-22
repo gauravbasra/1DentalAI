@@ -7,6 +7,11 @@ function canonicalizeHost(request: NextRequest) {
     request.nextUrl.pathname === "/app" ||
     request.nextUrl.pathname.startsWith("/app/") ||
     request.nextUrl.pathname.startsWith("/admin") ||
+    request.nextUrl.pathname.startsWith("/wrapper") ||
+    request.nextUrl.pathname.startsWith("/pms") ||
+    request.nextUrl.pathname.startsWith("/patient-engagement") ||
+    request.nextUrl.pathname.startsWith("/reputation-management") ||
+    request.nextUrl.pathname.startsWith("/digital-marketing") ||
     request.nextUrl.pathname === "/login" ||
     request.nextUrl.pathname === "/logout";
   if (appOnlyPath && hostname && !["app.1dentalai.com", "localhost", "127.0.0.1", "162.243.186.191"].includes(hostname)) {
@@ -27,5 +32,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/app/:path*", "/admin/:path*", "/login", "/logout", "/signup"],
+  matcher: ["/", "/app/:path*", "/admin/:path*", "/wrapper/:path*", "/wrapper", "/pms/:path*", "/pms", "/patient-engagement/:path*", "/patient-engagement", "/reputation-management/:path*", "/reputation-management", "/digital-marketing/:path*", "/digital-marketing", "/login", "/logout", "/signup"],
 };

@@ -16,7 +16,16 @@ export default async function AppLogin({
   searchParams: Promise<{ next?: string; loggedOut?: string; error?: string }>;
 }) {
   const params = await searchParams;
-  const next = params.next && (params.next.startsWith("/app") || params.next.startsWith("/admin")) ? params.next : "/app/overview";
+  const allowedNext =
+    params.next &&
+    (params.next.startsWith("/app") ||
+      params.next.startsWith("/admin") ||
+      params.next.startsWith("/wrapper") ||
+      params.next.startsWith("/pms") ||
+      params.next.startsWith("/patient-engagement") ||
+      params.next.startsWith("/reputation-management") ||
+      params.next.startsWith("/digital-marketing"));
+  const next = allowedNext ? params.next! : "/wrapper";
   const session = await currentSession();
   if (session) {
     redirect(next);

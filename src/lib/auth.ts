@@ -57,6 +57,18 @@ type LoginResult = AuthActionState & {
   redirectTo?: string;
 };
 
+function isWorkspacePath(path: string) {
+  return (
+    path.startsWith("/app") ||
+    path.startsWith("/admin") ||
+    path.startsWith("/wrapper") ||
+    path.startsWith("/pms") ||
+    path.startsWith("/patient-engagement") ||
+    path.startsWith("/reputation-management") ||
+    path.startsWith("/digital-marketing")
+  );
+}
+
 function authSecret() {
   return process.env.ONE_DENTAL_AUTH_SECRET || process.env.NEXTAUTH_SECRET || process.env.DATABASE_URL || "local-1dentalai-development-secret";
 }
@@ -185,7 +197,7 @@ async function auditAuth(input: {
 export async function loginWithPassword(formData: FormData): Promise<LoginResult> {
   const email = normalizeEmail(formData.get("email"));
   const password = String(formData.get("password") ?? "");
-  const next = String(formData.get("next") ?? "/app/overview");
+  const next = String(formData.get("next") ?? "/wrapper");
 
   if (!email || !password) {
     return { ok: false, message: "Enter your email and password." };
@@ -270,13 +282,13 @@ export async function loginWithPassword(formData: FormData): Promise<LoginResult
     metadata: { roleKey: user.roleKey, phiStored: false },
   });
 
-  if (user.roleKey === "super_admin" && (!next || next === "/app/overview")) {
+  if (user.roleKey === "super_admin" && (!next || next === "/app/overview" || next === "/wrapper")) {
     return { ok: true, redirectTo: "/admin/settings" };
   }
 
   return {
     ok: true,
-    redirectTo: (next.startsWith("/app") || next.startsWith("/admin")) && next !== "/app" ? next : "/app/overview",
+    redirectTo: isWorkspacePath(next) && next !== "/app" ? next : "/wrapper",
   };
 }
 
@@ -393,7 +405,7 @@ export async function requirePlatformAdmin() {
       summary: "User attempted to access platform administration without a platform role.",
       metadata: { roleKey: session.roleKey, phiStored: false },
     });
-    redirect("/app/overview");
+    redirect("/wrapper");
   }
   return session;
 }
