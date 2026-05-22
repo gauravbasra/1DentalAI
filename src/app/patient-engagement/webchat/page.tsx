@@ -5,7 +5,7 @@ import { StateBadge, WorkSurface } from "@/components/products/product-app-shell
 import { PatientEngagementShell, clean } from "@/components/products/patient-engagement-shell";
 import { LivePanelRefresh } from "@/components/products/live-panel-refresh";
 import { SpeechComposer } from "@/components/products/speech-composer";
-import { getOpenAiModelCatalog, type OpenAiModelCatalog } from "@/lib/connector-control-repository";
+import { getOpenAiModelCatalog, getOpenAiWebchatConfig, type OpenAiModelCatalog } from "@/lib/connector-control-repository";
 import { getPhoneOperatingCenter } from "@/lib/operating-system-repository";
 import {
   crawlKnowledgePage,
@@ -108,6 +108,7 @@ async function channelSettingAction(formData: FormData) {
 
 async function aiRuntimeSettingsAction(formData: FormData) {
   "use server";
+  const textModel = normalizeTextModel(String(formData.get("textModel") ?? "gpt-4.1").trim());
   const parseNumber = (name: string, fallback: number) => {
     const value = Number(formData.get(name) ?? fallback);
     return Number.isFinite(value) ? value : fallback;
@@ -124,7 +125,7 @@ async function aiRuntimeSettingsAction(formData: FormData) {
     await updateWebchatAiRuntimeSettings({
       actorRole: "practice_manager",
       llmSettings: {
-        textModel: String(formData.get("textModel") ?? "gpt-4.1").trim(),
+        textModel,
         reasoningEffort: String(formData.get("reasoningEffort") ?? "none").trim(),
         temperature: parseNumber("temperature", 0.25),
         maxOutputTokens: Math.round(parseNumber("maxOutputTokens", 280)),
@@ -167,6 +168,12 @@ async function aiRuntimeSettingsAction(formData: FormData) {
   redirect("/patient-engagement/webchat?view=ai-settings&aiSaved=1");
 }
 
+function normalizeTextModel(model: string) {
+  const value = model.trim() || "gpt-4.1";
+  if (/realtime|transcribe|whisper|tts|audio/i.test(value)) return "gpt-4.1";
+  return value;
+}
+
 export default async function PatientEngagementWebchatPage({
   searchParams,
 }: {
@@ -193,7 +200,9 @@ export default async function PatientEngagementWebchatPage({
   const schedulingRules = (center.schedulingRules ?? []) as SchedulingRuleRow[];
   const channel = ((center.channelSettings ?? []) as ChannelRow[]).find((row) => row.channel === "WEB_CHAT");
   const aiSettings = await getWebchatAiRuntimeSettings();
-  const openAiModels = view === "ai-settings" ? await getOpenAiModelCatalog() : null;
+  const [openAiModels, openAiRuntime] = view === "ai-settings"
+    ? await Promise.all([getOpenAiModelCatalog(), getOpenAiWebchatConfig()])
+    : [null, null] as const;
   const installScript = `<script async src="https://app.1dentalai.com/api/webchat/widget.js?tenant=tenant_1dentalai_production&v=20260522-patient-chat-clean"></script>`;
 
   return (
@@ -445,7 +454,7 @@ export default async function PatientEngagementWebchatPage({
       ) : null}
 
       {view === "ai-settings" ? (
-        <AiRuntimePanel settings={aiSettings} modelCatalog={openAiModels} saved={params.aiSaved === "1"} error={params.aiError} />
+        <AiRuntimePanel settings={aiSettings} modelCatalog={openAiModels} openAiRuntime={openAiRuntime} saved={params.aiSaved === "1"} error={params.aiError} />
       ) : null}
     </PatientEngagementShell>
   );
@@ -503,8 +512,21 @@ type LeadFormRow = { id: string; name: string; serviceLine: string; status: stri
 type SchedulingRuleRow = { id: string; name: string; status: string; bookingWindowDays: number; pmsWritebackStatus: string };
 type ChannelRow = { channel: string; displayName: string; theme: unknown; nlpMode: string; connectorStatus: string; knowledgeBaseStatus: string; schedulingStatus: string; formsStatus: string; nextAction: string };
 
-function AiRuntimePanel({ settings, modelCatalog, saved, error }: { settings: WebchatAiRuntimeSettings; modelCatalog: OpenAiModelCatalog | null; saved: boolean; error?: string }) {
+function AiRuntimePanel({
+  settings,
+  modelCatalog,
+  openAiRuntime,
+  saved,
+  error,
+}: {
+  settings: WebchatAiRuntimeSettings;
+  modelCatalog: OpenAiModelCatalog | null;
+  openAiRuntime: Awaited<ReturnType<typeof getOpenAiWebchatConfig>> | null;
+  saved: boolean;
+  error?: string;
+}) {
   const models = modelCatalog?.models ?? [];
+  const effectiveTextModel = normalizeTextModel(settings.llmSettings.textModel);
   return (
     <form action={aiRuntimeSettingsAction} className="mt-5 space-y-5">
       <WorkSurface title="AI runtime settings" eyebrow="OpenAI, prompt policy, and response behavior">
@@ -524,17 +546,34 @@ function AiRuntimePanel({ settings, modelCatalog, saved, error }: { settings: We
             Web search is disabled. General model knowledge is disabled by default. If the approved knowledge base does not contain an answer, the assistant must ask a clarifying question or hand the conversation to staff.
           </p>
         </div>
-        <div className="mb-5 grid gap-3 md:grid-cols-3">
+        <div className="mb-5 grid gap-3 md:grid-cols-4">
           <Context label="OpenAI model catalog" value={clean(modelCatalog?.status ?? "not loaded")} detail={`${models.length} models available from ${clean(modelCatalog?.source ?? "unknown")}. Manual model IDs are accepted for newly released models.`} />
           <Context label="Catalog fetched" value={modelCatalog?.fetchedAt ? new Date(modelCatalog.fetchedAt).toLocaleString("en-US") : "Not fetched"} detail={modelCatalog?.error ?? "Live model list loaded from OpenAI with the stored API key."} />
-          <Context label="Current text model" value={settings.llmSettings.textModel} detail="This exact ID is sent to the Responses API for webchat replies." />
+          <Context label="Current text model" value={effectiveTextModel} detail="Realtime, transcription, TTS, and audio model IDs are rejected for webchat text replies." />
+          <Context label="API key source" value={clean(openAiRuntime?.source ?? "not checked")} detail={openAiRuntime?.ready ? "OpenAI is available to webchat runtime." : "Keys are managed only in Integrations - API keys."} />
+        </div>
+        <div className="mb-5 rounded-lg border border-sky-200 bg-sky-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-sky-950">API keys are not edited on this page.</p>
+              <p className="mt-1 text-sm leading-6 text-sky-900">
+                This screen controls model, prompt, voice, and knowledge behavior. Store or rotate OpenAI, Twilio, Zoom, NexHealth, Stedi, and other provider keys in the shared encrypted vault.
+              </p>
+            </div>
+            <Link href="/app/connectors?view=credentials" className="rounded-md bg-sky-700 px-3 py-2 text-xs font-semibold text-white">
+              Open integration keys
+            </Link>
+          </div>
         </div>
         <div className="grid gap-4 lg:grid-cols-4">
-          <Input name="textModel" label="Text model" defaultValue={settings.llmSettings.textModel} list="openai-models" />
+          <Input name="textModel" label="Text model" defaultValue={effectiveTextModel} list="openai-text-models" />
           <Select name="reasoningEffort" label="Reasoning effort" options={["none", "minimal", "low", "medium", "high"]} defaultValue={settings.llmSettings.reasoningEffort} />
           <Input name="temperature" label="Temperature" type="number" step="0.05" min="0" max="2" defaultValue={String(settings.llmSettings.temperature)} />
           <Input name="maxOutputTokens" label="Max output tokens" type="number" min="80" max="2000" defaultValue={String(settings.llmSettings.maxOutputTokens)} />
         </div>
+        <datalist id="openai-text-models">
+          {models.filter((model) => normalizeTextModel(model) === model).map((model) => <option key={model} value={model} />)}
+        </datalist>
         <datalist id="openai-models">
           {models.map((model) => <option key={model} value={model} />)}
         </datalist>

@@ -4,6 +4,7 @@ import { Money, PmsCard, StatusFor } from "@/components/pms-ui";
 import {
   createConnectorRouteDecision,
   getConnectorControlCenter,
+  getOpenAiWebchatConfig,
   recordConnectorHealthCheck,
   updateConnectorInstallation,
 } from "@/lib/connector-control-repository";
@@ -97,7 +98,8 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
   const params = await searchParams;
   const role = getRole(params.role) ?? getRole("owner_dentist");
   const activeView = connectorViews.some((view) => view.key === params.view) ? params.view as ConnectorView : "overview";
-  const data = await getConnectorControlCenter();
+  const [data, openAiConfig] = await Promise.all([getConnectorControlCenter(), getOpenAiWebchatConfig()]);
+  const openAiInstallation = data.installations.find((installation) => installation.category === "AI_LLM" || /openai/i.test(String(installation.definitionName)));
   const metrics = data.metrics ?? {
     definitions: "0",
     installations: "0",
@@ -182,7 +184,9 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
 
       {activeView === "credentials" ? (
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-        <PmsCard title="Credential vault intake" eyebrow="Twilio, NexHealth, Stedi keys">
+        <div className="space-y-4">
+        <OpenAiCredentialCard config={openAiConfig} installation={openAiInstallation} roleKey={role.key as RoleKey} />
+        <PmsCard title="Shared credential vault" eyebrow="All provider secrets live here">
           <LatestCredentialActivity credentials={data.credentialVault} />
           <form action="/app/connectors/credentials" method="post" className="mt-3 grid gap-3">
             <input type="hidden" name="actorRole" value={role.key} />
@@ -228,20 +232,11 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
               Store encrypted credential
             </button>
             <p className="rounded-md bg-amber-50 p-3 text-xs leading-5 text-amber-900">
-              Secrets are encrypted at rest and never displayed after saving. Saving a key changes readiness to pending only; Twilio calls/SMS, NexHealth PMS writes, and Stedi payer transactions still require webhook verification, tenant approval, smoke tests, and provider response evidence.
+              Secrets are encrypted at rest and never displayed after saving. Editing a secret means rotating it here. Runtime screens only choose behavior like model, prompt, voice, and workflow policy; they do not store API keys.
             </p>
-          </form>
-          <form action="/app/connectors/credentials/validate-openai" method="post" className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3">
-            <input type="hidden" name="actorRole" value={role.key} />
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-sky-800">OpenAI smoke test</p>
-            <p className="mt-1 text-xs leading-5 text-sky-900">
-              Runs a non-PHI Responses API credential check against the stored OPENAI api_key. This validates the key only; production PHI remains blocked until BAA/model policy, tenant approval, and PHI retention controls are approved.
-            </p>
-            <button className="mt-3 rounded-md bg-sky-700 px-3 py-2 text-xs font-semibold text-white">
-              Validate OpenAI key
-            </button>
           </form>
         </PmsCard>
+        </div>
 
         <PmsCard title="Stored credential fingerprints" eyebrow="No raw secrets displayed">
           <div className="space-y-3">
@@ -552,6 +547,89 @@ function ConnectorViewNav({ activeView, roleKey }: { activeView: ConnectorView; 
         </a>
       ))}
     </nav>
+  );
+}
+
+function OpenAiCredentialCard({
+  config,
+  installation,
+  roleKey,
+}: {
+  config: Awaited<ReturnType<typeof getOpenAiWebchatConfig>>;
+  installation: Awaited<ReturnType<typeof getConnectorControlCenter>>["installations"][number] | undefined;
+  roleKey: RoleKey;
+}) {
+  const canStore = Boolean(installation?.id);
+  const readiness = config.ready ? "READY" : config.hasVaultKey || config.hasEnvironmentKey ? "SETUP_REQUIRED" : "MISSING";
+  return (
+    <PmsCard title="OpenAI BAA runtime key" eyebrow="Webchat, voice, and AI assistant connector">
+      <div className="grid gap-3 md:grid-cols-3">
+        <ContextCard label="Runtime source" value={config.source} detail={config.ready ? "The app can use OpenAI for webchat responses." : config.blockedReason ?? "OpenAI is not ready."} />
+        <ContextCard label="Vault key" value={config.hasVaultKey ? "stored" : "missing"} detail={config.hasVaultKey ? "Stored encrypted in the connector vault. Raw key is never displayed." : "Store or rotate the API key below."} />
+        <ContextCard label="Environment key" value={config.hasEnvironmentKey ? "present" : "not set"} detail="Production can also read OPENAI_API_KEY from deployment secrets, but the editable path is this vault." />
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <StatusTile label="Credential" value={config.credentialStatus} />
+        <StatusTile label="Approval" value={config.approvalStatus} />
+        <StatusTile label="Health" value={config.healthStatus} />
+        <StatusTile label="Runtime" value={readiness} />
+      </div>
+      {config.secretError ? (
+        <p className="mt-3 rounded-md bg-red-50 p-3 text-xs leading-5 text-red-900">{config.secretError}</p>
+      ) : null}
+      {!canStore ? (
+        <p className="mt-3 rounded-md bg-red-50 p-3 text-xs leading-5 text-red-900">
+          AI_LLM connector installation is missing. Run the connector seed/migration before storing the OpenAI key.
+        </p>
+      ) : null}
+      <form action="/app/connectors/credentials" method="post" className="mt-4 grid gap-3">
+        <input type="hidden" name="actorRole" value={roleKey} />
+        <input type="hidden" name="installationId" value={installation?.id ?? ""} />
+        <input type="hidden" name="providerKey" value="OPENAI" />
+        <input type="hidden" name="credentialLabel" value="api_key" />
+        <input type="hidden" name="credentialType" value="API_KEY" />
+        <label className="block text-xs font-semibold text-neutral-600">
+          Rotate OpenAI API key
+          <input name="secretValue" type="password" autoComplete="off" required disabled={!canStore} placeholder="Paste OpenAI API key" className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-100" />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <button disabled={!canStore} className="rounded-md bg-neutral-950 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300">
+            Store/rotate OpenAI key
+          </button>
+        </div>
+      </form>
+      <form action="/app/connectors/credentials/validate-openai" method="post" className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3">
+        <input type="hidden" name="actorRole" value={roleKey} />
+        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-sky-800">OpenAI smoke test</p>
+        <p className="mt-1 text-xs leading-5 text-sky-900">
+          Runs a non-PHI Responses API check against the stored OPENAI api_key. This validates the key; model, prompt, voice, and RAG behavior stay in Patient Engagement - Webchat - AI runtime.
+        </p>
+        <button disabled={!canStore} className="mt-3 rounded-md bg-sky-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300">
+          Validate OpenAI key
+        </button>
+      </form>
+    </PmsCard>
+  );
+}
+
+function ContextCard({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-neutral-950">{value}</p>
+      <p className="mt-1 text-xs leading-5 text-neutral-600">{detail}</p>
+    </div>
+  );
+}
+
+function StatusTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-neutral-200 bg-white p-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">{label}</p>
+      <div className="mt-2">
+        <StatusFor value={value} />
+      </div>
+    </div>
   );
 }
 
