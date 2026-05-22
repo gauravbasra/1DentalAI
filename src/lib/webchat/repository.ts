@@ -11,6 +11,7 @@ import {
   sendApprovedPhoneOutboundMessage,
   updatePhoneOutboundMessageApproval,
 } from "@/lib/operating-system-repository";
+import { getOpenAiWebchatConfig } from "@/lib/connector-control-repository";
 
 export type WebchatAnalysis = {
   intent: string;
@@ -756,15 +757,17 @@ async function buildAiAutoReply(input: {
   }
 
   const fallback = buildReply(input.analysis, input.knowledge);
+  const openAi = await getOpenAiWebchatConfig(input.tenantId);
   return {
     body: sanitizePatientReply(fallback.body, input.analysis),
     automationMode: "AI_AUTO",
     handoffReason: null,
     actionStatus: "AI_RULES_FALLBACK_RESPONDED",
-    deliveryStatus: process.env.OPENAI_API_KEY ? "SENT" : "SENT_WITH_RULES_FALLBACK",
-    provider: process.env.OPENAI_API_KEY ? "WEB_CHAT" : "RULES_ENGINE",
-    providerStatus: process.env.OPENAI_API_KEY ? "DELIVERED_TO_WIDGET" : "OPENAI_NOT_CONFIGURED",
-    model: process.env.OPENAI_API_KEY ? "rules_fallback_after_openai_error" : "rules_fallback_openai_not_configured",
+    deliveryStatus: "SENT",
+    provider: openAi.ready ? "WEB_CHAT" : "RULES_ENGINE",
+    providerStatus: openAi.ready ? "OPENAI_RESPONSE_EMPTY" : "OPENAI_CONNECTOR_BLOCKED",
+    model: openAi.ready ? "rules_fallback_after_openai_empty" : "rules_fallback_openai_connector_blocked",
+    metadata: { openAiConnector: { ready: openAi.ready, source: openAi.source, blockedReason: openAi.blockedReason } },
   };
 }
 
@@ -1193,9 +1196,9 @@ async function generateOpenAiReply(input: {
   knowledge: { heading: string | null; pageTitle: string; content: string }[];
   qualification: { leadScore: number; qualificationStage: string; nextBestAction: string };
 }) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  const model = process.env.OPENAI_WEBCHAT_MODEL || "gpt-4o-mini";
+  const openAi = await getOpenAiWebchatConfig(defaultTenantId);
+  if (!openAi.apiKey) return null;
+  const model = openAi.model;
   const knowledgeText = input.knowledge.slice(0, 4).map((row, index) => {
     const title = row.heading || row.pageTitle || `Source ${index + 1}`;
     return `${index + 1}. ${title}: ${row.content.slice(0, 700)}`;
@@ -1213,7 +1216,7 @@ async function generateOpenAiReply(input: {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${openAi.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({

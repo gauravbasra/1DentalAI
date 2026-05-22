@@ -1,4 +1,4 @@
-import { createCipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { newId, query } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
 
@@ -167,9 +167,10 @@ function buildDomainReadiness(input: {
     const checks = input.healthChecks.filter((row) => definitionIds.has(row.definitionId));
     const routes = input.routes.filter((row) => definitionIds.has(row.definitionId));
     const costs = input.costs.filter((row) => definitionIds.has(row.definitionId));
+    const webhookReady = (row: ConnectorRow) => row.webhookStatus === "VERIFIED" || (category === "AI_LLM" && row.webhookStatus === "NOT_REQUIRED");
     const blockers = [
       installations.some((row) => row.credentialStatus !== "VALIDATED") ? "Credential vault not validated" : null,
-      installations.some((row) => row.webhookStatus !== "VERIFIED") ? "Webhook callback or signing secret not verified" : null,
+      installations.some((row) => !webhookReady(row)) ? (category === "AI_LLM" ? "AI connector webhook gate must be NOT_REQUIRED or VERIFIED" : "Webhook callback or signing secret not verified") : null,
       installations.some((row) => row.approvalStatus !== "APPROVED") ? "Tenant approval policy not approved" : null,
       installations.some((row) => row.healthStatus !== "PASS") ? "Smoke test or health check not passing" : null,
       capabilities.some((row) => Array.isArray(row.missingFields) && row.missingFields.length > 0) ? "Capability map has missing fields" : null,
@@ -301,6 +302,199 @@ export async function storeConnectorCredential(input: {
   });
 }
 
+export async function getConnectorSecret(input: {
+  tenantId?: string;
+  providerKey: string;
+  credentialLabel: string;
+  installationId?: string;
+  requireValidated?: boolean;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const result = await query<{
+    encryptedValue: string;
+    encryptionIv: string;
+    encryptionTag: string;
+    status: string;
+    installationStatus: string | null;
+    credentialStatus: string | null;
+    approvalStatus: string | null;
+    healthStatus: string | null;
+  }>(
+    `select v."encryptedValue", v."encryptionIv", v."encryptionTag", v."status",
+       i."status" as "installationStatus", i."credentialStatus", i."approvalStatus", i."healthStatus"
+     from "ConnectorCredentialVault" v
+     left join "ConnectorInstallation" i on i."id" = v."installationId"
+     where v."tenantId" = $1
+       and v."providerKey" = $2
+       and v."credentialLabel" = $3
+       and ($4::text is null or v."installationId" = $4)
+       and v."status" <> 'REVOKED'
+     order by v."rotatedAt" desc
+     limit 1`,
+    [tenantId, normalizeProviderKey(input.providerKey), input.credentialLabel.trim(), input.installationId ?? null],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  const validated = row.status === "VALIDATED" || (row.credentialStatus === "VALIDATED" && row.approvalStatus === "APPROVED" && row.healthStatus === "PASS");
+  if (input.requireValidated && !validated) return null;
+  return {
+    value: decryptConnectorSecret(row.encryptedValue, row.encryptionIv, row.encryptionTag),
+    status: row.status,
+    validated,
+    installationStatus: row.installationStatus,
+    credentialStatus: row.credentialStatus,
+    approvalStatus: row.approvalStatus,
+    healthStatus: row.healthStatus,
+  };
+}
+
+export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
+  const installation = await query<{
+    id: string;
+    credentialStatus: string;
+    approvalStatus: string;
+    healthStatus: string;
+    status: string;
+    policy: unknown;
+  }>(
+    `select i."id", i."credentialStatus", i."approvalStatus", i."healthStatus", i."status", i."costPolicyJson" as "policy"
+     from "ConnectorInstallation" i
+     join "ConnectorDefinition" d on d."id" = i."definitionId"
+     where i."tenantId" = $1 and d."category" = 'AI_LLM'
+     order by i."createdAt" desc
+     limit 1`,
+    [tenantId],
+  );
+  const install = installation.rows[0];
+  const secret = install
+    ? await getConnectorSecret({ tenantId, providerKey: "OPENAI", credentialLabel: "api_key", installationId: install.id, requireValidated: false })
+    : null;
+  const envKey = process.env.OPENAI_API_KEY || "";
+  const envAllowed = envKey && process.env.OPENAI_BAA_ENABLED === "true" && process.env.OPENAI_PHI_ALLOWED === "true";
+  const vaultAllowed = Boolean(
+    secret?.value &&
+    install?.credentialStatus === "VALIDATED" &&
+    install.approvalStatus === "APPROVED" &&
+    install.healthStatus === "PASS" &&
+    process.env.OPENAI_BAA_ENABLED === "true" &&
+    process.env.OPENAI_PHI_ALLOWED === "true",
+  );
+  return {
+    apiKey: vaultAllowed ? secret!.value : envAllowed ? envKey : null,
+    model: process.env.OPENAI_WEBCHAT_MODEL || "gpt-4o-mini",
+    ready: Boolean(vaultAllowed || envAllowed),
+    source: vaultAllowed ? "credential_vault" : envAllowed ? "environment" : "blocked",
+    blockedReason: vaultAllowed || envAllowed
+      ? null
+      : "OpenAI is blocked until API key is stored, credential is validated, tenant approval and health checks pass, and OPENAI_BAA_ENABLED/OPENAI_PHI_ALLOWED are true.",
+    installationId: install?.id ?? null,
+    credentialStatus: install?.credentialStatus ?? "MISSING",
+    approvalStatus: install?.approvalStatus ?? "MISSING",
+    healthStatus: install?.healthStatus ?? "MISSING",
+    hasVaultKey: Boolean(secret?.value),
+    hasEnvironmentKey: Boolean(envKey),
+  };
+}
+
+export async function validateOpenAiCredential(input: { tenantId?: string; actorRole?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const installation = await query<{ id: string; definitionId: string }>(
+    `select i."id", i."definitionId"
+     from "ConnectorInstallation" i
+     join "ConnectorDefinition" d on d."id" = i."definitionId"
+     where i."tenantId" = $1 and d."category" = 'AI_LLM'
+     order by i."createdAt" desc
+     limit 1`,
+    [tenantId],
+  );
+  const install = installation.rows[0];
+  if (!install) throw new Error("AI/LLM connector installation not found.");
+  const secret = await getConnectorSecret({
+    tenantId,
+    providerKey: "OPENAI",
+    credentialLabel: "api_key",
+    installationId: install.id,
+    requireValidated: false,
+  });
+  if (!secret?.value) throw new Error("OpenAI API key is not stored in the credential vault.");
+
+  const started = Date.now();
+  const model = process.env.OPENAI_WEBCHAT_MODEL || "gpt-4o-mini";
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secret.value}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      max_output_tokens: 8,
+      input: "Non-PHI credential smoke test. Reply with OK.",
+    }),
+  });
+  const latencyMs = Date.now() - started;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const reason = typeof data?.error?.message === "string" ? data.error.message : `OpenAI smoke test failed with HTTP ${response.status}.`;
+    await query(
+      `update "ConnectorHealthCheck"
+       set "status" = 'FAIL',
+         "resultSummary" = $4,
+         "latencyMs" = $5,
+         "checkedAt" = current_timestamp
+       where "tenantId" = $1 and "installationId" = $2 and "definitionId" = $3 and "checkType" = 'CREDENTIAL_VAULT_OPENAI'`,
+      [tenantId, install.id, install.definitionId, reason, latencyMs],
+    );
+    await addAudit(tenantId, input.actorRole ?? "support_admin", "OPENAI_CREDENTIAL_SMOKE_TEST_FAILED", "ConnectorInstallation", install.id, "BLOCKED", {
+      provider: "OPENAI",
+      model,
+      latencyMs,
+      reason,
+      noPhiSent: true,
+    });
+    throw new Error(reason);
+  }
+
+  await query(
+    `update "ConnectorCredentialVault"
+     set "status" = 'VALIDATED', "updatedAt" = current_timestamp
+     where "tenantId" = $1 and "installationId" = $2 and "providerKey" = 'OPENAI' and "credentialLabel" = 'api_key'`,
+    [tenantId, install.id],
+  );
+  await query(
+    `update "ConnectorInstallation"
+     set "credentialStatus" = 'VALIDATED',
+       "healthStatus" = 'PASS',
+       "status" = case when "approvalStatus" = 'APPROVED' and "webhookStatus" in ('VERIFIED','NOT_REQUIRED') then 'ACTIVE' else 'READY_FOR_APPROVAL' end,
+       "lastHealthyAt" = current_timestamp,
+       "nextAction" = 'OpenAI API key validated with non-PHI Responses API smoke test. Approve BAA/model policy and PHI retention controls before production PHI use.',
+       "updatedAt" = current_timestamp
+     where "id" = $1`,
+    [install.id],
+  );
+  await query(
+    `insert into "ConnectorHealthCheck" ("id", "tenantId", "definitionId", "installationId", "checkType", "status", "resultSummary", "latencyMs", "checkedAt")
+     values ($1, $2, $3, $4, 'CREDENTIAL_VAULT_OPENAI', 'PASS', $5, $6, current_timestamp)
+     on conflict ("id") do update set "status" = 'PASS', "resultSummary" = excluded."resultSummary", "latencyMs" = excluded."latencyMs", "checkedAt" = current_timestamp`,
+    [
+      "conn_health_openai_credential_vault",
+      tenantId,
+      install.definitionId,
+      install.id,
+      `OpenAI credential validated against Responses API using ${model}. No PHI was sent.`,
+      latencyMs,
+    ],
+  );
+  await addAudit(tenantId, input.actorRole ?? "support_admin", "OPENAI_CREDENTIAL_VALIDATED", "ConnectorInstallation", install.id, "ALLOWED", {
+    provider: "OPENAI",
+    model,
+    latencyMs,
+    noPhiSent: true,
+    requiresBaaBeforePhi: true,
+  });
+  return { ok: true, latencyMs, model };
+}
+
 function normalizeProviderKey(value: string) {
   return value.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_");
 }
@@ -324,10 +518,16 @@ function encryptConnectorSecret(secret: string) {
   };
 }
 
+function decryptConnectorSecret(value: string, ivValue: string, tagValue: string) {
+  const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(ivValue, "base64"));
+  decipher.setAuthTag(Buffer.from(tagValue, "base64"));
+  return Buffer.concat([decipher.update(Buffer.from(value, "base64")), decipher.final()]).toString("utf8");
+}
+
 function resolveInstallationStatus(input: { status: string; credentialStatus: string; webhookStatus: string; approvalStatus: string; healthStatus: string }) {
   const blockers = [
     input.credentialStatus === "VALIDATED" ? null : "credentials are not validated",
-    input.webhookStatus === "VERIFIED" ? null : "webhooks are not verified",
+    ["VERIFIED", "NOT_REQUIRED"].includes(input.webhookStatus) ? null : "webhooks are not verified",
     input.approvalStatus === "APPROVED" ? null : "tenant approval is not approved",
     input.healthStatus === "PASS" ? null : "health check has not passed",
   ].filter(Boolean);

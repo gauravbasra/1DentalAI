@@ -7,6 +7,7 @@ import {
   recordConnectorHealthCheck,
   storeConnectorCredential,
   updateConnectorInstallation,
+  validateOpenAiCredential,
 } from "@/lib/connector-control-repository";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 
@@ -80,6 +81,14 @@ async function storeCredentialAction(formData: FormData) {
     credentialLabel: value(formData, "credentialLabel"),
     credentialType: value(formData, "credentialType"),
     secretValue: value(formData, "secretValue"),
+    actorRole: value(formData, "actorRole") || "support_admin",
+  });
+  revalidatePath("/app/connectors");
+}
+
+async function validateOpenAiCredentialAction(formData: FormData) {
+  "use server";
+  await validateOpenAiCredential({
     actorRole: value(formData, "actorRole") || "support_admin",
   });
   revalidatePath("/app/connectors");
@@ -195,7 +204,7 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
               <label className="block text-xs font-semibold text-neutral-600">
                 Provider
                 <select name="providerKey" className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold">
-                  {["TWILIO", "NEXHEALTH", "STEDI", "FREESWITCH", "SIGNALWIRE", "OTHER"].map((option) => (
+                  {["OPENAI", "TWILIO", "NEXHEALTH", "STEDI", "FREESWITCH", "SIGNALWIRE", "OTHER"].map((option) => (
                     <option key={option} value={option}>{option}</option>
                   ))}
                 </select>
@@ -203,7 +212,7 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
               <label className="block text-xs font-semibold text-neutral-600">
                 Credential label
                 <select name="credentialLabel" className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm font-semibold">
-                  {["account_sid", "auth_token", "api_key", "api_secret", "webhook_signing_secret", "location_id", "subdomain", "trading_partner_id", "submitter_id", "messaging_service_sid"].map((option) => (
+                  {["api_key", "account_sid", "auth_token", "api_secret", "webhook_signing_secret", "location_id", "subdomain", "trading_partner_id", "submitter_id", "messaging_service_sid"].map((option) => (
                     <option key={option} value={option}>{option}</option>
                   ))}
                 </select>
@@ -227,6 +236,16 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
             <p className="rounded-md bg-amber-50 p-3 text-xs leading-5 text-amber-900">
               Secrets are encrypted at rest and never displayed after saving. Saving a key changes readiness to pending only; Twilio calls/SMS, NexHealth PMS writes, and Stedi payer transactions still require webhook verification, tenant approval, smoke tests, and provider response evidence.
             </p>
+          </form>
+          <form action={validateOpenAiCredentialAction} className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3">
+            <input type="hidden" name="actorRole" value={role.key} />
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-sky-800">OpenAI smoke test</p>
+            <p className="mt-1 text-xs leading-5 text-sky-900">
+              Runs a non-PHI Responses API credential check against the stored OPENAI api_key. This validates the key only; production PHI remains blocked until BAA/model policy, tenant approval, and PHI retention controls are approved.
+            </p>
+            <button className="mt-3 rounded-md bg-sky-700 px-3 py-2 text-xs font-semibold text-white">
+              Validate OpenAI key
+            </button>
           </form>
         </PmsCard>
 
@@ -275,7 +294,7 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
                   {[
                     ["status", ["SETUP_REQUIRED", "READY_FOR_SMOKE_TEST", "ACTIVE", "BLOCKED_READINESS"]],
                     ["credentialStatus", ["MISSING", "PENDING", "VALIDATED"]],
-                    ["webhookStatus", ["NOT_CONFIGURED", "PENDING", "VERIFIED"]],
+                    ["webhookStatus", ["NOT_CONFIGURED", "PENDING", "VERIFIED", "NOT_REQUIRED"]],
                     ["approvalStatus", ["NEEDS_APPROVAL", "APPROVED", "REJECTED"]],
                     ["healthStatus", ["NOT_TESTED", "PASS", "FAIL"]],
                   ].map(([name, options]) => (
