@@ -74,6 +74,9 @@ type SchedulingOffer = {
 
 export function analyzeMessage(message: string): WebchatAnalysis {
   const text = message.toLowerCase();
+  if (/^(?:[1-5]|one|two|three|four|five|first|second|third|fourth|fifth|option\s+[1-5]|slot\s+[1-5]|book\s+[1-5])$/.test(text.trim())) {
+    return { intent: "SCHEDULE_APPOINTMENT", sentiment: "HIGH_INTENT", confidence: 88, actionType: "DIRECT_PMS_SCHEDULING", actionStatus: "SLOT_SELECTION_RECEIVED" };
+  }
   if (/(live person|human|representative|front desk|talk to someone|call me|staff)/.test(text)) {
     return { intent: "LIVE_PERSON_REQUEST", sentiment: "NEEDS_HELP", confidence: 91, actionType: "STAFF_TAKEOVER", actionStatus: "STAFF_REQUIRED" };
   }
