@@ -136,7 +136,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
         h('textarea', { name:'message', placeholder:'Ask a question or request an appointment', maxlength:'3000' }, []),
         h('button', { type:'submit', disabled: state.visitor.consentAccepted ? null : 'disabled', text: state.sending ? '...' : 'Send' }, [])
       ]),
-      h('div', { class:'meta' }, ['I can help with booking handoff, chart note routing context, insurance follow-up questions, and basic practice guidance.']),
+      h('div', { class:'meta' }, ['I can help with appointments, services, insurance questions, forms, and follow-up requests.']),
       h('div', { class:'meta' }, ['Call 911 or emergency services for life-threatening symptoms.'])
     ]);
   }
