@@ -12,7 +12,7 @@ import { getRole, type RoleKey } from "@/lib/foundation-data";
 export const dynamic = "force-dynamic";
 
 type ConnectorView = "overview" | "credentials" | "installations" | "capabilities" | "tests" | "routes";
-type SearchParams = Promise<{ role?: string; view?: string; saved?: string; error?: string; validated?: string }>;
+type SearchParams = Promise<{ role?: string; view?: string; saved?: string; error?: string; validated?: string; feedback?: string }>;
 
 const connectorViews: Array<{ key: ConnectorView; label: string; description: string }> = [
   { key: "overview", label: "Overview", description: "Readiness, blockers, and spend." },
@@ -118,18 +118,18 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
       <ConnectorViewNav activeView={activeView} roleKey={role.key as RoleKey} />
 
       {params.saved ? (
-        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">
-          Stored encrypted credential for {params.saved}. The raw secret is no longer displayed.
+        <div id="credential-feedback" className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-900 shadow-sm">
+          Credential saved: encrypted {params.saved}. The raw secret is no longer displayed.
         </div>
       ) : null}
       {params.validated ? (
-        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">
-          {params.validated} credential smoke test passed.
+        <div id="credential-feedback" className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-900 shadow-sm">
+          {params.validated} credential smoke test passed. You can now configure model, prompt, voice, and local RAG policy in Patient Engagement → Webchat → AI runtime.
         </div>
       ) : null}
       {params.error ? (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-900">
-          {params.error}
+        <div id="credential-feedback" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-900 shadow-sm">
+          Credential action failed: {params.error}
         </div>
       ) : null}
 

@@ -9,6 +9,7 @@ function redirectTo(_request: NextRequest, params: Record<string, string>) {
   const url = new URL("/app/connectors", "https://app.1dentalai.com");
   url.searchParams.set("view", "credentials");
   Object.entries(params).forEach(([key, item]) => url.searchParams.set(key, item));
+  url.hash = "credential-feedback";
   return NextResponse.redirect(url, { status: 303 });
 }
 
@@ -26,9 +27,9 @@ export async function POST(request: NextRequest) {
       secretValue: value(formData, "secretValue"),
       actorRole: role,
     });
-    return redirectTo(request, { role, saved: `${providerKey} ${credentialLabel}` });
+    return redirectTo(request, { role, saved: `${providerKey} ${credentialLabel}`, feedback: "credential_saved" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Credential could not be stored.";
-    return redirectTo(request, { role, error: message });
+    return redirectTo(request, { role, error: message, feedback: "credential_error" });
   }
 }

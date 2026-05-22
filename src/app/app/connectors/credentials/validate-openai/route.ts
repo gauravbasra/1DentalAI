@@ -9,6 +9,7 @@ function redirectTo(_request: NextRequest, params: Record<string, string>) {
   const url = new URL("/app/connectors", "https://app.1dentalai.com");
   url.searchParams.set("view", "credentials");
   Object.entries(params).forEach(([key, item]) => url.searchParams.set(key, item));
+  url.hash = "credential-feedback";
   return NextResponse.redirect(url, { status: 303 });
 }
 
@@ -17,9 +18,9 @@ export async function POST(request: NextRequest) {
   const role = value(formData, "actorRole") || "support_admin";
   try {
     await validateOpenAiCredential({ actorRole: role });
-    return redirectTo(request, { role, validated: "OpenAI" });
+    return redirectTo(request, { role, validated: "OpenAI", feedback: "openai_validated" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "OpenAI credential validation failed.";
-    return redirectTo(request, { role, error: message });
+    return redirectTo(request, { role, error: message, feedback: "openai_validation_error" });
   }
 }
