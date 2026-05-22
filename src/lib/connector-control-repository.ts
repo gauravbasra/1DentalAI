@@ -287,10 +287,10 @@ export async function storeConnectorCredential(input: {
     `update "ConnectorInstallation"
      set "credentialStatus" = case when "credentialStatus" = 'VALIDATED' then 'VALIDATED' else 'PENDING' end,
        "status" = case when "status" = 'ACTIVE' then 'READY_FOR_SMOKE_TEST' else "status" end,
-       "nextAction" = $3,
+       "nextAction" = $2,
        "updatedAt" = current_timestamp
      where "id" = $1`,
-    [input.installationId, tenantId, `${normalizeProviderKey(input.providerKey)} credential stored in vault. Run credential, webhook, and read-only smoke tests before marking validated.`],
+    [input.installationId, `${normalizeProviderKey(input.providerKey)} credential stored in vault. Run credential, webhook, and read-only smoke tests before marking validated.`],
   );
   await addAudit(tenantId, input.actorRole ?? "support_admin", "CONNECTOR_CREDENTIAL_STORED", "ConnectorInstallation", input.installationId, "ALLOWED", {
     providerKey: normalizeProviderKey(input.providerKey),

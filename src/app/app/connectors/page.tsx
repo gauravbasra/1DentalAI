@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { Money, PmsCard, StatusFor } from "@/components/pms-ui";
 import {
@@ -14,7 +15,7 @@ import { getRole, type RoleKey } from "@/lib/foundation-data";
 export const dynamic = "force-dynamic";
 
 type ConnectorView = "overview" | "credentials" | "installations" | "capabilities" | "tests" | "routes";
-type SearchParams = Promise<{ role?: string; view?: string }>;
+type SearchParams = Promise<{ role?: string; view?: string; saved?: string; error?: string; validated?: string }>;
 
 const connectorViews: Array<{ key: ConnectorView; label: string; description: string }> = [
   { key: "overview", label: "Overview", description: "Readiness, blockers, and spend." },
@@ -75,23 +76,39 @@ async function recordHealthCheckAction(formData: FormData) {
 
 async function storeCredentialAction(formData: FormData) {
   "use server";
-  await storeConnectorCredential({
-    installationId: value(formData, "installationId"),
-    providerKey: value(formData, "providerKey"),
-    credentialLabel: value(formData, "credentialLabel"),
-    credentialType: value(formData, "credentialType"),
-    secretValue: value(formData, "secretValue"),
-    actorRole: value(formData, "actorRole") || "support_admin",
-  });
+  const role = value(formData, "actorRole") || "support_admin";
+  const providerKey = value(formData, "providerKey");
+  const credentialLabel = value(formData, "credentialLabel");
+  try {
+    await storeConnectorCredential({
+      installationId: value(formData, "installationId"),
+      providerKey,
+      credentialLabel,
+      credentialType: value(formData, "credentialType"),
+      secretValue: value(formData, "secretValue"),
+      actorRole: role,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Credential could not be stored.";
+    redirect(`/app/connectors?view=credentials&role=${encodeURIComponent(role)}&error=${encodeURIComponent(message)}`);
+  }
   revalidatePath("/app/connectors");
+  redirect(`/app/connectors?view=credentials&role=${encodeURIComponent(role)}&saved=${encodeURIComponent(`${providerKey} ${credentialLabel}`)}`);
 }
 
 async function validateOpenAiCredentialAction(formData: FormData) {
   "use server";
-  await validateOpenAiCredential({
-    actorRole: value(formData, "actorRole") || "support_admin",
-  });
+  const role = value(formData, "actorRole") || "support_admin";
+  try {
+    await validateOpenAiCredential({
+      actorRole: role,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "OpenAI credential validation failed.";
+    redirect(`/app/connectors?view=credentials&role=${encodeURIComponent(role)}&error=${encodeURIComponent(message)}`);
+  }
   revalidatePath("/app/connectors");
+  redirect(`/app/connectors?view=credentials&role=${encodeURIComponent(role)}&validated=OpenAI`);
 }
 
 function textList(value: unknown) {
@@ -139,6 +156,22 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
       />
 
       <ConnectorViewNav activeView={activeView} roleKey={role.key as RoleKey} />
+
+      {params.saved ? (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">
+          Stored encrypted credential for {params.saved}. The raw secret is no longer displayed.
+        </div>
+      ) : null}
+      {params.validated ? (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">
+          {params.validated} credential smoke test passed.
+        </div>
+      ) : null}
+      {params.error ? (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-900">
+          {params.error}
+        </div>
+      ) : null}
 
       {activeView === "overview" ? (
       <>
