@@ -9,16 +9,20 @@ import { getOpenAiModelCatalog, getOpenAiWebchatConfig, type OpenAiModelCatalog 
 import { getPhoneOperatingCenter } from "@/lib/operating-system-repository";
 import {
   crawlKnowledgePage,
+  createWebchatTeamTask,
   createWebchatAppointmentHandoff,
   getConversationTranscript,
+  getWebchatTeamPresence,
   getWebchatAiRuntimeSettings,
   postStaffWebchatEntry,
+  transferWebchatConversation,
   updateWebchatAiRuntimeSettings,
   updateKnowledgeSourceReview,
   updateWebchatChannelSetting,
   upsertWebchatLeadForm,
   upsertWebchatSchedulingRule,
   type WebchatAiRuntimeSettings,
+  type WebchatTeamMember,
 } from "@/lib/webchat/repository";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +46,35 @@ async function appointmentHandoffAction(formData: FormData) {
     ownerRoleKey: String(formData.get("ownerRoleKey") ?? "front_desk"),
     priority: String(formData.get("priority") ?? "HIGH"),
     requestedWindow: String(formData.get("requestedWindow") ?? ""),
+    note: String(formData.get("note") ?? ""),
+  });
+  revalidatePath("/patient-engagement/webchat");
+}
+
+async function transferConversationAction(formData: FormData) {
+  "use server";
+  await transferWebchatConversation({
+    conversationId: String(formData.get("conversationId") ?? ""),
+    ownerRoleKey: String(formData.get("ownerRoleKey") ?? "front_desk"),
+    assignedStaffId: String(formData.get("assignedStaffId") ?? ""),
+    priority: String(formData.get("priority") ?? "NORMAL"),
+    dueMinutes: Number(formData.get("dueMinutes") ?? 30),
+    note: String(formData.get("note") ?? ""),
+    createTask: String(formData.get("createTask") ?? "true") === "true",
+  });
+  revalidatePath("/patient-engagement/webchat");
+}
+
+async function teamTaskAction(formData: FormData) {
+  "use server";
+  await createWebchatTeamTask({
+    conversationId: String(formData.get("conversationId") ?? ""),
+    ownerRoleKey: String(formData.get("ownerRoleKey") ?? "front_desk"),
+    assignedStaffId: String(formData.get("assignedStaffId") ?? ""),
+    taskType: String(formData.get("taskType") ?? "WEBCHAT_FOLLOW_UP"),
+    title: String(formData.get("title") ?? ""),
+    priority: String(formData.get("priority") ?? "NORMAL"),
+    dueMinutes: Number(formData.get("dueMinutes") ?? 30),
     note: String(formData.get("note") ?? ""),
   });
   revalidatePath("/patient-engagement/webchat");
@@ -194,6 +227,7 @@ export default async function PatientEngagementWebchatPage({
   });
   const selectedConversation = chats.find((chat) => chat.id === params.conversationId) ?? chats[0] ?? null;
   const transcript = selectedConversation ? await getConversationTranscript(selectedConversation.id) : null;
+  const teamPresence = view === "inbox" ? await getWebchatTeamPresence() : [];
   const messages = (transcript?.messages ?? []) as WebChatMessageRow[];
   const knowledge = (center.knowledgeSources ?? []) as KnowledgeRow[];
   const forms = (center.leadForms ?? []) as LeadFormRow[];
@@ -319,23 +353,28 @@ export default async function PatientEngagementWebchatPage({
                     </div>
                   </div>
 
-                  <footer className="border-t border-neutral-200 bg-white px-6 py-4">
-                    <form action={appointmentHandoffAction} className="mb-3 grid gap-2 rounded-2xl bg-neutral-50 p-3 lg:grid-cols-[1fr_140px_170px_1fr_auto]">
-                      <input type="hidden" name="conversationId" value={selectedConversation.id} />
-                      <Input name="requestedWindow" label="Requested window" placeholder="Tomorrow morning" />
-                      <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} />
-                      <Select name="ownerRoleKey" label="Owner" options={["front_desk", "treatment_coordinator", "practice_manager"]} />
-                      <Input name="note" label="Note" placeholder="Verify insurance first" />
-                      <button className="self-end rounded-xl bg-neutral-950 px-4 py-2 text-sm font-semibold text-white">Handoff</button>
-                    </form>
-                    <form action={staffEntryAction} className="flex items-end gap-3">
-                      <input type="hidden" name="conversationId" value={selectedConversation.id} />
-                      <input type="hidden" name="entryType" value="STAFF_REPLY" />
-                      <input type="hidden" name="status" value="OPEN" />
-                      <SpeechComposer name="body" required placeholder="Write a live reply to the visitor" />
-                      <button className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-600 text-lg font-semibold text-white shadow-sm">Send</button>
-                    </form>
-                    <p className="mt-2 text-xs text-neutral-500">Staff replies are delivered into the website chat stream in real time. Internal notes belong in the handoff form, not the visitor composer.</p>
+                  <footer className="border-t border-neutral-200 bg-white px-6 py-5">
+                    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+                      <div className="space-y-4">
+                        <form action={staffEntryAction} className="flex items-end gap-3">
+                          <input type="hidden" name="conversationId" value={selectedConversation.id} />
+                          <input type="hidden" name="entryType" value="STAFF_REPLY" />
+                          <input type="hidden" name="status" value="OPEN" />
+                          <SpeechComposer name="body" required placeholder="Reply to the website visitor" />
+                          <button className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow-sm">Send</button>
+                        </form>
+                        <form action={staffEntryAction} className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                          <input type="hidden" name="conversationId" value={selectedConversation.id} />
+                          <input type="hidden" name="entryType" value="STAFF_NOTE" />
+                          <input type="hidden" name="status" value="OPEN" />
+                          <div className="flex items-end gap-3">
+                            <Textarea name="body" label="Internal team note" rows={2} />
+                            <button className="rounded-xl bg-amber-900 px-4 py-3 text-sm font-semibold text-white">Add note</button>
+                          </div>
+                        </form>
+                      </div>
+                      <TeamCollaborationPanel conversation={selectedConversation} team={teamPresence} />
+                    </div>
                   </footer>
                 </>
               ) : <div className="p-6"><Empty title="No conversation selected" body="Select a chat from the inbox." /></div>}
@@ -477,6 +516,8 @@ type WebChatRow = {
   schedulingOutcome: string;
   pmsWritebackStatus: string;
   ownerRoleKey: string;
+  assignedStaffId: string | null;
+  staffOwnerDueAt: string | null;
   nextBestAction: string | null;
   blockedReason: string | null;
   lastMessageBody?: string | null;
@@ -511,6 +552,98 @@ type KnowledgeRow = { id: string; title: string; status: string; ownerRoleKey: s
 type LeadFormRow = { id: string; name: string; serviceLine: string; status: string; connectorStatus: string };
 type SchedulingRuleRow = { id: string; name: string; status: string; bookingWindowDays: number; pmsWritebackStatus: string };
 type ChannelRow = { channel: string; displayName: string; theme: unknown; nlpMode: string; connectorStatus: string; knowledgeBaseStatus: string; schedulingStatus: string; formsStatus: string; nextAction: string };
+
+function TeamCollaborationPanel({ conversation, team }: { conversation: WebChatRow; team: WebchatTeamMember[] }) {
+  const ownerOptions = ["front_desk", "treatment_coordinator", "practice_manager", "billing_team", "provider"];
+  const assigned = team.find((member) => member.id === conversation.assignedStaffId);
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-neutral-950">Team handoff</p>
+          <p className="mt-1 text-xs leading-5 text-neutral-600">
+            Owner: {clean(conversation.ownerRoleKey)}{assigned ? ` · ${assigned.displayName}` : ""}{conversation.staffOwnerDueAt ? ` · due ${relativeTime(conversation.staffOwnerDueAt)}` : ""}
+          </p>
+        </div>
+        <StateBadge tone={conversation.assignedStaffId ? "green" : "amber"}>{conversation.assignedStaffId ? "Assigned" : "Unassigned"}</StateBadge>
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {team.length ? team.slice(0, 6).map((member) => (
+          <div key={member.id} className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 ${member.id === conversation.assignedStaffId ? "border-blue-200 bg-blue-50" : "border-neutral-200 bg-white"}`}>
+            <div className="flex min-w-0 items-center gap-3">
+              <PresenceDot status={member.presenceStatus} />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-neutral-950">{member.displayName}</p>
+                <p className="truncate text-xs text-neutral-500">{clean(member.roleKey)} · {member.openChats} chats · {member.openTasks} tasks</p>
+              </div>
+            </div>
+            <span className="text-xs font-semibold text-neutral-500">{clean(member.presenceStatus)}</span>
+          </div>
+        )) : (
+          <Empty title="No active team users" body="Invite users or have staff sign in so ownership, workload, and presence can be tracked." />
+        )}
+      </div>
+
+      <form action={transferConversationAction} className="mt-4 space-y-3 rounded-xl border border-neutral-200 bg-white p-3">
+        <input type="hidden" name="conversationId" value={conversation.id} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Select name="ownerRoleKey" label="Transfer to team" options={ownerOptions} defaultValue={conversation.ownerRoleKey || "front_desk"} />
+          <StaffSelect name="assignedStaffId" label="Staff member" team={team} defaultValue={conversation.assignedStaffId ?? ""} />
+          <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue={conversation.leadScore >= 80 ? "HIGH" : "NORMAL"} />
+          <Select name="dueMinutes" label="Due in" options={["10", "30", "60", "240", "1440"]} defaultValue="30" />
+        </div>
+        <Textarea name="note" label="Transfer note" rows={2} />
+        <input type="hidden" name="createTask" value="true" />
+        <button className="w-full rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Transfer and create task</button>
+      </form>
+
+      <form action={teamTaskAction} className="mt-3 space-y-3 rounded-xl border border-neutral-200 bg-white p-3">
+        <input type="hidden" name="conversationId" value={conversation.id} />
+        <Input name="title" label="Task title" placeholder="Call visitor about appointment options" />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Select name="taskType" label="Task type" options={["WEBCHAT_FOLLOW_UP", "CALL_VISITOR", "SCHEDULE_APPOINTMENT", "VERIFY_INSURANCE", "SERVICE_RECOVERY"]} />
+          <Select name="ownerRoleKey" label="Owner" options={ownerOptions} defaultValue={conversation.ownerRoleKey || "front_desk"} />
+          <StaffSelect name="assignedStaffId" label="Staff" team={team} defaultValue={conversation.assignedStaffId ?? ""} />
+          <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue="NORMAL" />
+        </div>
+        <Textarea name="note" label="Task note" rows={2} />
+        <input type="hidden" name="dueMinutes" value="30" />
+        <button className="w-full rounded-xl border border-neutral-300 bg-white px-4 py-3 text-sm font-semibold text-neutral-950">Create internal task</button>
+      </form>
+
+      <form action={appointmentHandoffAction} className="mt-3 space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+        <input type="hidden" name="conversationId" value={conversation.id} />
+        <Input name="requestedWindow" label="Appointment window" placeholder="Tomorrow morning" />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue="HIGH" />
+          <Select name="ownerRoleKey" label="Owner" options={["front_desk", "treatment_coordinator", "practice_manager"]} defaultValue="front_desk" />
+        </div>
+        <Input name="note" label="Scheduling note" placeholder="Verify insurance first" />
+        <button className="w-full rounded-xl bg-blue-700 px-4 py-3 text-sm font-semibold text-white">Create scheduling handoff</button>
+      </form>
+    </div>
+  );
+}
+
+function PresenceDot({ status }: { status: WebchatTeamMember["presenceStatus"] }) {
+  const color = status === "ONLINE" ? "bg-emerald-500" : status === "RECENT" ? "bg-amber-400" : "bg-neutral-300";
+  return <span className={`h-3 w-3 shrink-0 rounded-full ${color}`} />;
+}
+
+function StaffSelect({ name, label, team, defaultValue }: { name: string; label: string; team: WebchatTeamMember[]; defaultValue?: string }) {
+  return (
+    <label className="block">
+      <span className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</span>
+      <select name={name} defaultValue={defaultValue} className="mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100">
+        <option value="">Role queue</option>
+        {team.map((member) => (
+          <option key={member.id} value={member.id}>{member.displayName} · {clean(member.roleKey)} · {clean(member.presenceStatus)}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 function AiRuntimePanel({
   settings,

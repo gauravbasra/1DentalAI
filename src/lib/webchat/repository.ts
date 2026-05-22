@@ -73,6 +73,19 @@ type SchedulingOffer = {
   options: PmsOnlineSlot[];
 };
 
+export type WebchatTeamMember = {
+  id: string;
+  displayName: string;
+  email: string;
+  roleKey: string;
+  status: string;
+  lastSeenAt: string | null;
+  presenceStatus: "ONLINE" | "RECENT" | "OFFLINE";
+  openChats: number;
+  roleOpenChats: number;
+  openTasks: number;
+};
+
 export function analyzeMessage(message: string): WebchatAnalysis {
   const text = message.toLowerCase();
   if (/^(?:[1-5]|one|two|three|four|five|first|second|third|fourth|fifth|option\s+[1-5]|slot\s+[1-5]|book\s+[1-5])$/.test(text.trim())) {
@@ -590,6 +603,198 @@ export async function createWebchatAppointmentHandoff(input: {
     priority,
     requestedWindow,
     blockedReason: "PMS scheduling writeback connector is required before direct appointment creation.",
+  });
+  return { taskId };
+}
+
+export async function getWebchatTeamPresence(tenantId = defaultTenantId) {
+  const result = await query<WebchatTeamMember>(
+    `select
+       u."id",
+       u."displayName",
+       u."email",
+       u."roleKey",
+       u."status",
+       max(s."lastSeenAt")::text as "lastSeenAt",
+       case
+         when max(s."lastSeenAt") >= current_timestamp - interval '5 minutes' then 'ONLINE'
+         when max(s."lastSeenAt") >= current_timestamp - interval '30 minutes' then 'RECENT'
+         else 'OFFLINE'
+       end as "presenceStatus",
+       (select count(*)::int
+        from "PatientWebChatConversation" c
+        where c."tenantId" = $1 and c."assignedStaffId" = u."id" and c."status" = 'OPEN') as "openChats",
+       (select count(*)::int
+        from "PatientWebChatConversation" c
+        where c."tenantId" = $1 and c."ownerRoleKey" = u."roleKey" and c."status" = 'OPEN') as "roleOpenChats",
+       (select count(*)::int
+        from "PmsTask" t
+        where t."tenantId" = $1 and t."ownerRoleKey" = u."roleKey" and t."status" in ('OPEN','IN_PROGRESS')) as "openTasks"
+     from "AuthUser" u
+     left join "AuthSession" s on s."tenantId" = u."tenantId"
+       and s."userId" = u."id"
+       and s."revokedAt" is null
+       and s."expiresAt" > current_timestamp
+     where u."tenantId" = $1 and u."status" = 'ACTIVE'
+     group by u."id"
+     order by case
+       when max(s."lastSeenAt") >= current_timestamp - interval '5 minutes' then 0
+       when max(s."lastSeenAt") >= current_timestamp - interval '30 minutes' then 1
+       else 2
+     end, u."roleKey", u."displayName"`,
+    [tenantId],
+  );
+  return result.rows.map((row) => ({
+    ...row,
+    openChats: Number(row.openChats ?? 0),
+    roleOpenChats: Number(row.roleOpenChats ?? 0),
+    openTasks: Number(row.openTasks ?? 0),
+  }));
+}
+
+export async function transferWebchatConversation(input: {
+  tenantId?: string;
+  conversationId: string;
+  ownerRoleKey: string;
+  assignedStaffId?: string;
+  priority?: string;
+  dueMinutes?: number;
+  note?: string;
+  createTask?: boolean;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const dueMinutes = Math.max(5, Math.min(1440, Math.round(input.dueMinutes ?? 30)));
+  const ownerRoleKey = input.ownerRoleKey || "front_desk";
+  const priority = input.priority || "NORMAL";
+  const assignedStaffId = input.assignedStaffId?.trim() || null;
+  const conversation = (await query<{
+    id: string;
+    patientId: string | null;
+    visitorName: string | null;
+    visitorPhone: string | null;
+    visitorEmail: string | null;
+    ownerRoleKey: string;
+    assignedStaffId: string | null;
+  }>(
+    `select "id", "patientId", "visitorName", "visitorPhone", "visitorEmail", "ownerRoleKey", "assignedStaffId"
+     from "PatientWebChatConversation"
+     where "tenantId" = $1 and "id" = $2
+     limit 1`,
+    [tenantId, input.conversationId],
+  )).rows[0];
+  if (!conversation) return null;
+
+  const taskId = input.createTask ? newId("task") : null;
+  const visitorLabel = conversation.visitorName || conversation.visitorPhone || conversation.visitorEmail || "website visitor";
+  const note = input.note?.trim() || `Transferred ${visitorLabel} to ${ownerRoleKey}.`;
+  if (taskId) {
+    await query(
+      `insert into "PmsTask" ("id", "tenantId", "patientId", "ownerRoleKey", "title", "taskType", "priority", "dueAt", "updatedAt")
+       values ($1, $2, $3, $4, $5, 'WEBCHAT_TEAM_TRANSFER', $6, current_timestamp + ($7::int * interval '1 minute'), current_timestamp)`,
+      [taskId, tenantId, conversation.patientId, ownerRoleKey, `Webchat transfer: ${visitorLabel}`, priority, dueMinutes],
+    );
+  }
+
+  await query(
+    `update "PatientWebChatConversation"
+     set "ownerRoleKey" = $3,
+         "assignedStaffId" = $4,
+         "staffOwnerDueAt" = current_timestamp + ($5::int * interval '1 minute'),
+         "automationMode" = 'STAFF_TAKEOVER',
+         "handoffReason" = 'TEAM_TRANSFER',
+         "nextBestAction" = $6,
+         "updatedAt" = current_timestamp
+     where "tenantId" = $1 and "id" = $2`,
+    [tenantId, input.conversationId, ownerRoleKey, assignedStaffId, dueMinutes, note],
+  );
+  await postStaffWebchatEntry({
+    tenantId,
+    conversationId: input.conversationId,
+    body: note,
+    senderName: "Team handoff",
+    entryType: "STAFF_NOTE",
+    status: "OPEN",
+  });
+  await query(
+    `insert into "PatientWebChatEvent" ("id", "tenantId", "conversationId", "eventType", "payload")
+     values ($1, $2, $3, 'WEBCHAT_CONVERSATION_TRANSFERRED', $4::jsonb)`,
+    [newId("evt"), tenantId, input.conversationId, JSON.stringify({
+      fromOwnerRoleKey: conversation.ownerRoleKey,
+      fromAssignedStaffId: conversation.assignedStaffId,
+      ownerRoleKey,
+      assignedStaffId,
+      priority,
+      dueMinutes,
+      taskId,
+      note,
+    })],
+  );
+  await addWebchatAudit(tenantId, "WEBCHAT_CONVERSATION_TRANSFERRED", input.conversationId, "ALLOWED", {
+    ownerRoleKey,
+    assignedStaffId,
+    priority,
+    dueMinutes,
+    taskId,
+  });
+  return { taskId, ownerRoleKey, assignedStaffId };
+}
+
+export async function createWebchatTeamTask(input: {
+  tenantId?: string;
+  conversationId: string;
+  ownerRoleKey: string;
+  assignedStaffId?: string;
+  taskType: string;
+  title: string;
+  priority?: string;
+  dueMinutes?: number;
+  note?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const dueMinutes = Math.max(5, Math.min(1440, Math.round(input.dueMinutes ?? 30)));
+  const conversation = (await query<{ id: string; patientId: string | null; visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null }>(
+    `select "id", "patientId", "visitorName", "visitorPhone", "visitorEmail"
+     from "PatientWebChatConversation"
+     where "tenantId" = $1 and "id" = $2
+     limit 1`,
+    [tenantId, input.conversationId],
+  )).rows[0];
+  if (!conversation) return null;
+  const taskId = newId("task");
+  const title = input.title.trim() || `Webchat follow-up: ${conversation.visitorName || conversation.visitorPhone || conversation.visitorEmail || "website visitor"}`;
+  await query(
+    `insert into "PmsTask" ("id", "tenantId", "patientId", "ownerRoleKey", "title", "taskType", "priority", "dueAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, current_timestamp + ($8::int * interval '1 minute'), current_timestamp)`,
+    [taskId, tenantId, conversation.patientId, input.ownerRoleKey || "front_desk", title, input.taskType || "WEBCHAT_FOLLOW_UP", input.priority || "NORMAL", dueMinutes],
+  );
+  await query(
+    `insert into "PatientWebChatEvent" ("id", "tenantId", "conversationId", "eventType", "payload")
+     values ($1, $2, $3, 'WEBCHAT_TEAM_TASK_CREATED', $4::jsonb)`,
+    [newId("evt"), tenantId, input.conversationId, JSON.stringify({
+      taskId,
+      ownerRoleKey: input.ownerRoleKey,
+      assignedStaffId: input.assignedStaffId || null,
+      taskType: input.taskType,
+      priority: input.priority || "NORMAL",
+      dueMinutes,
+      note: input.note?.trim() || null,
+    })],
+  );
+  if (input.note?.trim()) {
+    await postStaffWebchatEntry({
+      tenantId,
+      conversationId: input.conversationId,
+      body: `Task created: ${title}. ${input.note.trim()}`,
+      senderName: "Team task",
+      entryType: "STAFF_NOTE",
+      status: "OPEN",
+    });
+  }
+  await addWebchatAudit(tenantId, "WEBCHAT_TEAM_TASK_CREATED", input.conversationId, "ALLOWED", {
+    taskId,
+    taskType: input.taskType,
+    ownerRoleKey: input.ownerRoleKey,
+    assignedStaffId: input.assignedStaffId || null,
   });
   return { taskId };
 }
