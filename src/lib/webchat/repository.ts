@@ -830,7 +830,7 @@ function buildReply(analysis: WebchatAnalysis, knowledge: Array<{ content: strin
   const knowledgeExcerpt = summarizeKnowledge(knowledge[0]);
   const context = knowledgeExcerpt || "I can help with appointments, services, insurance questions, forms, and follow-up requests.";
   if (analysis.intent === "SCHEDULE_APPOINTMENT") {
-    return { body: `I can help with that. ${context}\n\nPlease share the best day and time, and the front desk will confirm the appointment options with you.` };
+    return { body: "I can help with that. Please share the best day and time for your visit, and the front desk will confirm the available appointment options with you." };
   }
   if (analysis.intent === "RESCHEDULE_APPOINTMENT") {
     return { body: "I can help start that request. Please share the appointment you want to move and your preferred time window. The team will verify your details before changing anything." };
