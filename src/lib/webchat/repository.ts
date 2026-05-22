@@ -27,11 +27,14 @@ type LeadCapture = {
 };
 
 type WebchatMessageRecord = {
+  id: string;
+  body: string;
   senderType: string;
   intent: string | null;
   sentiment: string | null;
   actionType: string | null;
   actionStatus: string;
+  deliveryStatus: string;
   metadata: unknown;
 };
 
@@ -42,6 +45,9 @@ type WebchatEventRecord = {
 
 export function analyzeMessage(message: string): WebchatAnalysis {
   const text = message.toLowerCase();
+  if (/(live person|human|representative|front desk|talk to someone|call me|staff)/.test(text)) {
+    return { intent: "LIVE_PERSON_REQUEST", sentiment: "NEEDS_HELP", confidence: 91, actionType: "STAFF_TAKEOVER", actionStatus: "STAFF_REQUIRED" };
+  }
   if (/(book|appointment|schedule|available|availability|consult)/.test(text)) {
     return { intent: "SCHEDULE_APPOINTMENT", sentiment: "HIGH_INTENT", confidence: 82, actionType: "SCHEDULING_HANDOFF", actionStatus: "STAFF_APPROVAL_REQUIRED" };
   }
@@ -217,8 +223,8 @@ export async function postWebchatMessage(input: {
   const userMessageId = newId("msg");
   await query(
     `insert into "PatientWebChatMessage"
-      ("id", "tenantId", "conversationId", "senderType", "senderName", "body", "intent", "sentiment", "confidence", "actionType", "actionStatus", "metadata")
-     values ($1, $2, $3, 'VISITOR', $4, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
+      ("id", "tenantId", "conversationId", "senderType", "senderName", "body", "intent", "sentiment", "confidence", "actionType", "actionStatus", "deliveryStatus", "metadata")
+     values ($1, $2, $3, 'VISITOR', $4, $5, $6, $7, $8, $9, $10, 'RECEIVED', $11::jsonb)`,
     [
       userMessageId,
       tenantId,
@@ -240,24 +246,27 @@ export async function postWebchatMessage(input: {
   );
 
   const knowledge = await retrieveKnowledge(input.body, tenantId);
-  const reply = buildReply(analysis, knowledge);
+  const aiDecision = await buildAiAutoReply({ tenantId, conversationId: input.conversationId, body: input.body, analysis, knowledge, leadCapture, qualification });
   const replyId = newId("msg");
   await query(
     `insert into "PatientWebChatMessage"
-      ("id", "tenantId", "conversationId", "senderType", "senderName", "body", "intent", "sentiment", "confidence", "knowledgeSourceIds", "actionType", "actionStatus", "metadata")
-     values ($1, $2, $3, 'ASSISTANT', '1DentalAI Web Chat', $4, $5, $6, $7, $8::text[], $9, $10, $11::jsonb)`,
+      ("id", "tenantId", "conversationId", "senderType", "senderName", "body", "intent", "sentiment", "confidence", "knowledgeSourceIds", "actionType", "actionStatus", "deliveryStatus", "provider", "providerStatus", "metadata")
+     values ($1, $2, $3, 'ASSISTANT', '1DentalAI Web Chat', $4, $5, $6, $7, $8::text[], $9, $10, $11, $12, $13, $14::jsonb)`,
     [
       replyId,
       tenantId,
       input.conversationId,
-      reply.body,
+      aiDecision.body,
       analysis.intent,
       analysis.sentiment,
       analysis.confidence,
       knowledge.map((row) => row.id),
       analysis.actionType ?? null,
-      analysis.actionStatus ?? "NONE",
-      JSON.stringify({ sourceTitles: knowledge.map((row) => row.heading ?? row.pageTitle), noClinicalDiagnosis: true, noExternalBooking: true, qualification }),
+      aiDecision.actionStatus,
+      aiDecision.deliveryStatus,
+      aiDecision.provider,
+      aiDecision.providerStatus,
+      JSON.stringify({ sourceTitles: knowledge.map((row) => row.heading ?? row.pageTitle), noClinicalDiagnosis: true, noExternalBooking: true, qualification, automationMode: aiDecision.automationMode, handoffReason: aiDecision.handoffReason, model: aiDecision.model }),
     ],
   );
 
@@ -273,24 +282,27 @@ export async function postWebchatMessage(input: {
          "schedulingOutcome" = case when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then $10 else "schedulingOutcome" end,
          "pmsWritebackStatus" = case when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then 'PMS_CONNECTOR_REQUIRED' else "pmsWritebackStatus" end,
          "blockedReason" = case when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then 'PMS scheduling/writeback connector is not approved; staff must complete appointment work.' else "blockedReason" end,
+         "automationMode" = $11,
+         "handoffReason" = $12,
          "updatedAt" = current_timestamp
      where "tenantId" = $1 and "id" = $2`,
-    [tenantId, input.conversationId, analysis.intent, analysis.confidence, qualification.leadScore, qualification.qualificationStage, qualification.nextBestAction, qualification.dueIn, `Latest visitor intent: ${analysis.intent}. Score ${qualification.leadScore}. Stage ${qualification.qualificationStage}. ${input.body.slice(0, 180)}`, analysis.actionStatus ?? "STAFF_APPROVAL_REQUIRED"],
+    [tenantId, input.conversationId, analysis.intent, analysis.confidence, qualification.leadScore, qualification.qualificationStage, qualification.nextBestAction, qualification.dueIn, `Latest visitor intent: ${analysis.intent}. Score ${qualification.leadScore}. Stage ${qualification.qualificationStage}. ${input.body.slice(0, 180)}`, analysis.actionStatus ?? "STAFF_APPROVAL_REQUIRED", aiDecision.automationMode, aiDecision.handoffReason],
   );
 
-  if (analysis.actionType && analysis.actionType !== "KNOWLEDGE_RESPONSE") {
+  if (aiDecision.automationMode !== "AI_AUTO" || (analysis.actionType && analysis.actionType !== "KNOWLEDGE_RESPONSE" && analysis.actionType !== "SCHEDULING_HANDOFF")) {
     await createWebchatTask({ tenantId, conversationId: input.conversationId, analysis, body: input.body, leadCapture });
   }
   await addWebchatAudit(tenantId, "WEBCHAT_MESSAGE_PROCESSED", input.conversationId, "ALLOWED", {
     intent: analysis.intent,
     actionType: analysis.actionType ?? null,
-    actionStatus: analysis.actionStatus ?? null,
-    connectorBlocked: analysis.actionStatus !== "ANSWERED_WITH_GUARDRAILS",
+    actionStatus: aiDecision.actionStatus,
+    automationMode: aiDecision.automationMode,
+    connectorBlocked: aiDecision.deliveryStatus.includes("BLOCKED"),
     consentAccepted: Boolean(leadCapture.consentAccepted),
     qualification,
   });
 
-  return { userMessageId, replyId, reply, analysis, qualification };
+  return { userMessageId, replyId, reply: { body: aiDecision.body }, analysis, qualification, automationMode: aiDecision.automationMode, handoffReason: aiDecision.handoffReason };
 }
 
 export async function postStaffWebchatEntry(input: {
@@ -354,6 +366,351 @@ export async function updateKnowledgeSourceReview(input: { tenantId?: string; id
     });
   }
   return result.rows[0] ?? null;
+}
+
+export async function createWebchatAppointmentHandoff(input: {
+  tenantId?: string;
+  conversationId: string;
+  ownerRoleKey?: string;
+  priority?: string;
+  requestedWindow?: string;
+  note?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const conversation = (await query<{
+    id: string;
+    patientId: string | null;
+    visitorName: string | null;
+    visitorPhone: string | null;
+    visitorEmail: string | null;
+    nlpIntent: string | null;
+    qualificationStage: string;
+    leadScore: number;
+    blockedReason: string | null;
+  }>(
+    `select "id", "patientId", "visitorName", "visitorPhone", "visitorEmail", "nlpIntent", "qualificationStage", "leadScore", "blockedReason"
+     from "PatientWebChatConversation"
+     where "tenantId" = $1 and "id" = $2
+     limit 1`,
+    [tenantId, input.conversationId],
+  )).rows[0];
+  if (!conversation) return null;
+
+  const ownerRoleKey = input.ownerRoleKey || "front_desk";
+  const priority = input.priority || (conversation.leadScore >= 80 ? "HIGH" : "NORMAL");
+  const requestedWindow = input.requestedWindow?.trim() || "next available approved scheduling slot";
+  const title = `Webchat appointment handoff: ${conversation.visitorName || conversation.visitorPhone || conversation.visitorEmail || "website visitor"}`;
+  const taskId = newId("task");
+  await query(
+    `insert into "PmsTask" ("id", "tenantId", "patientId", "ownerRoleKey", "title", "taskType", "priority", "dueAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, 'WEBCHAT_APPOINTMENT_HANDOFF', $6, current_timestamp + interval '30 minutes', current_timestamp)`,
+    [taskId, tenantId, conversation.patientId, ownerRoleKey, title, priority],
+  );
+  await query(
+    `update "PatientWebChatConversation"
+     set "schedulingOutcome" = 'STAFF_HANDOFF_CREATED',
+         "pmsWritebackStatus" = 'PMS_CONNECTOR_REQUIRED',
+         "blockedReason" = 'Appointment request is staged for staff. PMS scheduling writeback is blocked until a live PMS connector or manual proof policy is approved.',
+         "nextBestAction" = $3,
+         "ownerRoleKey" = $4,
+         "staffOwnerDueAt" = current_timestamp + interval '30 minutes',
+         "updatedAt" = current_timestamp
+     where "tenantId" = $1 and "id" = $2`,
+    [tenantId, input.conversationId, `Confirm availability, verify identity/contact, and create appointment manually or through approved PMS connector. Requested window: ${requestedWindow}.`, ownerRoleKey],
+  );
+  await query(
+    `insert into "PatientWebChatEvent" ("id", "tenantId", "conversationId", "eventType", "payload")
+     values ($1, $2, $3, 'APPOINTMENT_HANDOFF_CREATED', $4::jsonb)`,
+    [
+      newId("evt"),
+      tenantId,
+      input.conversationId,
+      JSON.stringify({
+        pmsTaskId: taskId,
+        ownerRoleKey,
+        priority,
+        requestedWindow,
+        note: input.note?.trim() || null,
+        pmsWritebackStatus: "PMS_CONNECTOR_REQUIRED",
+      }),
+    ],
+  );
+  await addWebchatAudit(tenantId, "WEBCHAT_APPOINTMENT_HANDOFF_CREATED", input.conversationId, "BLOCKED", {
+    pmsTaskId: taskId,
+    ownerRoleKey,
+    priority,
+    requestedWindow,
+    blockedReason: "PMS scheduling writeback connector is required before direct appointment creation.",
+  });
+  return { taskId };
+}
+
+export async function upsertWebchatLeadForm(input: {
+  tenantId?: string;
+  id?: string;
+  name: string;
+  serviceLine: string;
+  fields: string;
+  routingRule?: string;
+  status?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const fields = input.fields.split(",").map((field) => field.trim()).filter(Boolean);
+  const id = input.id || newId("leadform");
+  const fieldSchema = {
+    fields: fields.length ? fields : ["name", "phone", "email", "service_line", "preferred_time", "consent"],
+    required: ["name", "phone_or_email", "consent"],
+  };
+  await query(
+    `insert into "PatientEngagementLeadForm"
+      ("id", "tenantId", "name", "serviceLine", "sourceChannel", "status", "fieldSchema", "pmsMapping", "routingRule", "connectorStatus", "nextAction")
+     values ($1, $2, $3, $4, 'WEB_CHAT', $5, $6::jsonb, $7::jsonb, $8, 'PMS_CONNECTOR_REQUIRED', $9)
+     on conflict ("id") do update set
+       "name" = excluded."name",
+       "serviceLine" = excluded."serviceLine",
+       "status" = excluded."status",
+       "fieldSchema" = excluded."fieldSchema",
+       "routingRule" = excluded."routingRule",
+       "nextAction" = excluded."nextAction",
+       "updatedAt" = current_timestamp`,
+    [
+      id,
+      tenantId,
+      input.name.trim(),
+      input.serviceLine.trim(),
+      input.status || "READY_FOR_REVIEW",
+      JSON.stringify(fieldSchema),
+      JSON.stringify({ patientLookup: "phone_or_email", appointmentRequest: "manual_or_connector_gated" }),
+      input.routingRule?.trim() || "Route to front desk for verification before PMS writeback.",
+      "Review field mapping, consent text, service-line routing, and PMS writeback before publishing.",
+    ],
+  );
+  await addWebchatAudit(tenantId, "WEBCHAT_LEAD_FORM_UPSERTED", id, "ALLOWED", { serviceLine: input.serviceLine, fields });
+  return { id };
+}
+
+export async function upsertWebchatSchedulingRule(input: {
+  tenantId?: string;
+  id?: string;
+  name: string;
+  sourceChannel?: string;
+  bookingWindowDays?: number;
+  allowReschedule?: boolean;
+  requireHumanApproval?: boolean;
+  status?: string;
+  nextAction?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = input.id || newId("schedrule");
+  await query(
+    `insert into "PatientEngagementSchedulingRule"
+      ("id", "tenantId", "name", "sourceChannel", "status", "bookingWindowDays", "allowReschedule", "requireHumanApproval", "pmsWritebackStatus", "conflictPolicy", "nextAction")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, 'PMS_CONNECTOR_REQUIRED', $9::jsonb, $10)
+     on conflict ("id") do update set
+       "name" = excluded."name",
+       "sourceChannel" = excluded."sourceChannel",
+       "status" = excluded."status",
+       "bookingWindowDays" = excluded."bookingWindowDays",
+       "allowReschedule" = excluded."allowReschedule",
+       "requireHumanApproval" = excluded."requireHumanApproval",
+       "conflictPolicy" = excluded."conflictPolicy",
+       "nextAction" = excluded."nextAction",
+       "updatedAt" = current_timestamp`,
+    [
+      id,
+      tenantId,
+      input.name.trim(),
+      input.sourceChannel || "WEB_CHAT",
+      input.status || "READY_FOR_REVIEW",
+      input.bookingWindowDays || 30,
+      input.allowReschedule ?? true,
+      input.requireHumanApproval ?? true,
+      JSON.stringify({ doubleBook: "block", providerMismatch: "staff_review", medicalAlert: "staff_review", payerRestriction: "staff_review" }),
+      input.nextAction?.trim() || "Approve PMS connector route or keep appointment creation as manual staff handoff.",
+    ],
+  );
+  await addWebchatAudit(tenantId, "WEBCHAT_SCHEDULING_RULE_UPSERTED", id, "ALLOWED", { pmsWritebackStatus: "PMS_CONNECTOR_REQUIRED" });
+  return { id };
+}
+
+export async function updateWebchatChannelSetting(input: {
+  tenantId?: string;
+  displayName: string;
+  primaryColor: string;
+  launcherText: string;
+  nlpMode?: string;
+  nextAction?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  await query(
+    `insert into "PatientEngagementChannelSetting"
+      ("id", "tenantId", "channel", "displayName", "status", "theme", "nlpMode", "knowledgeBaseStatus", "schedulingStatus", "formsStatus", "connectorStatus", "approvalPolicy", "nextAction")
+     values ($1, $2, 'WEB_CHAT', $3, 'READY_FOR_REVIEW', $4::jsonb, $5, 'NEEDS_REVIEW', 'PMS_CONNECTOR_REQUIRED', 'PMS_FORMS_REQUIRED', 'CONNECTOR_REQUIRED', $6::jsonb, $7)
+     on conflict ("tenantId", "channel") do update set
+       "displayName" = excluded."displayName",
+       "theme" = excluded."theme",
+       "nlpMode" = excluded."nlpMode",
+       "nextAction" = excluded."nextAction",
+       "updatedAt" = current_timestamp`,
+    [
+      newId("channel"),
+      tenantId,
+      input.displayName.trim(),
+      JSON.stringify({ primaryColor: input.primaryColor.trim(), launcherText: input.launcherText.trim(), position: "bottom-right" }),
+      input.nlpMode || "RULES_AND_AI_DRAFT",
+      JSON.stringify({ staffReplyRequiresApproval: true, appointmentWritebackRequiresPmsConnector: true, clinicalAdviceBlocked: true }),
+      input.nextAction?.trim() || "Install widget script, approve knowledge base, approve lead forms, and verify scheduling handoff.",
+    ],
+  );
+  await addWebchatAudit(tenantId, "WEBCHAT_CHANNEL_SETTING_UPDATED", "WEB_CHAT", "ALLOWED", { connectorStatus: "CONNECTOR_REQUIRED" });
+}
+
+async function buildAiAutoReply(input: {
+  tenantId: string;
+  conversationId: string;
+  body: string;
+  analysis: WebchatAnalysis;
+  knowledge: { id: string; heading: string | null; pageTitle: string; content: string }[];
+  leadCapture: LeadCapture;
+  qualification: { leadScore: number; qualificationStage: string; nextBestAction: string };
+}) {
+  const handoffReason = classifyStaffHandoff(input.analysis, input.body);
+  if (handoffReason) {
+    return {
+      body: handoffReason === "LIVE_PERSON_REQUEST"
+        ? "Absolutely. I’m bringing this to the dental team so a live person can help you from here."
+        : "I’m going to bring this to the dental team for review so you get the right help safely.",
+      automationMode: "STAFF_TAKEOVER",
+      handoffReason,
+      actionStatus: "STAFF_REQUIRED",
+      deliveryStatus: "SENT",
+      provider: "WEB_CHAT",
+      providerStatus: "DELIVERED_TO_WIDGET",
+      model: "handoff_policy",
+    };
+  }
+
+  const openAiReply = await generateOpenAiReply(input);
+  if (openAiReply) {
+    return {
+      body: openAiReply,
+      automationMode: "AI_AUTO",
+      handoffReason: null,
+      actionStatus: input.analysis.actionStatus ?? "AI_AUTO_RESPONDED",
+      deliveryStatus: "SENT",
+      provider: "WEB_CHAT",
+      providerStatus: "DELIVERED_TO_WIDGET",
+      model: process.env.OPENAI_WEBCHAT_MODEL || "gpt-4o-mini",
+    };
+  }
+
+  const fallback = buildReply(input.analysis, input.knowledge);
+  return {
+    body: fallback.body,
+    automationMode: "AI_AUTO",
+    handoffReason: null,
+    actionStatus: "AI_RULES_FALLBACK_RESPONDED",
+    deliveryStatus: process.env.OPENAI_API_KEY ? "SENT" : "SENT_WITH_RULES_FALLBACK",
+    provider: process.env.OPENAI_API_KEY ? "WEB_CHAT" : "RULES_ENGINE",
+    providerStatus: process.env.OPENAI_API_KEY ? "DELIVERED_TO_WIDGET" : "OPENAI_NOT_CONFIGURED",
+    model: process.env.OPENAI_API_KEY ? "rules_fallback_after_openai_error" : "rules_fallback_openai_not_configured",
+  };
+}
+
+function classifyStaffHandoff(analysis: WebchatAnalysis, body: string) {
+  const text = body.toLowerCase();
+  if (analysis.intent === "LIVE_PERSON_REQUEST") return "LIVE_PERSON_REQUEST";
+  if (/(suicide|chest pain|can't breathe|unconscious|911)/.test(text)) return "EMERGENCY_SAFETY";
+  if (analysis.intent === "EMERGENCY_TRIAGE") return "DENTAL_EMERGENCY_REVIEW";
+  if (analysis.confidence < 55) return "LOW_CONFIDENCE";
+  return null;
+}
+
+async function generateOpenAiReply(input: {
+  body: string;
+  analysis: WebchatAnalysis;
+  knowledge: { heading: string | null; pageTitle: string; content: string }[];
+  qualification: { leadScore: number; qualificationStage: string; nextBestAction: string };
+}) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  const model = process.env.OPENAI_WEBCHAT_MODEL || "gpt-4o-mini";
+  const knowledgeText = input.knowledge.slice(0, 4).map((row, index) => {
+    const title = row.heading || row.pageTitle || `Source ${index + 1}`;
+    return `${index + 1}. ${title}: ${row.content.slice(0, 700)}`;
+  }).join("\n");
+  const system = [
+    "You are 1DentalAI's dental practice webchat and SMS assistant.",
+    "Answer automatically unless the user asks for a live person or the message is an emergency/clinical risk.",
+    "Do not diagnose, prescribe, quote guaranteed insurance benefits, or claim an appointment is booked.",
+    "For booking requests, collect preference and explain the team or scheduling system will confirm availability.",
+    "Keep answers concise, friendly, and dental-practice appropriate.",
+    "Use approved knowledge when provided. If not enough info is available, say so and route to the team.",
+  ].join(" ");
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.3,
+      max_tokens: 220,
+      messages: [
+        { role: "system", content: system },
+        {
+          role: "user",
+          content: [
+            `Visitor message: ${input.body}`,
+            `Intent: ${input.analysis.intent}`,
+            `Sentiment: ${input.analysis.sentiment}`,
+            `Lead stage: ${input.qualification.qualificationStage}`,
+            `Next best action: ${input.qualification.nextBestAction}`,
+            knowledgeText ? `Approved knowledge:\n${knowledgeText}` : "Approved knowledge: none available",
+          ].join("\n\n"),
+        },
+      ],
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) return null;
+  const content = data?.choices?.[0]?.message?.content;
+  return typeof content === "string" && content.trim() ? content.trim() : null;
+}
+
+export async function ingestSmsIntoAiConversation(input: { tenantId?: string; from: string; to: string; body: string; providerMessageId?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const existing = await query<{ id: string }>(
+    `select "id"
+     from "PatientWebChatConversation"
+     where "tenantId" = $1 and "sourceChannel" = 'SMS' and "visitorPhone" = $2 and "status" = 'OPEN'
+     order by "updatedAt" desc
+     limit 1`,
+    [tenantId, input.from],
+  );
+  let conversationId = existing.rows[0]?.id;
+  if (!conversationId) {
+    conversationId = newId("chat");
+    await query(
+      `insert into "PatientWebChatConversation"
+        ("id", "tenantId", "visitorPhone", "sourcePage", "sourceChannel", "status", "transcriptSummary", "schedulingOutcome", "pmsWritebackStatus", "ownerRoleKey", "nextBestAction", "automationMode", "staffOwnerDueAt")
+       values ($1, $2, $3, $4, 'SMS', 'OPEN', $5, 'NOT_ATTEMPTED', 'PMS_CONNECTOR_REQUIRED', 'front_desk', 'AI will respond automatically unless staff takeover is required.', 'AI_AUTO', current_timestamp + interval '30 minutes')`,
+      [conversationId, tenantId, input.from, `SMS:${input.to}`, `SMS conversation started from ${input.from}.`],
+    );
+  }
+  const result = await postWebchatMessage({
+    tenantId,
+    conversationId,
+    body: input.body,
+    senderName: input.from,
+    leadCapture: {
+      visitorPhone: input.from,
+      sourceChannel: "SMS",
+      consentAccepted: true,
+    },
+  });
+  return { conversationId, ...result };
 }
 
 async function createWebchatTask(input: { tenantId: string; conversationId: string; analysis: WebchatAnalysis; body: string; leadCapture: LeadCapture }) {

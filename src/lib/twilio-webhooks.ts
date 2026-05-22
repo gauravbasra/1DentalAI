@@ -1,5 +1,6 @@
 import { newId, query } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
+import { ingestSmsIntoAiConversation } from "@/lib/webchat/repository";
 import { createHmac, timingSafeEqual } from "crypto";
 
 type TwilioPayload = Record<string, string>;
@@ -229,7 +230,20 @@ export async function ingestIncomingSms(payload: TwilioPayload, tenantId = defau
     [newId("ptask"), tenantId, conversationId, `Review inbound SMS from ${payload.From || "unknown"}. Reply only after consent, quiet-hours, and connector policy checks.`],
   );
   await addAudit(tenantId, "twilio_webhook", "TWILIO_SMS_INBOUND_RECEIVED", "PhoneConversation", conversationId, "ALLOWED", redactedPayload(payload));
-  return { conversationId };
+  const aiConversation = await ingestSmsIntoAiConversation({
+    tenantId,
+    from: payload.From || "unknown",
+    to: payload.To || "practice",
+    body: payload.Body || "",
+    providerMessageId: payload.MessageSid || payload.SmsSid || undefined,
+  });
+  const smsSend = await sendSmsAutoReplyIfAllowed({
+    tenantId,
+    to: payload.From || "",
+    body: aiConversation.reply?.body || "",
+    sourceConversationId: aiConversation.conversationId,
+  });
+  return { conversationId, aiConversationId: aiConversation.conversationId, smsSend };
 }
 
 export async function ingestSmsStatus(payload: TwilioPayload, tenantId = defaultTenantId) {
@@ -302,6 +316,97 @@ function redactedPayload(payload: TwilioPayload) {
     BodyLength: payload.Body?.length ?? 0,
     noSecretLogged: true,
   };
+}
+
+async function sendSmsAutoReplyIfAllowed(input: { tenantId: string; to: string; body: string; sourceConversationId: string }) {
+  if (!input.to || !input.body.trim()) return { status: "BLOCKED", reason: "Missing recipient or body." };
+  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+    await recordSmsAssistantDelivery(input, "BLOCKED_CONNECTOR_REQUIRED", "Twilio Account SID/Auth Token are not configured.");
+    return { status: "BLOCKED_CONNECTOR_REQUIRED", reason: "Twilio Account SID/Auth Token are not configured." };
+  }
+  const fromNumber = await getActiveSmsFromNumber(input.tenantId);
+  if (!fromNumber) {
+    await recordSmsAssistantDelivery(input, "BLOCKED_CONNECTOR_REQUIRED", "No active SMS-capable practice number is configured.");
+    return { status: "BLOCKED_CONNECTOR_REQUIRED", reason: "No active SMS-capable practice number is configured." };
+  }
+  const callbackUrl = `${(process.env.ONE_DENTAL_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://app.1dentalai.com").replace(/\/$/, "")}/api/twilio/sms/status`;
+  try {
+    const twilio = await sendTwilioSms({ from: fromNumber, to: input.to, body: input.body, statusCallback: callbackUrl });
+    await query(
+      `update "PatientWebChatMessage"
+       set "deliveryStatus" = 'SENT_TO_PROVIDER',
+         "provider" = 'TWILIO',
+         "providerMessageId" = $3,
+         "providerStatus" = $4
+       where "id" = (
+         select "id" from "PatientWebChatMessage"
+         where "tenantId" = $1 and "conversationId" = $2 and "senderType" = 'ASSISTANT'
+         order by "createdAt" desc
+         limit 1
+       )`,
+      [input.tenantId, input.sourceConversationId, twilio.sid, twilio.status],
+    );
+    await addAudit(input.tenantId, "twilio_webhook", "TWILIO_SMS_AI_AUTO_REPLY_SENT", "PatientWebChatConversation", input.sourceConversationId, "ALLOWED", { providerMessageId: twilio.sid, providerStatus: twilio.status });
+    return { status: "SENT_TO_PROVIDER", providerMessageId: twilio.sid };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Twilio SMS send failed.";
+    await recordSmsAssistantDelivery(input, "PROVIDER_ERROR", reason);
+    return { status: "PROVIDER_ERROR", reason };
+  }
+}
+
+async function recordSmsAssistantDelivery(input: { tenantId: string; sourceConversationId: string }, status: string, reason: string) {
+  await query(
+    `update "PatientWebChatMessage"
+     set "deliveryStatus" = $3,
+       "provider" = 'TWILIO',
+       "providerError" = $4
+     where "id" = (
+       select "id" from "PatientWebChatMessage"
+       where "tenantId" = $1 and "conversationId" = $2 and "senderType" = 'ASSISTANT'
+       order by "createdAt" desc
+       limit 1
+     )`,
+    [input.tenantId, input.sourceConversationId, status, reason],
+  );
+  await addAudit(input.tenantId, "twilio_webhook", "TWILIO_SMS_AI_AUTO_REPLY_BLOCKED", "PatientWebChatConversation", input.sourceConversationId, "BLOCKED", { deliveryStatus: status, reason });
+}
+
+async function getActiveSmsFromNumber(tenantId: string) {
+  const result = await query<{ phoneNumber: string }>(
+    `select "phoneNumber"
+     from "PhoneNumber"
+     where "tenantId" = $1 and "status" = 'ACTIVE' and "smsStatus" = 'ACTIVE'
+     order by case "numberType" when 'MAIN' then 0 else 1 end, "createdAt" asc
+     limit 1`,
+    [tenantId],
+  );
+  return result.rows[0]?.phoneNumber ?? null;
+}
+
+async function sendTwilioSms(input: { from: string; to: string; body: string; statusCallback: string }) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID!;
+  const authToken = process.env.TWILIO_AUTH_TOKEN!;
+  const params = new URLSearchParams({
+    From: input.from,
+    To: input.to,
+    Body: input.body,
+    StatusCallback: input.statusCallback,
+  });
+  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: params.toString(),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = typeof data?.message === "string" ? data.message : `HTTP ${response.status}`;
+    throw new Error(`Twilio SMS rejected: ${detail}`);
+  }
+  return { sid: String(data.sid || ""), status: String(data.status || "accepted") };
 }
 
 async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string | null, outcome = "ALLOWED", metadata?: unknown) {
