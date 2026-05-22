@@ -977,7 +977,11 @@ async function buildAiAutoReply(input: {
   }
 
   const fallback = buildReply(input.analysis, input.knowledge);
-  const openAi = await getOpenAiWebchatConfig(input.tenantId);
+  const openAi = await getOpenAiWebchatConfig(input.tenantId).catch((error) => ({
+    ready: false,
+    source: "error",
+    blockedReason: error instanceof Error ? error.message : "OpenAI connector check failed.",
+  }));
   return {
     body: sanitizePatientReply(fallback.body, input.analysis),
     automationMode: "AI_AUTO",
@@ -1417,8 +1421,8 @@ async function generateOpenAiReply(input: {
   knowledge: { heading: string | null; pageTitle: string; content: string }[];
   qualification: { leadScore: number; qualificationStage: string; nextBestAction: string };
 }) {
-  const openAi = await getOpenAiWebchatConfig(input.tenantId);
-  if (!openAi.apiKey) return null;
+  const openAi = await getOpenAiWebchatConfig(input.tenantId).catch(() => null);
+  if (!openAi?.apiKey) return null;
   const runtimeSettings = await getWebchatAiRuntimeSettings(input.tenantId);
   const model = runtimeSettings.llmSettings.textModel || openAi.model;
   const knowledgeText = input.knowledge.slice(0, runtimeSettings.ragPolicy.maxChunks).map((row, index) => {
@@ -1455,20 +1459,24 @@ async function generateOpenAiReply(input: {
   if (runtimeSettings.llmSettings.reasoningEffort && runtimeSettings.llmSettings.reasoningEffort !== "none") {
     payload.reasoning = { effort: runtimeSettings.llmSettings.reasoningEffort };
   }
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${openAi.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) return null;
-  const content = typeof data?.output_text === "string"
-    ? data.output_text
-    : data?.output?.flatMap((item: { content?: Array<{ text?: string }> }) => item.content ?? []).map((item: { text?: string }) => item.text).filter(Boolean).join("\n");
-  return typeof content === "string" && content.trim() ? content.trim() : null;
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openAi.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return null;
+    const content = typeof data?.output_text === "string"
+      ? data.output_text
+      : data?.output?.flatMap((item: { content?: Array<{ text?: string }> }) => item.content ?? []).map((item: { text?: string }) => item.text).filter(Boolean).join("\n");
+    return typeof content === "string" && content.trim() ? content.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 function sanitizePatientReply(reply: string, analysis: WebchatAnalysis) {

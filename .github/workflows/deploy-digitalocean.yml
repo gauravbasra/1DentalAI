@@ -67,11 +67,21 @@ jobs:
           ZOOM_CLIENT_ID: ${{ secrets.ZOOM_CLIENT_ID }}
           ZOOM_CLIENT_SECRET: ${{ secrets.ZOOM_CLIENT_SECRET }}
           ZOOM_WEBHOOK_SECRET_TOKEN: ${{ secrets.ZOOM_WEBHOOK_SECRET_TOKEN }}
+          CONNECTOR_SECRET_KEY: ${{ secrets.CONNECTOR_SECRET_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_WEBCHAT_MODEL: ${{ secrets.OPENAI_WEBCHAT_MODEL }}
+          OPENAI_BAA_ENABLED: ${{ secrets.OPENAI_BAA_ENABLED }}
+          OPENAI_PHI_ALLOWED: ${{ secrets.OPENAI_PHI_ALLOWED }}
         run: |
           ZOOM_ACCOUNT_ID_B64="$(printf '%s' "${ZOOM_ACCOUNT_ID:-}" | base64 -w 0)"
           ZOOM_CLIENT_ID_B64="$(printf '%s' "${ZOOM_CLIENT_ID:-}" | base64 -w 0)"
           ZOOM_CLIENT_SECRET_B64="$(printf '%s' "${ZOOM_CLIENT_SECRET:-}" | base64 -w 0)"
           ZOOM_SECRET_B64="$(printf '%s' "${ZOOM_WEBHOOK_SECRET_TOKEN:-}" | base64 -w 0)"
+          CONNECTOR_SECRET_KEY_B64="$(printf '%s' "${CONNECTOR_SECRET_KEY:-}" | base64 -w 0)"
+          OPENAI_API_KEY_B64="$(printf '%s' "${OPENAI_API_KEY:-}" | base64 -w 0)"
+          OPENAI_WEBCHAT_MODEL_B64="$(printf '%s' "${OPENAI_WEBCHAT_MODEL:-}" | base64 -w 0)"
+          OPENAI_BAA_ENABLED_B64="$(printf '%s' "${OPENAI_BAA_ENABLED:-}" | base64 -w 0)"
+          OPENAI_PHI_ALLOWED_B64="$(printf '%s' "${OPENAI_PHI_ALLOWED:-}" | base64 -w 0)"
           for i in 1 2 3; do
             timeout 600s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
             set -euo pipefail
@@ -109,6 +119,31 @@ jobs:
             if [ -n "${ZOOM_CLIENT_SECRET_B64}" ]; then
               ZOOM_CLIENT_SECRET_VALUE="\$(printf '%s' "${ZOOM_CLIENT_SECRET_B64}" | base64 -d)"
               if grep -q '^ZOOM_CLIENT_SECRET=' .env; then sed -i "s|^ZOOM_CLIENT_SECRET=.*|ZOOM_CLIENT_SECRET=\${ZOOM_CLIENT_SECRET_VALUE}|" .env; else printf '\\nZOOM_CLIENT_SECRET=%s\\n' "\${ZOOM_CLIENT_SECRET_VALUE}" >> .env; fi
+            fi
+            if [ -n "${CONNECTOR_SECRET_KEY_B64}" ]; then
+              CONNECTOR_SECRET_KEY_VALUE="\$(printf '%s' "${CONNECTOR_SECRET_KEY_B64}" | base64 -d)"
+              if grep -q '^CONNECTOR_SECRET_KEY=' .env; then sed -i "s|^CONNECTOR_SECRET_KEY=.*|CONNECTOR_SECRET_KEY=\${CONNECTOR_SECRET_KEY_VALUE}|" .env; else printf '\\nCONNECTOR_SECRET_KEY=%s\\n' "\${CONNECTOR_SECRET_KEY_VALUE}" >> .env; fi
+            elif ! grep -q '^CONNECTOR_SECRET_KEY=' .env; then
+              printf '\\nCONNECTOR_SECRET_KEY=%s\\n' "\$(openssl rand -hex 32)" >> .env
+            fi
+            if ! grep -q '^AUTH_SECRET=' .env; then
+              printf '\\nAUTH_SECRET=%s\\n' "\$(openssl rand -hex 32)" >> .env
+            fi
+            if [ -n "${OPENAI_API_KEY_B64}" ]; then
+              OPENAI_API_KEY_VALUE="\$(printf '%s' "${OPENAI_API_KEY_B64}" | base64 -d)"
+              if grep -q '^OPENAI_API_KEY=' .env; then sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=\${OPENAI_API_KEY_VALUE}|" .env; else printf '\\nOPENAI_API_KEY=%s\\n' "\${OPENAI_API_KEY_VALUE}" >> .env; fi
+            fi
+            if [ -n "${OPENAI_WEBCHAT_MODEL_B64}" ]; then
+              OPENAI_WEBCHAT_MODEL_VALUE="\$(printf '%s' "${OPENAI_WEBCHAT_MODEL_B64}" | base64 -d)"
+              if grep -q '^OPENAI_WEBCHAT_MODEL=' .env; then sed -i "s|^OPENAI_WEBCHAT_MODEL=.*|OPENAI_WEBCHAT_MODEL=\${OPENAI_WEBCHAT_MODEL_VALUE}|" .env; else printf '\\nOPENAI_WEBCHAT_MODEL=%s\\n' "\${OPENAI_WEBCHAT_MODEL_VALUE}" >> .env; fi
+            fi
+            if [ -n "${OPENAI_BAA_ENABLED_B64}" ]; then
+              OPENAI_BAA_ENABLED_VALUE="\$(printf '%s' "${OPENAI_BAA_ENABLED_B64}" | base64 -d)"
+              if grep -q '^OPENAI_BAA_ENABLED=' .env; then sed -i "s|^OPENAI_BAA_ENABLED=.*|OPENAI_BAA_ENABLED=\${OPENAI_BAA_ENABLED_VALUE}|" .env; else printf '\\nOPENAI_BAA_ENABLED=%s\\n' "\${OPENAI_BAA_ENABLED_VALUE}" >> .env; fi
+            fi
+            if [ -n "${OPENAI_PHI_ALLOWED_B64}" ]; then
+              OPENAI_PHI_ALLOWED_VALUE="\$(printf '%s' "${OPENAI_PHI_ALLOWED_B64}" | base64 -d)"
+              if grep -q '^OPENAI_PHI_ALLOWED=' .env; then sed -i "s|^OPENAI_PHI_ALLOWED=.*|OPENAI_PHI_ALLOWED=\${OPENAI_PHI_ALLOWED_VALUE}|" .env; else printf '\\nOPENAI_PHI_ALLOWED=%s\\n' "\${OPENAI_PHI_ALLOWED_VALUE}" >> .env; fi
             fi
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
             docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm ci && (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true) && npx prisma migrate deploy' < /dev/null

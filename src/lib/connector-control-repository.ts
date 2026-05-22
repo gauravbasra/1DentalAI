@@ -366,9 +366,15 @@ export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
     [tenantId],
   );
   const install = installation.rows[0];
-  const secret = install
-    ? await getConnectorSecret({ tenantId, providerKey: "OPENAI", credentialLabel: "api_key", installationId: install.id, requireValidated: false })
-    : null;
+  let secret: Awaited<ReturnType<typeof getConnectorSecret>> = null;
+  let secretError: string | null = null;
+  if (install) {
+    try {
+      secret = await getConnectorSecret({ tenantId, providerKey: "OPENAI", credentialLabel: "api_key", installationId: install.id, requireValidated: false });
+    } catch (error) {
+      secretError = error instanceof Error ? error.message : "OpenAI credential could not be decrypted.";
+    }
+  }
   const envKey = process.env.OPENAI_API_KEY || "";
   const envAllowed = envKey && process.env.OPENAI_BAA_ENABLED === "true" && process.env.OPENAI_PHI_ALLOWED === "true";
   const vaultAllowed = Boolean(
@@ -384,7 +390,9 @@ export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
     model: process.env.OPENAI_WEBCHAT_MODEL || "gpt-4o-mini",
     ready: Boolean(vaultAllowed || envAllowed),
     source: vaultAllowed ? "credential_vault" : envAllowed ? "environment" : "blocked",
-    blockedReason: vaultAllowed || envAllowed
+    blockedReason: secretError
+      ? `OpenAI credential is stored but cannot be used: ${secretError}`
+      : vaultAllowed || envAllowed
       ? null
       : "OpenAI is blocked until API key is stored, credential is validated, tenant approval and health checks pass, and OPENAI_BAA_ENABLED/OPENAI_PHI_ALLOWED are true.",
     installationId: install?.id ?? null,
@@ -393,6 +401,7 @@ export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
     healthStatus: install?.healthStatus ?? "MISSING",
     hasVaultKey: Boolean(secret?.value),
     hasEnvironmentKey: Boolean(envKey),
+    secretError,
   };
 }
 
