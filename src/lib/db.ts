@@ -1,4 +1,4 @@
-import { Pool, type QueryResultRow } from "pg";
+import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
 declare global {
   var __oneDentalPool: Pool | undefined;
@@ -27,6 +27,21 @@ function getPool() {
 
 export async function query<T extends QueryResultRow>(sql: string, values: unknown[] = []) {
   return getPool().query<T>(sql, values);
+}
+
+export async function withTransaction<T>(callback: (client: PoolClient) => Promise<T>) {
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    const result = await callback(client);
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    await client.query("rollback").catch(() => null);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export function newId(prefix: string) {

@@ -571,6 +571,12 @@ model PmsOnlineSchedulingLink {
   reservationFeeCents   Int      @default(0)
   requiresInsurance     Boolean  @default(false)
   acceptedPayerNames    Json?
+  patientTypePolicy     String   @default("ASK")
+  requireSmsVerification Boolean @default(false)
+  publicFlowConfig      Json?
+  intakeQuestionSchema  Json?
+  confirmationPolicy    Json?
+  brandingJson          Json?
   notes                 String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
