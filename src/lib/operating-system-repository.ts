@@ -834,12 +834,20 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
     query(`select * from "PatientEngagementChannelSetting" where "tenantId" = $1 order by "channel"`, [tenantId]),
     query(`select * from "PatientEngagementKnowledgeSource" where "tenantId" = $1 order by case "status" when 'NEEDS_REVIEW' then 0 else 1 end, "sourceModule", "title"`, [tenantId]),
     query(
-      `select wc.*, p."firstName", p."lastName", p."chartNumber", lf."name" as "leadFormName", lf."serviceLine"
+      `select wc.*, p."firstName", p."lastName", p."chartNumber", lf."name" as "leadFormName", lf."serviceLine",
+              last_message."body" as "lastMessageBody", last_message."createdAt" as "lastMessageAt", last_message."senderType" as "lastMessageSenderType"
        from "PatientWebChatConversation" wc
        left join "PmsPatient" p on p."id" = wc."patientId"
        left join "PatientEngagementLeadForm" lf on lf."id" = wc."leadFormId"
+       left join lateral (
+         select wm."body", wm."createdAt", wm."senderType"
+         from "PatientWebChatMessage" wm
+         where wm."tenantId" = wc."tenantId" and wm."conversationId" = wc."id"
+         order by wm."createdAt" desc
+         limit 1
+       ) last_message on true
        where wc."tenantId" = $1
-       order by case wc."status" when 'OPEN' then 0 else 1 end, wc."createdAt" desc`,
+       order by case wc."status" when 'OPEN' then 0 else 1 end, wc."updatedAt" desc, wc."createdAt" desc`,
       [tenantId],
     ),
     query(

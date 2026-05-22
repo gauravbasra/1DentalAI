@@ -2,6 +2,7 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { StateBadge, WorkSurface } from "@/components/products/product-app-shell";
 import { PatientEngagementShell, clean } from "@/components/products/patient-engagement-shell";
+import { LivePanelRefresh } from "@/components/products/live-panel-refresh";
 import { getPhoneOperatingCenter } from "@/lib/operating-system-repository";
 import {
   crawlKnowledgePage,
@@ -128,6 +129,7 @@ export default async function PatientEngagementWebchatPage({
 
   return (
     <PatientEngagementShell active="/patient-engagement/webchat">
+      {view === "inbox" ? <LivePanelRefresh intervalMs={2500} /> : null}
       <div className="mb-4 flex flex-wrap gap-2">
         {[
           ["inbox", "Inbox"],
@@ -189,14 +191,14 @@ export default async function PatientEngagementWebchatPage({
                       <Avatar label={personLabel(chat)} tone={chat.sourceChannel === "SMS" ? "blue" : "dark"} />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-neutral-950">{personLabel(chat)}</p>
-                        <p className="mt-1 truncate text-sm text-neutral-500">{chat.nextBestAction || clean(chat.nlpIntent ?? "new conversation")}</p>
+                        <p className="mt-1 truncate text-sm text-neutral-500">{chat.lastMessageBody || chat.nextBestAction || clean(chat.nlpIntent ?? "new conversation")}</p>
                         <div className="mt-2 flex items-center gap-2">
                           <span className="h-2 w-2 rounded-full bg-emerald-500" />
                           <span className="text-xs font-semibold text-neutral-500">{chat.sourceChannel === "SMS" ? "Two-way SMS" : "Website chat"}</span>
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs text-neutral-500">now</p>
+                        <p className="text-xs text-neutral-500">{relativeTime(chat.updatedAt || chat.createdAt)}</p>
                         <span className={`mt-4 inline-grid h-6 min-w-6 place-items-center rounded-full px-2 text-xs font-semibold ${chat.leadScore >= 80 ? "bg-blue-600 text-white" : "bg-neutral-200 text-neutral-700"}`}>
                           {chat.leadScore}
                         </span>
@@ -398,6 +400,10 @@ type WebChatRow = {
   ownerRoleKey: string;
   nextBestAction: string | null;
   blockedReason: string | null;
+  lastMessageBody?: string | null;
+  lastMessageAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 type WebChatMessageRow = {
@@ -409,6 +415,18 @@ type WebChatMessageRow = {
   actionStatus: string;
   deliveryStatus: string;
 };
+
+function relativeTime(value?: string | null) {
+  if (!value) return "now";
+  const ms = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "now";
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
 
 type KnowledgeRow = { id: string; title: string; status: string; ownerRoleKey: string; contentSummary: string };
 type LeadFormRow = { id: string; name: string; serviceLine: string; status: string; connectorStatus: string };
