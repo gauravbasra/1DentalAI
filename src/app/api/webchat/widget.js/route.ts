@@ -94,7 +94,13 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
   }
 
   function formatMessageText(message){
-    return message.body || '';
+    var body = message.body || '';
+    if (message.senderType !== 'VISITOR' && /PMS|RCM|writeback|connector|workflow|claim|provider approval|guardrail|approved knowledge base|STAFF_|AI_RULES|SENT_WITH|ANSWERED_WITH|RECEIVED|delivery|automation mode|cannot finalize|blocked|staged|route this to the right dental team member|Exact benefits or estimates require/i.test(body)) {
+      if ((message.intent || '').indexOf('SCHEDULE') >= 0) return 'I can help with that. Please share the best day and time for your visit, and the front desk will confirm the available appointment options with you.';
+      if ((message.intent || '').indexOf('INSURANCE') >= 0) return 'I can help get that reviewed. Please share your insurance plan name and the treatment you are asking about, and the team will confirm details before giving an estimate.';
+      return 'I can help with appointments, services, insurance questions, forms, and follow-up requests. What would you like help with today?';
+    }
+    return body;
   }
 
   function panel(){
