@@ -1188,6 +1188,7 @@ export async function createPhoneOutboundMessage(input: {
     ],
   );
   await addAudit(tenantId, "front_desk", "PHONE_OUTBOUND_MESSAGE_STAGED", "PhoneOutboundMessage", id, consentBlockedReason ? "BLOCKED" : "ALLOWED", { consentStatus, blockedReason: consentBlockedReason, connectorStatus, readiness });
+  return { id, connectorStatus, blockedReason: consentBlockedReason };
 }
 
 async function getPhoneOutboundConnectorReadiness(tenantId: string, channel: string, linkType?: string) {

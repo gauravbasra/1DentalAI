@@ -1,6 +1,16 @@
 import { createHash } from "node:crypto";
 import { newId, query } from "@/lib/db";
-import { defaultTenantId } from "@/lib/pms-repository";
+import {
+  defaultTenantId,
+  getOnlineSchedulingAvailability,
+  submitOnlineBooking,
+  type PmsOnlineSlot,
+} from "@/lib/pms-repository";
+import {
+  createPhoneOutboundMessage,
+  sendApprovedPhoneOutboundMessage,
+  updatePhoneOutboundMessageApproval,
+} from "@/lib/operating-system-repository";
 
 export type WebchatAnalysis = {
   intent: string;
@@ -43,16 +53,35 @@ type WebchatEventRecord = {
   payload: unknown;
 };
 
+type WebchatAiDecision = {
+  body: string;
+  automationMode: string;
+  handoffReason: string | null;
+  actionStatus: string;
+  deliveryStatus: string;
+  provider: string;
+  providerStatus: string;
+  model: string;
+  metadata?: Record<string, unknown>;
+};
+
+type SchedulingOffer = {
+  slug: string;
+  serviceLabel: string;
+  requestedDay: string;
+  options: PmsOnlineSlot[];
+};
+
 export function analyzeMessage(message: string): WebchatAnalysis {
   const text = message.toLowerCase();
   if (/(live person|human|representative|front desk|talk to someone|call me|staff)/.test(text)) {
     return { intent: "LIVE_PERSON_REQUEST", sentiment: "NEEDS_HELP", confidence: 91, actionType: "STAFF_TAKEOVER", actionStatus: "STAFF_REQUIRED" };
   }
-  if (/(book|appointment|schedule|available|availability|consult)/.test(text)) {
-    return { intent: "SCHEDULE_APPOINTMENT", sentiment: "HIGH_INTENT", confidence: 82, actionType: "SCHEDULING_HANDOFF", actionStatus: "STAFF_APPROVAL_REQUIRED" };
-  }
   if (/(reschedule|move my appointment|change appointment|cancel)/.test(text)) {
-    return { intent: "RESCHEDULE_APPOINTMENT", sentiment: "NEEDS_HELP", confidence: 84, actionType: "RESCHEDULE_HANDOFF", actionStatus: "IDENTITY_CHECK_REQUIRED" };
+    return { intent: "RESCHEDULE_APPOINTMENT", sentiment: "NEEDS_HELP", confidence: 84, actionType: "RESCHEDULE_APPOINTMENT", actionStatus: "IDENTITY_CHECK_REQUIRED" };
+  }
+  if (/(book|appointment|schedule|available|availability|consult|opening|slot|cleaning|exam|whitening|implant|crown|filling|root canal|tooth pain|toothache)/.test(text)) {
+    return { intent: "SCHEDULE_APPOINTMENT", sentiment: "HIGH_INTENT", confidence: 82, actionType: "DIRECT_PMS_SCHEDULING", actionStatus: "SCHEDULING_IN_PROGRESS" };
   }
   if (/(price|cost|insurance|financing|payment|covered)/.test(text)) {
     return { intent: "INSURANCE_OR_PRICE", sentiment: "SHOPPING", confidence: 76, actionType: "RCM_OR_TREATMENT_COORDINATOR_HANDOFF", actionStatus: "NEEDS_STAFF_REVIEW" };
@@ -338,10 +367,19 @@ export async function postWebchatMessage(input: {
       aiDecision.deliveryStatus,
       aiDecision.provider,
       aiDecision.providerStatus,
-      JSON.stringify({ sourceTitles: knowledge.map((row) => row.heading ?? row.pageTitle), noClinicalDiagnosis: true, noExternalBooking: true, qualification, automationMode: aiDecision.automationMode, handoffReason: aiDecision.handoffReason, model: aiDecision.model }),
+      JSON.stringify({
+        sourceTitles: knowledge.map((row) => row.heading ?? row.pageTitle),
+        noClinicalDiagnosis: true,
+        qualification,
+        automationMode: aiDecision.automationMode,
+        handoffReason: aiDecision.handoffReason,
+        model: aiDecision.model,
+        scheduling: aiDecision.metadata ?? null,
+      }),
     ],
   );
 
+  const appointmentId = typeof aiDecision.metadata?.appointmentId === "string" ? aiDecision.metadata.appointmentId : null;
   await query(
     `update "PatientWebChatConversation"
      set "nlpIntent" = $3,
@@ -352,16 +390,48 @@ export async function postWebchatMessage(input: {
          "staffOwnerDueAt" = current_timestamp + ($8::text)::interval,
          "transcriptSummary" = $9,
          "schedulingOutcome" = case when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then $10 else "schedulingOutcome" end,
-         "pmsWritebackStatus" = case when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then 'PMS_CONNECTOR_REQUIRED' else "pmsWritebackStatus" end,
-         "blockedReason" = case when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then 'PMS scheduling/writeback connector is not approved; staff must complete appointment work.' else "blockedReason" end,
+         "pmsWritebackStatus" = case
+           when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') and $10 = 'PMS_APPOINTMENT_BOOKED' then 'BOOKED_TO_PMS'
+           when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') and $10 in ('PMS_SLOTS_OFFERED','RESCHEDULE_SLOTS_OFFERED') then 'PMS_SLOTS_READ'
+           when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then 'NEEDS_STAFF_REVIEW'
+           else "pmsWritebackStatus"
+         end,
+         "blockedReason" = case
+           when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') and $10 in ('PMS_APPOINTMENT_BOOKED','PMS_SLOTS_OFFERED','RESCHEDULE_SLOTS_OFFERED') then null
+           when $3 in ('SCHEDULE_APPOINTMENT','RESCHEDULE_APPOINTMENT') then $13
+           else "blockedReason"
+         end,
+         "appointmentId" = coalesce($14, "appointmentId"),
+         "patientId" = coalesce($15, "patientId"),
          "automationMode" = $11,
          "handoffReason" = $12,
          "updatedAt" = current_timestamp
      where "tenantId" = $1 and "id" = $2`,
-    [tenantId, input.conversationId, analysis.intent, analysis.confidence, qualification.leadScore, qualification.qualificationStage, qualification.nextBestAction, qualification.dueIn, `Latest visitor intent: ${analysis.intent}. Score ${qualification.leadScore}. Stage ${qualification.qualificationStage}. ${input.body.slice(0, 180)}`, analysis.actionStatus ?? "STAFF_APPROVAL_REQUIRED", aiDecision.automationMode, aiDecision.handoffReason],
+    [
+      tenantId,
+      input.conversationId,
+      analysis.intent,
+      analysis.confidence,
+      qualification.leadScore,
+      qualification.qualificationStage,
+      qualification.nextBestAction,
+      qualification.dueIn,
+      `Latest visitor intent: ${analysis.intent}. Score ${qualification.leadScore}. Stage ${qualification.qualificationStage}. ${input.body.slice(0, 180)}`,
+      aiDecision.actionStatus,
+      aiDecision.automationMode,
+      aiDecision.handoffReason,
+      aiDecision.providerStatus,
+      appointmentId,
+      typeof aiDecision.metadata?.patientId === "string" ? aiDecision.metadata.patientId : null,
+    ],
   );
 
-  if (aiDecision.automationMode !== "AI_AUTO" || (analysis.actionType && analysis.actionType !== "KNOWLEDGE_RESPONSE" && analysis.actionType !== "SCHEDULING_HANDOFF")) {
+  const schedulingNeedsStaffTask = [
+    "SCHEDULING_NO_SLOTS_AVAILABLE",
+    "RESCHEDULE_SAME_DAY_APPROVAL_REQUIRED",
+    "RESCHEDULE_NO_SLOTS_AVAILABLE",
+  ].includes(aiDecision.actionStatus);
+  if (aiDecision.automationMode !== "AI_AUTO" || schedulingNeedsStaffTask || (analysis.actionType && !["KNOWLEDGE_RESPONSE", "DIRECT_PMS_SCHEDULING", "RESCHEDULE_APPOINTMENT"].includes(analysis.actionType))) {
     await createWebchatTask({ tenantId, conversationId: input.conversationId, analysis, body: input.body, leadCapture });
   }
   await addWebchatAudit(tenantId, "WEBCHAT_MESSAGE_PROCESSED", input.conversationId, "ALLOWED", {
@@ -648,7 +718,10 @@ async function buildAiAutoReply(input: {
   knowledge: { id: string; heading: string | null; pageTitle: string; content: string }[];
   leadCapture: LeadCapture;
   qualification: { leadScore: number; qualificationStage: string; nextBestAction: string };
-}) {
+}): Promise<WebchatAiDecision> {
+  const schedulingReply = await buildSchedulingReply(input);
+  if (schedulingReply) return schedulingReply;
+
   const handoffReason = classifyStaffHandoff(input.analysis, input.body);
   if (handoffReason) {
     return {
@@ -690,6 +763,413 @@ async function buildAiAutoReply(input: {
     providerStatus: process.env.OPENAI_API_KEY ? "DELIVERED_TO_WIDGET" : "OPENAI_NOT_CONFIGURED",
     model: process.env.OPENAI_API_KEY ? "rules_fallback_after_openai_error" : "rules_fallback_openai_not_configured",
   };
+}
+
+async function buildSchedulingReply(input: {
+  tenantId: string;
+  conversationId: string;
+  body: string;
+  analysis: WebchatAnalysis;
+  leadCapture: LeadCapture;
+  qualification: { leadScore: number; qualificationStage: string; nextBestAction: string };
+}): Promise<WebchatAiDecision | null> {
+  if (!["SCHEDULE_APPOINTMENT", "RESCHEDULE_APPOINTMENT"].includes(input.analysis.intent)) return null;
+
+  if (input.analysis.intent === "RESCHEDULE_APPOINTMENT") {
+    return buildRescheduleReply(input);
+  }
+
+  const selectedIndex = parseSlotSelection(input.body);
+  if (selectedIndex !== null) {
+    const offer = await getLatestSchedulingOffer(input.tenantId, input.conversationId);
+    if (!offer) {
+      return schedulingDecision(
+        "I can book that. Which type of visit should I look for: cleaning, new patient exam, emergency visit, implant consult, or another treatment?",
+        "SCHEDULING_NEEDS_PROCEDURE",
+        "NEEDS_PROCEDURE",
+        { reason: "NO_ACTIVE_SLOT_OFFER" },
+      );
+    }
+    const slot = offer.options[selectedIndex];
+    if (!slot) {
+      return schedulingDecision(
+        `I offered ${offer.options.length} openings. Reply with one of those numbers, or tell me a different day and I’ll check again.`,
+        "SCHEDULING_SELECTION_INVALID",
+        "INVALID_SLOT_SELECTION",
+        { offeredCount: offer.options.length },
+      );
+    }
+    return bookOfferedSlot({ ...input, offer, slot });
+  }
+
+  const procedure = inferSchedulingProcedure(input.body, input.leadCapture.serviceLine);
+  if (!procedure) {
+    return schedulingDecision(
+      "What would you like to book: cleaning, new patient exam, emergency visit, implant consult, or another treatment?",
+      "SCHEDULING_NEEDS_PROCEDURE",
+      "NEEDS_PROCEDURE",
+      { reason: "PROCEDURE_REQUIRED" },
+    );
+  }
+
+  const slots = await getOnlineSchedulingAvailability(procedure.slug, input.tenantId);
+  const requestedDay = inferRequestedDay(input.body);
+  const dayFiltered = filterSlotsByRequestedDay(slots, requestedDay);
+  const options = (dayFiltered.length ? dayFiltered : slots).slice(0, 5);
+
+  if (!options.length) {
+    return schedulingDecision(
+      `I don’t see online-bookable openings for ${procedure.label.toLowerCase()} right now. I’m alerting the front desk to review the schedule manually.`,
+      "SCHEDULING_NO_SLOTS_AVAILABLE",
+      "NO_AVAILABLE_SLOTS",
+      { slug: procedure.slug, serviceLabel: procedure.label, requestedDay },
+    );
+  }
+
+  const dayPrefix = requestedDay === "today" && dayFiltered.length === 0
+    ? "I don’t see an online-bookable opening today, but I found the next available times:"
+    : `I found these openings for ${procedure.label.toLowerCase()}:`;
+  const body = [
+    dayPrefix,
+    ...options.map((slot, index) => `${index + 1}. ${formatSlot(slot)}`),
+    "Reply with the number you want and I’ll book it into the calendar.",
+  ].join("\n");
+
+  return schedulingDecision(body, "PMS_SLOTS_OFFERED", "SLOTS_READ_FROM_PMS", {
+    kind: "SLOT_OFFER",
+    slug: procedure.slug,
+    serviceLabel: procedure.label,
+    requestedDay,
+    options,
+  });
+}
+
+async function buildRescheduleReply(input: {
+  tenantId: string;
+  conversationId: string;
+  body: string;
+  leadCapture: LeadCapture;
+}): Promise<WebchatAiDecision> {
+  const contact = await getConversationContact(input.tenantId, input.conversationId, input.leadCapture);
+  const phoneDigits = digits(contact.visitorPhone);
+  const email = contact.visitorEmail?.trim() || "";
+  if (!phoneDigits && !email) {
+    return schedulingDecision(
+      "I can help reschedule. Please share the phone number or email on the appointment so I can find it first.",
+      "RESCHEDULE_IDENTITY_NEEDED",
+      "IDENTITY_NEEDED",
+      { reason: "CONTACT_REQUIRED" },
+    );
+  }
+  const appointments = await query<{
+    id: string;
+    startsAt: string;
+    appointmentType: string;
+    providerName: string | null;
+  }>(
+    `select a."id", a."startsAt"::text as "startsAt", a."appointmentType", pr."displayName" as "providerName"
+     from "PmsAppointment" a
+     join "PmsPatient" p on p."id" = a."patientId"
+     left join "PmsProvider" pr on pr."id" = a."providerId"
+     where a."tenantId" = $1
+       and a."status" not in ('CANCELED', 'NO_SHOW', 'BROKEN', 'COMPLETED')
+       and a."startsAt" >= current_timestamp
+       and (
+        ($2 <> '' and regexp_replace(coalesce(p."phone", ''), '[^0-9]', '', 'g') = $2)
+        or ($3 <> '' and lower(coalesce(p."email", '')) = lower($3))
+       )
+     order by a."startsAt"
+     limit 3`,
+    [input.tenantId, phoneDigits, email],
+  );
+  if (!appointments.rows.length) {
+    return schedulingDecision(
+      "I couldn’t find an upcoming appointment from that phone or email. Please share the appointment date or another contact detail and I’ll check again.",
+      "RESCHEDULE_APPOINTMENT_NOT_FOUND",
+      "APPOINTMENT_NOT_FOUND",
+      { contactMatched: false },
+    );
+  }
+  const sameDay = appointments.rows.some((appointment) => isToday(appointment.startsAt));
+  if (sameDay) {
+    return schedulingDecision(
+      `I found ${formatExistingAppointment(appointments.rows[0])}. Same-day changes need the front desk or practice manager to approve the move so the chair schedule stays accurate. I’ve flagged this conversation for immediate review.`,
+      "RESCHEDULE_SAME_DAY_APPROVAL_REQUIRED",
+      "SAME_DAY_APPROVAL_REQUIRED",
+      { appointmentId: appointments.rows[0].id },
+    );
+  }
+  const procedure = inferSchedulingProcedure(input.body, appointments.rows[0].appointmentType) ?? { slug: "new-patient-exam", label: appointments.rows[0].appointmentType || "visit" };
+  const slots = (await getOnlineSchedulingAvailability(procedure.slug, input.tenantId)).slice(0, 5);
+  if (!slots.length) {
+    return schedulingDecision(
+      `I found ${formatExistingAppointment(appointments.rows[0])}, but I don’t see open online reschedule times right now. I’m flagging the front desk to review the schedule manually.`,
+      "RESCHEDULE_NO_SLOTS_AVAILABLE",
+      "NO_AVAILABLE_SLOTS",
+      { appointmentId: appointments.rows[0].id },
+    );
+  }
+  return schedulingDecision(
+    [
+      `I found ${formatExistingAppointment(appointments.rows[0])}. Here are replacement openings:`,
+      ...slots.map((slot, index) => `${index + 1}. ${formatSlot(slot)}`),
+      "Reply with the number you want. If this becomes a same-day change, staff approval is required before the calendar is moved.",
+    ].join("\n"),
+    "RESCHEDULE_SLOTS_OFFERED",
+    "SLOTS_READ_FROM_PMS",
+    { kind: "RESCHEDULE_SLOT_OFFER", appointmentId: appointments.rows[0].id, slug: procedure.slug, serviceLabel: procedure.label, options: slots },
+  );
+}
+
+async function bookOfferedSlot(input: {
+  tenantId: string;
+  conversationId: string;
+  body: string;
+  leadCapture: LeadCapture;
+  offer: SchedulingOffer;
+  slot: PmsOnlineSlot;
+}): Promise<WebchatAiDecision> {
+  const contact = await getConversationContact(input.tenantId, input.conversationId, input.leadCapture);
+  const name = splitPatientName(contact.visitorName);
+  const missing = [
+    !name.firstName ? "name" : null,
+    !contact.visitorPhone ? "phone number" : null,
+    !contact.visitorEmail ? "email" : null,
+  ].filter(Boolean);
+  if (missing.length) {
+    return schedulingDecision(
+      `I can book that time. Please share your ${missing.join(", ")} so I can put it on the calendar.`,
+      "SCHEDULING_CONTACT_NEEDED",
+      "CONTACT_REQUIRED",
+      { reason: "CONTACT_REQUIRED", missing, selectedSlot: input.slot },
+    );
+  }
+
+  try {
+    const booking = await submitOnlineBooking({
+      tenantId: input.tenantId,
+      slug: input.offer.slug,
+      startsAt: input.slot.startsAt,
+      providerId: input.slot.providerId,
+      operatoryId: input.slot.operatoryId,
+      firstName: name.firstName,
+      lastName: name.lastName || "Patient",
+      phone: contact.visitorPhone,
+      email: contact.visitorEmail,
+      patientNote: `Booked from webchat. Visitor said: ${input.body.slice(0, 180)}`,
+      utmSource: "webchat",
+    });
+    const confirmation = await stageAndSendAppointmentConfirmation({
+      tenantId: input.tenantId,
+      conversationId: input.conversationId,
+      appointmentId: booking.appointmentId,
+      patientId: booking.patientId,
+      phone: contact.visitorPhone,
+      consentAccepted: Boolean(contact.consentAccepted),
+      slot: input.slot,
+      serviceLabel: input.offer.serviceLabel,
+    });
+    await query(
+      `insert into "PatientWebChatEvent" ("id", "tenantId", "conversationId", "eventType", "payload")
+       values ($1, $2, $3, 'APPOINTMENT_BOOKED_FROM_WEBCHAT', $4::jsonb)`,
+      [
+        newId("evt"),
+        input.tenantId,
+        input.conversationId,
+        JSON.stringify({ ...booking, slot: input.slot, serviceLabel: input.offer.serviceLabel, confirmation }),
+      ],
+    );
+    const confirmationLine = confirmation.smsDeliveryStatus === "SENT_TO_PROVIDER"
+      ? "I also sent a text confirmation."
+      : "The confirmation is saved in the appointment record and ready for the practice communication queue.";
+    return schedulingDecision(
+      `Booked. You’re confirmed for ${input.offer.serviceLabel.toLowerCase()} on ${formatSlot(input.slot)}. ${confirmationLine}`,
+      "PMS_APPOINTMENT_BOOKED",
+      "BOOKED_TO_PMS",
+      {
+        kind: "APPOINTMENT_BOOKED",
+        appointmentId: booking.appointmentId,
+        patientId: booking.patientId,
+        bookingId: booking.bookingId,
+        isReturningPatient: booking.isReturningPatient,
+        slot: input.slot,
+        confirmation,
+      },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "That appointment time is no longer available.";
+    const procedure = { slug: input.offer.slug, label: input.offer.serviceLabel };
+    const fresh = (await getOnlineSchedulingAvailability(procedure.slug, input.tenantId)).slice(0, 5);
+    const body = fresh.length
+      ? [
+          `${message}. Here are the current openings:`,
+          ...fresh.map((slot, index) => `${index + 1}. ${formatSlot(slot)}`),
+          "Reply with the number you want and I’ll book that time.",
+        ].join("\n")
+      : `${message}. I don’t see another online-bookable slot right now, so I’m flagging this for the front desk.`;
+    return schedulingDecision(body, "SCHEDULING_SLOT_REFRESHED", "SLOT_RECHECK_FAILED", {
+      kind: "SLOT_OFFER",
+      slug: procedure.slug,
+      serviceLabel: procedure.label,
+      options: fresh,
+      blockedReason: message,
+    });
+  }
+}
+
+async function stageAndSendAppointmentConfirmation(input: {
+  tenantId: string;
+  conversationId: string;
+  appointmentId: string;
+  patientId: string;
+  phone?: string;
+  consentAccepted: boolean;
+  slot: PmsOnlineSlot;
+  serviceLabel: string;
+}) {
+  if (!input.phone) return { smsDeliveryStatus: "NOT_ATTEMPTED", reason: "No mobile number provided." };
+  const body = `Your ${input.serviceLabel.toLowerCase()} is confirmed for ${formatSlot(input.slot)}. Reply here if you need to change it.`;
+  const staged = await createPhoneOutboundMessage({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+    patientId: input.patientId,
+    appointmentId: input.appointmentId,
+    channel: "SMS",
+    recipientNumber: input.phone,
+    messageType: "APPOINTMENT_CONFIRMATION",
+    body,
+    consentStatus: input.consentAccepted ? "VERIFIED" : "UNKNOWN",
+    linkType: "ONLINE_SCHEDULING_LINK",
+    linkTargetId: input.appointmentId,
+    linkLabel: "Appointment confirmation",
+  });
+  if (!staged || staged.blockedReason) {
+    return { smsMessageId: staged?.id ?? null, smsDeliveryStatus: "BLOCKED", reason: staged?.blockedReason ?? "SMS connector or consent is not ready." };
+  }
+  await updatePhoneOutboundMessageApproval(staged.id, "APPROVED_STAGED", "webchat_ai_scheduler");
+  await sendApprovedPhoneOutboundMessage(staged.id, "webchat_ai_scheduler");
+  const result = await query<{ deliveryStatus: string; provider: string | null; providerMessageId: string | null; blockedReason: string | null; providerError: string | null }>(
+    `select "deliveryStatus", "provider", "providerMessageId", "blockedReason", "providerError"
+     from "PhoneOutboundMessage"
+     where "id" = $1`,
+    [staged.id],
+  );
+  return { smsMessageId: staged.id, ...(result.rows[0] ?? { deliveryStatus: "UNKNOWN" }) };
+}
+
+function schedulingDecision(body: string, actionStatus: string, providerStatus: string, metadata: Record<string, unknown>): WebchatAiDecision {
+  return {
+    body,
+    automationMode: actionStatus.includes("APPROVAL_REQUIRED") ? "STAFF_TAKEOVER" : "AI_AUTO",
+    handoffReason: actionStatus.includes("APPROVAL_REQUIRED") ? actionStatus : null,
+    actionStatus,
+    deliveryStatus: "SENT",
+    provider: "PMS_SCHEDULING",
+    providerStatus,
+    model: "pms_scheduling_engine_v1",
+    metadata,
+  };
+}
+
+async function getLatestSchedulingOffer(tenantId: string, conversationId: string): Promise<SchedulingOffer | null> {
+  const result = await query<{ metadata: unknown }>(
+    `select "metadata"
+     from "PatientWebChatMessage"
+     where "tenantId" = $1
+       and "conversationId" = $2
+       and "senderType" = 'ASSISTANT'
+       and "metadata"->'scheduling'->>'kind' = 'SLOT_OFFER'
+     order by "createdAt" desc
+     limit 1`,
+    [tenantId, conversationId],
+  );
+  const metadata = result.rows[0]?.metadata as { scheduling?: Partial<SchedulingOffer> } | undefined;
+  const scheduling = metadata?.scheduling;
+  if (!scheduling?.slug || !scheduling?.serviceLabel || !Array.isArray(scheduling.options)) return null;
+  return {
+    slug: String(scheduling.slug),
+    serviceLabel: String(scheduling.serviceLabel),
+    requestedDay: String(scheduling.requestedDay ?? "any"),
+    options: scheduling.options as PmsOnlineSlot[],
+  };
+}
+
+async function getConversationContact(tenantId: string, conversationId: string, leadCapture: LeadCapture) {
+  const result = await query<{ visitorName: string | null; visitorPhone: string | null; visitorEmail: string | null }>(
+    `select "visitorName", "visitorPhone", "visitorEmail"
+     from "PatientWebChatConversation"
+     where "tenantId" = $1 and "id" = $2
+     limit 1`,
+    [tenantId, conversationId],
+  );
+  const row = result.rows[0];
+  return {
+    visitorName: leadCapture.visitorName || row?.visitorName || "",
+    visitorPhone: leadCapture.visitorPhone || row?.visitorPhone || "",
+    visitorEmail: leadCapture.visitorEmail || row?.visitorEmail || "",
+    consentAccepted: leadCapture.consentAccepted === true,
+  };
+}
+
+function inferSchedulingProcedure(body: string, serviceLine?: string) {
+  const text = `${body} ${serviceLine ?? ""}`.toLowerCase();
+  if (/(emergency|pain|swelling|broken|trauma|toothache|bleeding)/.test(text)) return { slug: "emergency-exam", label: "Emergency exam" };
+  if (/(cleaning|hygiene|recall|recare|prophy)/.test(text)) return { slug: "hygiene-recare", label: "Hygiene cleaning" };
+  if (/(implant|aligner|invisalign|whitening|cosmetic|consult|crown|filling|root canal|exam|new patient|checkup|appointment|visit)/.test(text)) return { slug: "new-patient-exam", label: text.includes("implant") ? "Implant consultation" : "New patient exam" };
+  return null;
+}
+
+function parseSlotSelection(body: string) {
+  const text = body.toLowerCase().trim();
+  const wordMap: Record<string, number> = { first: 0, one: 0, second: 1, two: 1, third: 2, three: 2, fourth: 3, four: 3, fifth: 4, five: 4 };
+  if (wordMap[text] !== undefined) return wordMap[text];
+  const match = text.match(/(?:option|slot|number|book)?\s*([1-5])\b/);
+  return match ? Number(match[1]) - 1 : null;
+}
+
+function inferRequestedDay(body: string) {
+  const text = body.toLowerCase();
+  if (/\btoday\b/.test(text)) return "today";
+  if (/\btomorrow\b/.test(text)) return "tomorrow";
+  return "any";
+}
+
+function filterSlotsByRequestedDay(slots: PmsOnlineSlot[], requestedDay: string) {
+  if (requestedDay === "any") return slots;
+  const target = new Date();
+  target.setHours(0, 0, 0, 0);
+  if (requestedDay === "tomorrow") target.setDate(target.getDate() + 1);
+  return slots.filter((slot) => {
+    const startsAt = new Date(slot.startsAt);
+    return startsAt.getFullYear() === target.getFullYear() && startsAt.getMonth() === target.getMonth() && startsAt.getDate() === target.getDate();
+  });
+}
+
+function formatSlot(slot: PmsOnlineSlot) {
+  const startsAt = new Date(slot.startsAt);
+  const date = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Denver" }).format(startsAt);
+  return `${date} with ${slot.providerName} in ${slot.operatoryName}`;
+}
+
+function formatExistingAppointment(appointment: { startsAt: string; appointmentType: string; providerName: string | null }) {
+  const startsAt = new Date(appointment.startsAt);
+  const date = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Denver" }).format(startsAt);
+  return `${appointment.appointmentType} on ${date}${appointment.providerName ? ` with ${appointment.providerName}` : ""}`;
+}
+
+function splitPatientName(name?: string) {
+  const parts = name?.trim().split(/\s+/).filter(Boolean) ?? [];
+  return { firstName: parts[0] ?? "", lastName: parts.slice(1).join(" ") || "" };
+}
+
+function digits(value?: string) {
+  return value?.replace(/\D/g, "") ?? "";
+}
+
+function isToday(value: string) {
+  const date = new Date(value);
+  const today = new Date();
+  return date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
 }
 
 function classifyStaffHandoff(analysis: WebchatAnalysis, body: string) {
