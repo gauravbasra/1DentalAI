@@ -801,6 +801,12 @@ function stringSetting(source: Record<string, unknown>, key: string, fallback: s
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+function textResponseModelSetting(source: Record<string, unknown>, key: string, fallback: string) {
+  const value = stringSetting(source, key, fallback);
+  if (/realtime|transcribe|whisper|tts|audio/i.test(value)) return fallback;
+  return value;
+}
+
 function numberSetting(source: Record<string, unknown>, key: string, fallback: number, min: number, max: number) {
   const value = Number(source[key]);
   if (!Number.isFinite(value)) return fallback;
@@ -839,7 +845,7 @@ export async function getWebchatAiRuntimeSettings(tenantId = defaultTenantId): P
   const rag = asObject(row.ragPolicy);
   return {
     llmSettings: {
-      textModel: stringSetting(llm, "textModel", defaults.llmSettings.textModel),
+      textModel: textResponseModelSetting(llm, "textModel", defaults.llmSettings.textModel),
       reasoningEffort: stringSetting(llm, "reasoningEffort", defaults.llmSettings.reasoningEffort),
       temperature: numberSetting(llm, "temperature", defaults.llmSettings.temperature, 0, 2),
       maxOutputTokens: Math.round(numberSetting(llm, "maxOutputTokens", defaults.llmSettings.maxOutputTokens, 80, 2000)),
