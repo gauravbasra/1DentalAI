@@ -45,6 +45,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     settings: null,
     messages: [],
     editingIdentity: false,
+    stream: null,
   };
   var root = document.createElement('div');
   root.id = 'one-dental-ai-webchat';
@@ -101,6 +102,45 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       return 'I can help with appointments, services, insurance questions, forms, and follow-up requests. What would you like help with today?';
     }
     return body;
+  }
+
+  function normalizeMessage(message){
+    return {
+      senderType: message.senderType,
+      body: message.body || '',
+      intent: message.intent,
+      actionStatus: message.actionStatus,
+      deliveryStatus: message.deliveryStatus,
+      automationMode: message.automationMode,
+    };
+  }
+
+  function startTranscriptStream(){
+    if (!state.session || !state.session.id || typeof EventSource === 'undefined') return;
+    if (state.stream) state.stream.close();
+    state.stream = new EventSource(API_BASE + '/api/webchat/stream?tenant=' + encodeURIComponent(TENANT) + '&conversationId=' + encodeURIComponent(state.session.id));
+    state.stream.addEventListener('transcript', function(event){
+      try {
+        var transcript = JSON.parse(event.data);
+        if (!transcript || !transcript.conversation) return;
+        if (transcript.conversation.status === 'CLOSED') {
+          localStorage.removeItem(storageKey);
+          state.session = null;
+          state.messages = [];
+          if (state.stream) state.stream.close();
+          state.stream = null;
+          render();
+          return;
+        }
+        state.messages = (transcript.messages || []).map(normalizeMessage);
+        render();
+      } catch (error) {}
+    });
+    state.stream.onerror = function(){
+      if (state.stream) state.stream.close();
+      state.stream = null;
+      window.setTimeout(startTranscriptStream, 1200);
+    };
   }
 
   function panel(){
@@ -226,6 +266,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     if (persisted && persisted.id) {
       state.session = { id: persisted.id };
       await loadTranscript();
+      startTranscriptStream();
       return state.session;
     }
 
@@ -238,6 +279,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     state.session = json.session;
     saveSession();
     state.messages = [];
+    startTranscriptStream();
     return state.session;
   }
 
@@ -328,15 +370,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
         state.messages = [];
         return;
       }
-      state.messages = (transcript.messages || []).map(function(message){
-        return {
-          senderType: message.senderType,
-          body: message.body || '',
-          actionStatus: message.actionStatus,
-          deliveryStatus: message.deliveryStatus,
-          automationMode: message.automationMode,
-        };
-      });
+      state.messages = (transcript.messages || []).map(normalizeMessage);
     } catch (error) {
     }
   }
@@ -388,6 +422,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     }
 
     state.sending = false;
+    loadTranscript();
     render();
   }
 
@@ -439,6 +474,6 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     state.settings = json;
     render();
     return ensureSession();
-  }).then(function(){ render(); }).catch(render);
+  }).then(function(){ startTranscriptStream(); render(); }).catch(render);
 })();\n`;
 }

@@ -251,16 +251,16 @@ export default async function PatientEngagementWebchatPage({
                     </form>
                     <form action={staffEntryAction} className="flex items-end gap-3">
                       <input type="hidden" name="conversationId" value={selectedConversation.id} />
-                      <input type="hidden" name="entryType" value={(selectedConversation.automationMode || "AI_AUTO") === "AI_AUTO" ? "STAFF_NOTE" : "STAFF_REPLY"} />
+                      <input type="hidden" name="entryType" value="STAFF_REPLY" />
                       <input type="hidden" name="status" value="OPEN" />
                       <div className="flex min-h-14 flex-1 items-center gap-3 rounded-2xl bg-neutral-100 px-4">
                         <span className="text-xl text-neutral-500">+</span>
-                        <textarea name="body" required className="min-h-12 flex-1 resize-none bg-transparent py-4 text-sm outline-none" placeholder={(selectedConversation.automationMode || "AI_AUTO") === "AI_AUTO" ? "Add internal staff note" : "Write live staff reply"} />
+                        <textarea name="body" required className="min-h-12 flex-1 resize-none bg-transparent py-4 text-sm outline-none" placeholder="Write a live reply to the visitor" />
                         <span className="text-xl text-neutral-500">mic</span>
                       </div>
                       <button className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-600 text-lg font-semibold text-white shadow-sm">Send</button>
                     </form>
-                    <p className="mt-2 text-xs text-neutral-500">{(selectedConversation.automationMode || "AI_AUTO") === "AI_AUTO" ? "AI is still responding automatically. Staff notes stay internal." : "Staff reply is staged and remains connector-gated until live delivery is approved."}</p>
+                    <p className="mt-2 text-xs text-neutral-500">Staff replies are delivered into the website chat stream in real time. Internal notes belong in the handoff form, not the visitor composer.</p>
                   </footer>
                 </>
               ) : <div className="p-6"><Empty title="No conversation selected" body="Select a chat from the inbox." /></div>}
@@ -441,7 +441,7 @@ function MessageBubble({ message, visitorLabel }: { message: WebChatMessageRow; 
       {isIncoming ? <Avatar label={visitorLabel} tone="rose" /> : null}
       <div className={`max-w-[68%] rounded-2xl px-4 py-3 ${isIncoming ? "rounded-bl-md bg-neutral-100 text-neutral-950" : isNote ? "rounded-br-md bg-amber-50 text-neutral-900" : "rounded-br-md bg-blue-600 text-white"}`}>
         <p className={`mb-1 text-sm font-semibold ${isIncoming ? "text-neutral-950" : isNote ? "text-neutral-950" : "text-white"}`}>
-          {isIncoming ? visitorLabel : isNote ? "Internal note" : "1DentalAI"}
+          {isIncoming ? visitorLabel : isNote ? "Internal note" : message.senderType === "STAFF" ? "Front desk" : "1DentalAI"}
         </p>
         <p className="text-sm leading-6">{message.body}</p>
         <p className={`mt-2 text-right text-[11px] ${isIncoming || isNote ? "text-neutral-500" : "text-blue-100"}`}>

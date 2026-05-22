@@ -19,3 +19,11 @@ export function jsonResponse(body: unknown, init?: ResponseInit) {
 export function optionsResponse() {
   return new NextResponse(null, { status: 204, headers: corsHeaders });
 }
+
+export const sseHeaders = {
+  ...corsHeaders,
+  "Content-Type": "text/event-stream; charset=utf-8",
+  "Cache-Control": "no-cache, no-transform",
+  Connection: "keep-alive",
+  "X-Accel-Buffering": "no",
+};

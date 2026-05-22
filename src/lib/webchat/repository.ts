@@ -209,6 +209,44 @@ export async function getConversationTranscript(conversationId: string, tenantId
   };
 }
 
+export async function getConversationStreamState(conversationId: string, tenantId = defaultTenantId) {
+  const result = await query<{ messageCount: string; lastMessageAt: string | null; conversationUpdatedAt: string | null; status: string | null }>(
+    `select
+       (select count(*) from "PatientWebChatMessage" where "tenantId" = $1 and "conversationId" = $2)::text as "messageCount",
+       (select max("createdAt")::text from "PatientWebChatMessage" where "tenantId" = $1 and "conversationId" = $2) as "lastMessageAt",
+       (select "updatedAt"::text from "PatientWebChatConversation" where "tenantId" = $1 and "id" = $2 limit 1) as "conversationUpdatedAt",
+       (select "status" from "PatientWebChatConversation" where "tenantId" = $1 and "id" = $2 limit 1) as "status"`,
+    [tenantId, conversationId],
+  );
+  const row = result.rows[0];
+  return {
+    messageCount: Number(row?.messageCount ?? 0),
+    lastMessageAt: row?.lastMessageAt ?? null,
+    conversationUpdatedAt: row?.conversationUpdatedAt ?? null,
+    status: row?.status ?? null,
+  };
+}
+
+export async function getWebchatInboxStreamState(tenantId = defaultTenantId) {
+  const result = await query<{ conversationCount: string; openCount: string; lastUpdatedAt: string | null; messageCount: string; lastMessageAt: string | null }>(
+    `select
+       (select count(*) from "PatientWebChatConversation" where "tenantId" = $1)::text as "conversationCount",
+       (select count(*) from "PatientWebChatConversation" where "tenantId" = $1 and "status" = 'OPEN')::text as "openCount",
+       (select max("updatedAt")::text from "PatientWebChatConversation" where "tenantId" = $1) as "lastUpdatedAt",
+       (select count(*) from "PatientWebChatMessage" where "tenantId" = $1)::text as "messageCount",
+       (select max("createdAt")::text from "PatientWebChatMessage" where "tenantId" = $1) as "lastMessageAt"`,
+    [tenantId],
+  );
+  const row = result.rows[0];
+  return {
+    conversationCount: Number(row?.conversationCount ?? 0),
+    openCount: Number(row?.openCount ?? 0),
+    lastUpdatedAt: row?.lastUpdatedAt ?? null,
+    messageCount: Number(row?.messageCount ?? 0),
+    lastMessageAt: row?.lastMessageAt ?? null,
+  };
+}
+
 export async function postWebchatMessage(input: {
   tenantId?: string;
   conversationId: string;
@@ -349,12 +387,13 @@ export async function postStaffWebchatEntry(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const senderType = input.entryType === "STAFF_REPLY" ? "STAFF" : "STAFF_NOTE";
-  const actionStatus = senderType === "STAFF" ? "STAFF_REPLY_STAGED" : "INTERNAL_NOTE";
+  const actionStatus = senderType === "STAFF" ? "STAFF_REPLY_SENT" : "INTERNAL_NOTE";
+  const deliveryStatus = senderType === "STAFF" ? "SENT" : "INTERNAL";
   const id = newId("msg");
   await query(
     `insert into "PatientWebChatMessage"
-      ("id", "tenantId", "conversationId", "senderType", "senderName", "body", "intent", "sentiment", "confidence", "actionType", "actionStatus", "metadata")
-     values ($1, $2, $3, $4, $5, $6, 'STAFF_HANDOFF', 'NEUTRAL', 100, 'OPERATOR_REVIEW', $7, $8::jsonb)`,
+      ("id", "tenantId", "conversationId", "senderType", "senderName", "body", "intent", "sentiment", "confidence", "actionType", "actionStatus", "deliveryStatus", "provider", "providerStatus", "metadata")
+     values ($1, $2, $3, $4, $5, $6, 'STAFF_HANDOFF', 'NEUTRAL', 100, 'OPERATOR_REVIEW', $7, $8, 'WEB_CHAT', $9, $10::jsonb)`,
     [
       id,
       tenantId,
@@ -363,7 +402,9 @@ export async function postStaffWebchatEntry(input: {
       input.senderName || "Front desk",
       input.body,
       actionStatus,
-      JSON.stringify({ internalOnly: senderType === "STAFF_NOTE", externalSendBlocked: true, connectorGated: true }),
+      deliveryStatus,
+      senderType === "STAFF" ? "DELIVERED_TO_WIDGET_STREAM" : "INTERNAL_ONLY",
+      JSON.stringify({ internalOnly: senderType === "STAFF_NOTE", realtimeStream: senderType === "STAFF", deliveredToWidget: senderType === "STAFF" }),
     ],
   );
   await query(
@@ -372,10 +413,10 @@ export async function postStaffWebchatEntry(input: {
          "transcriptSummary" = $4,
          "updatedAt" = current_timestamp
      where "tenantId" = $1 and "id" = $2`,
-    [tenantId, input.conversationId, input.status || "OPEN", `Staff ${senderType === "STAFF" ? "reply staged" : "note added"}: ${input.body.slice(0, 180)}`],
+    [tenantId, input.conversationId, input.status || "OPEN", `Staff ${senderType === "STAFF" ? "reply sent" : "note added"}: ${input.body.slice(0, 180)}`],
   );
-  await addWebchatAudit(tenantId, senderType === "STAFF" ? "WEBCHAT_STAFF_REPLY_STAGED" : "WEBCHAT_STAFF_NOTE_ADDED", input.conversationId, "ALLOWED", {
-    externalSendBlocked: true,
+  await addWebchatAudit(tenantId, senderType === "STAFF" ? "WEBCHAT_STAFF_REPLY_SENT" : "WEBCHAT_STAFF_NOTE_ADDED", input.conversationId, "ALLOWED", {
+    realtimeStream: senderType === "STAFF",
     status: input.status || "OPEN",
   });
   return { id, actionStatus };
