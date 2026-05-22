@@ -94,12 +94,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
   }
 
   function formatMessageText(message){
-    var body = message.body || '';
-    var suffix = [];
-    if (message.actionStatus) suffix.push(message.actionStatus);
-    if (message.deliveryStatus) suffix.push(message.deliveryStatus);
-    if (message.automationMode) suffix.push('Mode ' + message.automationMode);
-    return suffix.length ? body + '\\n' + suffix.join(' · ') : body;
+    return message.body || '';
   }
 
   function panel(){
