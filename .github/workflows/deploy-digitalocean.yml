@@ -62,7 +62,10 @@ jobs:
           exit 1
 
       - name: Provision database and run migrations
+        env:
+          ZOOM_WEBHOOK_SECRET_TOKEN: ${{ secrets.ZOOM_WEBHOOK_SECRET_TOKEN }}
         run: |
+          ZOOM_SECRET_B64="$(printf '%s' "${ZOOM_WEBHOOK_SECRET_TOKEN:-}" | base64 -w 0)"
           for i in 1 2 3; do
             timeout 600s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
             set -euo pipefail
@@ -80,6 +83,14 @@ jobs:
                 echo "DATABASE_URL=postgresql://dentalai_app:\${DB_PASSWORD}@postgres:5432/dentalai_prod?schema=public"
               } > .env
               chmod 600 .env
+            fi
+            if [ -n "${ZOOM_SECRET_B64}" ]; then
+              ZOOM_SECRET_VALUE="\$(printf '%s' "${ZOOM_SECRET_B64}" | base64 -d)"
+              if grep -q '^ZOOM_WEBHOOK_SECRET_TOKEN=' .env; then
+                sed -i "s|^ZOOM_WEBHOOK_SECRET_TOKEN=.*|ZOOM_WEBHOOK_SECRET_TOKEN=\${ZOOM_SECRET_VALUE}|" .env
+              else
+                printf '\\nZOOM_WEBHOOK_SECRET_TOKEN=%s\\n' "\${ZOOM_SECRET_VALUE}" >> .env
+              fi
             fi
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
             docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm ci && (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true) && npx prisma migrate deploy' < /dev/null
