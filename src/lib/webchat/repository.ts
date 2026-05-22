@@ -1210,7 +1210,7 @@ async function generateOpenAiReply(input: {
     "Keep answers concise, warm, and dental-practice appropriate.",
     "Use approved patient-facing knowledge only. If knowledge sounds like product documentation or operations language, ignore it.",
   ].join(" ");
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -1219,26 +1219,23 @@ async function generateOpenAiReply(input: {
     body: JSON.stringify({
       model,
       temperature: 0.3,
-      max_tokens: 220,
-      messages: [
-        { role: "system", content: system },
-        {
-          role: "user",
-          content: [
-            `Visitor message: ${input.body}`,
-            `Intent: ${input.analysis.intent}`,
-            `Sentiment: ${input.analysis.sentiment}`,
-            `Lead stage: ${input.qualification.qualificationStage}`,
-            `Next best action: ${input.qualification.nextBestAction}`,
-            knowledgeText ? `Approved knowledge:\n${knowledgeText}` : "Approved knowledge: none available",
-          ].join("\n\n"),
-        },
-      ],
+      max_output_tokens: 220,
+      instructions: system,
+      input: [
+        `Visitor message: ${input.body}`,
+        `Intent: ${input.analysis.intent}`,
+        `Sentiment: ${input.analysis.sentiment}`,
+        `Lead stage: ${input.qualification.qualificationStage}`,
+        `Next best action: ${input.qualification.nextBestAction}`,
+        knowledgeText ? `Approved knowledge:\n${knowledgeText}` : "Approved knowledge: none available",
+      ].join("\n\n"),
     }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) return null;
-  const content = data?.choices?.[0]?.message?.content;
+  const content = typeof data?.output_text === "string"
+    ? data.output_text
+    : data?.output?.flatMap((item: { content?: Array<{ text?: string }> }) => item.content ?? []).map((item: { text?: string }) => item.text).filter(Boolean).join("\n");
   return typeof content === "string" && content.trim() ? content.trim() : null;
 }
 
