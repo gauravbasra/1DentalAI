@@ -396,6 +396,72 @@ export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
   };
 }
 
+export type OpenAiModelCatalog = {
+  status: "READY" | "NO_KEY" | "ERROR";
+  source: string;
+  models: string[];
+  error?: string;
+  fetchedAt: string;
+};
+
+const fallbackOpenAiModels = [
+  "gpt-4.1",
+  "gpt-4.1-mini",
+  "gpt-4.1-nano",
+  "gpt-4o",
+  "gpt-4o-mini",
+  "o3",
+  "o3-mini",
+  "o4-mini",
+  "gpt-realtime",
+  "gpt-realtime-mini",
+  "gpt-4o-realtime-preview",
+  "gpt-4o-mini-realtime-preview",
+  "whisper-1",
+  "gpt-4o-transcribe",
+  "gpt-4o-mini-transcribe",
+];
+
+export async function getOpenAiModelCatalog(tenantId = defaultTenantId): Promise<OpenAiModelCatalog> {
+  const installation = await query<{ id: string }>(
+    `select i."id"
+     from "ConnectorInstallation" i
+     join "ConnectorDefinition" d on d."id" = i."definitionId"
+     where i."tenantId" = $1 and d."category" = 'AI_LLM'
+     order by i."createdAt" desc
+     limit 1`,
+    [tenantId],
+  );
+  const install = installation.rows[0];
+  const secret = install
+    ? await getConnectorSecret({ tenantId, providerKey: "OPENAI", credentialLabel: "api_key", installationId: install.id, requireValidated: false })
+    : null;
+  const apiKey = secret?.value || process.env.OPENAI_API_KEY || "";
+  const source = secret?.value ? "credential_vault" : process.env.OPENAI_API_KEY ? "environment" : "fallback";
+  if (!apiKey) {
+    return { status: "NO_KEY", source, models: fallbackOpenAiModels, fetchedAt: new Date().toISOString(), error: "OpenAI API key is not stored yet; showing fallback model names." };
+  }
+  try {
+    const response = await fetch("https://api.openai.com/v1/models", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      cache: "no-store",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const reason = typeof data?.error?.message === "string" ? data.error.message : `OpenAI model list failed with HTTP ${response.status}.`;
+      return { status: "ERROR", source, models: fallbackOpenAiModels, fetchedAt: new Date().toISOString(), error: reason };
+    }
+    const ids = Array.isArray(data?.data)
+      ? data.data.map((item: { id?: unknown }) => typeof item.id === "string" ? item.id : "").filter(Boolean)
+      : [];
+    const models = Array.from(new Set([...ids, ...fallbackOpenAiModels])).sort((a, b) => a.localeCompare(b));
+    return { status: "READY", source, models, fetchedAt: new Date().toISOString() };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "OpenAI model list request failed.";
+    return { status: "ERROR", source, models: fallbackOpenAiModels, fetchedAt: new Date().toISOString(), error: reason };
+  }
+}
+
 export async function validateOpenAiCredential(input: { tenantId?: string; actorRole?: string }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const installation = await query<{ id: string; definitionId: string }>(
