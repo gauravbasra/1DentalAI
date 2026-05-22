@@ -7,8 +7,18 @@ type Props = {
   initialSlug: string;
   appointmentTypes: PmsOnlineSchedulingLinkRow[];
   slotsBySlug: Record<string, PmsOnlineSlot[]>;
+  customForms: PublicCustomForm[];
   booked: boolean;
   utmSource?: string;
+};
+
+type PublicCustomForm = {
+  id: string;
+  name: string;
+  formType: string;
+  requiresSignature: boolean;
+  successMessage: string | null;
+  fields: Array<{ id: string; fieldKey: string; label: string; fieldType: string; required: boolean; placeholder: string | null; helpText: string | null; options: unknown }>;
 };
 
 type Intake = {
@@ -47,7 +57,7 @@ const blankIntake: Intake = {
 
 const referralSources = ["Google search", "Google Maps", "Friend or family", "Insurance directory", "Social media", "Existing patient", "Other"];
 
-export function BookingClient({ initialSlug, appointmentTypes, slotsBySlug, booked, utmSource }: Props) {
+export function BookingClient({ initialSlug, appointmentTypes, slotsBySlug, customForms, booked, utmSource }: Props) {
   const [step, setStep] = useState(booked ? 5 : 0);
   const [selectedSlug, setSelectedSlug] = useState(initialSlug);
   const [selectedDate, setSelectedDate] = useState("");
@@ -57,14 +67,23 @@ export function BookingClient({ initialSlug, appointmentTypes, slotsBySlug, book
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [bookingSummary, setBookingSummary] = useState("");
+  const [customFormAnswers, setCustomFormAnswers] = useState<Record<string, Record<string, string>>>({});
+  const [customFormSignatures, setCustomFormSignatures] = useState<Record<string, string>>({});
 
   const selectedType = appointmentTypes.find((item) => item.slug === selectedSlug) ?? appointmentTypes[0];
+  const selectedCustomForms = useMemo(() => {
+    const ids = new Set(selectedType?.customFormDefinitionIds ?? []);
+    return customForms.filter((form) => ids.has(form.id));
+  }, [customForms, selectedType?.customFormDefinitionIds]);
+  const hasCustomFormStep = selectedCustomForms.length > 0;
+  const reviewStep = hasCustomFormStep ? 5 : 4;
+  const confirmedStep = hasCustomFormStep ? 6 : 5;
   const slots = useMemo(() => slotsBySlug[selectedSlug] ?? [], [slotsBySlug, selectedSlug]);
   const dates = useMemo(() => uniqueDates(slots), [slots]);
   const activeDate = selectedDate || dates[0] || "";
   const daySlots = slots.filter((slot) => dateKey(slot.startsAt) === activeDate).slice(0, 12);
   const selectedSlotObject = slots.find((slot) => `${slot.startsAt}|${slot.providerId}|${slot.operatoryId}` === selectedSlot);
-  const completion = Math.min(100, Math.round(((step + 1) / 5) * 100));
+  const completion = Math.min(100, Math.round(((step + 1) / (confirmedStep || 5)) * 100));
   const brand = String(selectedType?.brandingJson?.brandName ?? "1DentalAI Practice");
 
   function update(field: keyof Intake, value: string) {
@@ -83,12 +102,12 @@ export function BookingClient({ initialSlug, appointmentTypes, slotsBySlug, book
       const response = await fetch(`/api/public-booking/${selectedSlug}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...intake, slot: selectedSlot, utmSource }),
+        body: JSON.stringify({ ...intake, slot: selectedSlot, customFormAnswers, customFormSignatures, utmSource }),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "The selected time is no longer available.");
       setBookingSummary(selectedSlotObject ? formatSlotLong(selectedSlotObject) : "your selected appointment time");
-      setStep(5);
+              setStep(confirmedStep);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Booking failed.");
     } finally {
@@ -119,7 +138,7 @@ export function BookingClient({ initialSlug, appointmentTypes, slotsBySlug, book
             <div className="h-2 rounded-full bg-blue-600 transition-all" style={{ width: `${completion}%` }} />
           </div>
           <nav className="mt-6 grid gap-2 text-sm">
-            {["Patient", "Visit", "Date & time", "Details", "Review"].map((label, index) => (
+            {["Patient", "Visit", "Date & time", "Details", ...(hasCustomFormStep ? ["Forms"] : []), "Review"].map((label, index) => (
               <button
                 key={label}
                 type="button"
@@ -234,7 +253,37 @@ export function BookingClient({ initialSlug, appointmentTypes, slotsBySlug, book
             </Panel>
           ) : null}
 
-          {step === 4 ? (
+          {hasCustomFormStep && step === 4 ? (
+            <Panel eyebrow="Forms" title="Complete the forms requested by the practice">
+              <div className="grid gap-4">
+                {selectedCustomForms.map((form) => (
+                  <div key={form.id} className="rounded-3xl border border-neutral-200 bg-neutral-50 p-4">
+                    <p className="text-lg font-semibold text-neutral-950">{form.name}</p>
+                    <p className="mt-1 text-sm text-neutral-600">{form.formType.replaceAll("_", " ").toLowerCase()}</p>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      {form.fields.map((field) => (
+                        <DynamicFormField
+                          key={field.id}
+                          field={field}
+                          value={customFormAnswers[form.id]?.[field.fieldKey] ?? ""}
+                          onChange={(value) => setCustomFormAnswers((current) => ({
+                            ...current,
+                            [form.id]: { ...(current[form.id] ?? {}), [field.fieldKey]: value },
+                          }))}
+                        />
+                      ))}
+                      {form.requiresSignature ? (
+                        <Field label="Signature name" value={customFormSignatures[form.id] ?? ""} onChange={(value) => setCustomFormSignatures((current) => ({ ...current, [form.id]: value }))} required />
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <FooterAction onBack={() => setStep(3)} onNext={() => setStep(5)} nextDisabled={missingCustomFormFields(selectedCustomForms, customFormAnswers, customFormSignatures).length > 0} />
+            </Panel>
+          ) : null}
+
+          {step === reviewStep ? (
             <Panel eyebrow="Review" title="Confirm the appointment request">
               <div className="grid gap-3 rounded-3xl border border-neutral-200 bg-neutral-50 p-4 text-sm">
                 <Summary label="Visit" value={selectedType.categoryName ?? selectedType.title} />
@@ -242,13 +291,14 @@ export function BookingClient({ initialSlug, appointmentTypes, slotsBySlug, book
                 <Summary label="Patient" value={`${intake.firstName} ${intake.lastName}`.trim() || "Missing patient name"} />
                 <Summary label="Contact" value={`${intake.phone} · ${intake.email}`} />
                 <Summary label="Insurance" value={intake.insuranceStatus === "Yes" ? intake.insurancePayerName || "Insurance payer not entered" : intake.insuranceStatus || "Not answered"} />
+                {hasCustomFormStep ? <Summary label="Forms" value={`${selectedCustomForms.length} attached form${selectedCustomForms.length === 1 ? "" : "s"} completed`} /> : null}
               </div>
               {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
-              <FooterAction onBack={() => setStep(3)} onNext={submitBooking} nextLabel={submitting ? "Booking..." : "Schedule appointment"} nextDisabled={submitting} />
+              <FooterAction onBack={() => setStep(hasCustomFormStep ? 4 : 3)} onNext={submitBooking} nextLabel={submitting ? "Booking..." : "Schedule appointment"} nextDisabled={submitting} />
             </Panel>
           ) : null}
 
-          {step === 5 ? (
+          {step === confirmedStep ? (
             <Panel eyebrow="Confirmed" title="You are on the schedule">
               <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
                 <p className="text-lg font-semibold text-emerald-950">{bookingSummary || "Your appointment has been reserved."}</p>
@@ -293,6 +343,30 @@ function Field({ label, value, onChange, type = "text", placeholder, required }:
 
 function SelectField({ label, value, onChange, options, required }: { label: string; value: string; onChange: (value: string) => void; options: string[]; required?: boolean }) {
   return <label className="grid gap-1 text-xs font-semibold text-neutral-700">{label}{required ? " *" : ""}<select value={value} onChange={(event) => onChange(event.target.value)} className="rounded-2xl border border-neutral-300 px-4 py-3 text-sm outline-none focus:border-blue-600"><option value="">Select</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>;
+}
+
+function DynamicFormField({ field, value, onChange }: { field: PublicCustomForm["fields"][number]; value: string; onChange: (value: string) => void }) {
+  const options = Array.isArray(field.options) ? field.options.map(String) : [];
+  if (["single_select", "select"].includes(field.fieldType)) {
+    return <SelectField label={field.label} value={value} onChange={onChange} options={options} required={field.required} />;
+  }
+  if (["long_text", "textarea"].includes(field.fieldType)) {
+    return (
+      <label className="grid gap-1 text-xs font-semibold text-neutral-700 md:col-span-2">
+        {field.label}{field.required ? " *" : ""}
+        <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={field.placeholder ?? undefined} rows={4} className="rounded-2xl border border-neutral-300 px-4 py-3 text-sm outline-none focus:border-blue-600" />
+        {field.helpText ? <span className="text-xs font-normal text-neutral-500">{field.helpText}</span> : null}
+      </label>
+    );
+  }
+  return <Field label={field.label} value={value} onChange={onChange} type={field.fieldType === "email" ? "email" : field.fieldType === "date" ? "date" : field.fieldType === "phone" ? "tel" : "text"} placeholder={field.placeholder ?? undefined} required={field.required} />;
+}
+
+function missingCustomFormFields(forms: PublicCustomForm[], answers: Record<string, Record<string, string>>, signatures: Record<string, string>) {
+  return forms.flatMap((form) => [
+    ...form.fields.filter((field) => field.required && !String(answers[form.id]?.[field.fieldKey] ?? "").trim()).map((field) => field.label),
+    form.requiresSignature && !String(signatures[form.id] ?? "").trim() ? `${form.name} signature` : null,
+  ]).filter(Boolean);
 }
 
 function Summary({ label, value }: { label: string; value: string }) {

@@ -4,6 +4,7 @@ export const patientEngagementNav: ProductNavItem[] = [
   { href: "/patient-engagement", label: "Today", description: "Front desk operating console" },
   { href: "/patient-engagement/phone", label: "Phone", description: "Calls, voicemail, numbers, devices" },
   { href: "/patient-engagement/webchat", label: "Web chat", description: "Inbox, widget, KB, handoff" },
+  { href: "/patient-engagement/forms", label: "Forms", description: "Builder, intake, insurance" },
   { href: "/patient-engagement/onboarding", label: "Onboarding", description: "Practice setup checklist" },
   { href: "/patient-engagement/settings", label: "Settings", description: "Twilio, AI voice, chat, consent" },
 ];

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { submitCustomForm } from "@/lib/form-builder-repository";
 import { getOnlineSchedulingAvailability, submitOnlineBooking } from "@/lib/pms-repository";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,16 @@ function dobFromParts(input: Record<string, unknown>) {
   if (!month || !day || !year) return undefined;
   if (!/^\d{4}$/.test(year) || !/^\d{2}$/.test(month) || !/^\d{2}$/.test(day)) return undefined;
   return `${year}-${month}-${day}`;
+}
+
+function formAnswerMap(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, Record<string, string>>;
+}
+
+function stringMap(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, string>;
 }
 
 export async function GET(_request: NextRequest, { params }: RouteParams) {
@@ -66,7 +77,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       ].filter(Boolean).join(" | "),
       utmSource: text(body.utmSource) || "public_scheduler",
     });
-    return NextResponse.json({ ok: true, booking });
+    const customFormAnswers = formAnswerMap(body.customFormAnswers);
+    const customFormSignatures = stringMap(body.customFormSignatures);
+    const formSubmissions = await Promise.all(Object.entries(customFormAnswers).map(([formDefinitionId, answers]) => submitCustomForm({
+      formDefinitionId,
+      patientId: booking.patientId,
+      appointmentId: booking.appointmentId,
+      sourceChannel: "PUBLIC_BOOKING",
+      submittedByName: `${text(body.firstName)} ${text(body.lastName)}`.trim(),
+      submittedByEmail: text(body.email),
+      submittedByPhone: text(body.phone),
+      signatureName: customFormSignatures[formDefinitionId] ?? "",
+      answers,
+      ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
+      userAgent: request.headers.get("user-agent") ?? undefined,
+    })));
+    return NextResponse.json({ ok: true, booking, formSubmissions });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Booking failed.";
     return NextResponse.json({ ok: false, error: message }, { status: 409 });

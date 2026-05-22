@@ -13,6 +13,7 @@ export default async function PublicBookingPage({ params, searchParams }: { para
       initialSlug={slug}
       appointmentTypes={experience.appointmentTypes}
       slotsBySlug={experience.slotsBySlug}
+      customForms={experience.customForms}
       booked={query.booked === "1"}
       utmSource={query.utm_source}
     />

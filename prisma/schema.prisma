@@ -621,6 +621,14 @@ model PmsOnlineSchedulingLink {
   intakeQuestionSchema  Json?
   confirmationPolicy    Json?
   brandingJson          Json?
+  workflowKey           String?  @default("standard_booking")
+  workflowName          String?  @default("Standard booking")
+  workflowScreenSchema  Json?
+  requiredFormTemplateIds String[] @default([])
+  customFormDefinitionIds String[] @default([])
+  bookingMode           String?  @default("DIRECT_BOOKING")
+  patientIdentityPolicy String?  @default("PHONE_EMAIL_DOB")
+  screenTheme           Json?
   notes                 String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -628,6 +636,96 @@ model PmsOnlineSchedulingLink {
   @@unique([tenantId, slug])
   @@index([tenantId, status, sourceChannel])
   @@index([appointmentCategoryId, providerId])
+}
+
+model CustomFormDefinition {
+  id               String   @id
+  tenantId         String
+  formKey          String
+  name             String
+  formType         String   @default("CUSTOM")
+  status           String   @default("DRAFT")
+  version          Int      @default(1)
+  description      String?
+  storageTableName String
+  workflowUse      String   @default("GENERAL")
+  visibility       String   @default("STAFF_AND_PUBLIC_LINK")
+  requiresSignature Boolean @default(false)
+  allowAnonymous   Boolean  @default(true)
+  successMessage   String?
+  createdByRole    String   @default("practice_manager")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([tenantId, formKey, version])
+  @@index([tenantId, status, formType])
+  @@index([tenantId, workflowUse])
+}
+
+model CustomFormField {
+  id               String   @id
+  tenantId         String
+  formDefinitionId String
+  fieldKey         String
+  label            String
+  fieldType        String
+  required         Boolean  @default(false)
+  placeholder      String?
+  helpText         String?
+  options          Json?
+  validation       Json?
+  displayOrder     Int      @default(0)
+  conditionalLogic Json?
+  pmsTargetModel   String?
+  pmsTargetField   String?
+  phiCategory      String   @default("ADMINISTRATIVE")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([formDefinitionId, fieldKey])
+  @@index([formDefinitionId, displayOrder])
+}
+
+model CustomFormSubmission {
+  id               String   @id
+  tenantId         String
+  formDefinitionId String
+  storageTableName String
+  patientId        String?
+  appointmentId    String?
+  conversationId   String?
+  sourceChannel    String   @default("STAFF")
+  submittedByName  String?
+  submittedByEmail String?
+  submittedByPhone String?
+  status           String   @default("SUBMITTED")
+  signatureName    String?
+  signatureAt      DateTime?
+  ipAddress        String?
+  userAgent        String?
+  rawPayload       Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([formDefinitionId, createdAt])
+  @@index([patientId, createdAt])
+  @@index([tenantId, status, createdAt])
+}
+
+model CustomFormSubmissionValue {
+  id               String   @id
+  tenantId         String
+  submissionId     String
+  formDefinitionId String
+  fieldId          String?
+  fieldKey         String
+  fieldType        String
+  answerText       String?
+  answerJson       Json?
+  createdAt        DateTime @default(now())
+
+  @@unique([submissionId, fieldKey])
+  @@index([formDefinitionId, fieldKey])
 }
 
 model PmsOnlineBooking {

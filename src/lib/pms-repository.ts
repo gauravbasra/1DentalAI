@@ -159,6 +159,14 @@ export type PmsOnlineSchedulingLinkRow = {
   intakeQuestionSchema: Record<string, unknown> | null;
   confirmationPolicy: Record<string, unknown> | null;
   brandingJson: Record<string, unknown> | null;
+  workflowKey: string | null;
+  workflowName: string | null;
+  workflowScreenSchema: Record<string, unknown> | null;
+  requiredFormTemplateIds: string[];
+  customFormDefinitionIds: string[];
+  bookingMode: string | null;
+  patientIdentityPolicy: string | null;
+  screenTheme: Record<string, unknown> | null;
   notes: string | null;
   categoryName: string | null;
   defaultMinutes: number | null;
@@ -180,6 +188,14 @@ export type PmsPublicSchedulingExperience = {
   link: PmsOnlineSchedulingLinkRow | null;
   appointmentTypes: PmsOnlineSchedulingLinkRow[];
   slotsBySlug: Record<string, PmsOnlineSlot[]>;
+  customForms: Array<{
+    id: string;
+    name: string;
+    formType: string;
+    requiresSignature: boolean;
+    successMessage: string | null;
+    fields: Array<{ id: string; fieldKey: string; label: string; fieldType: string; required: boolean; placeholder: string | null; helpText: string | null; options: unknown; displayOrder: number }>;
+  }>;
 };
 
 export function cents(amount: number) {
@@ -1521,6 +1537,13 @@ export async function createAppointmentHold(input: {
   appointmentType: string;
   categoryId?: string;
   notes?: string;
+  workflowKey?: string;
+  workflowName?: string;
+  workflowScreenSchema?: Record<string, unknown>;
+  customFormDefinitionIds?: string[];
+  bookingMode?: string;
+  patientIdentityPolicy?: string;
+  screenTheme?: Record<string, unknown>;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("appt");
@@ -1991,7 +2014,7 @@ export async function getOnlineSchedulingLink(slug: string, tenantId = defaultTe
 
 export async function getPublicSchedulingExperience(slug: string, tenantId = defaultTenantId): Promise<PmsPublicSchedulingExperience> {
   const link = await getOnlineSchedulingLink(slug, tenantId);
-  if (!link) return { link: null, appointmentTypes: [], slotsBySlug: {} };
+  if (!link) return { link: null, appointmentTypes: [], slotsBySlug: {}, customForms: [] };
   const appointmentTypes = await query<PmsOnlineSchedulingLinkRow>(
     `select l.*,
       c."name" as "categoryName",
@@ -2019,8 +2042,25 @@ export async function getPublicSchedulingExperience(slug: string, tenantId = def
   );
   const limitedTypes = appointmentTypes.rows.slice(0, 8);
   const slotsBySlug = Object.fromEntries(await Promise.all(limitedTypes.map(async (type) => [type.slug, (await getOnlineSchedulingAvailability(type.slug, tenantId)).slice(0, 48)] as const)));
+  const customFormIds = Array.from(new Set(limitedTypes.flatMap((type) => type.customFormDefinitionIds ?? []).filter(Boolean)));
+  const [forms, fields] = customFormIds.length ? await Promise.all([
+    query<{ id: string; name: string; formType: string; requiresSignature: boolean; successMessage: string | null }>(
+      `select "id", "name", "formType", "requiresSignature", "successMessage"
+       from "CustomFormDefinition"
+       where "tenantId" = $1 and "status" = 'ACTIVE' and "id" = any($2)`,
+      [tenantId, customFormIds],
+    ),
+    query<{ id: string; formDefinitionId: string; fieldKey: string; label: string; fieldType: string; required: boolean; placeholder: string | null; helpText: string | null; options: unknown; displayOrder: number }>(
+      `select "id", "formDefinitionId", "fieldKey", "label", "fieldType", "required", "placeholder", "helpText", "options", "displayOrder"
+       from "CustomFormField"
+       where "tenantId" = $1 and "formDefinitionId" = any($2)
+       order by "formDefinitionId", "displayOrder"`,
+      [tenantId, customFormIds],
+    ),
+  ]) : [{ rows: [] }, { rows: [] }];
+  const customForms = forms.rows.map((form) => ({ ...form, fields: fields.rows.filter((field) => field.formDefinitionId === form.id) }));
   await addAudit(tenantId, "public_visitor", "ONLINE_SCHEDULING_EXPERIENCE_VIEWED", "PmsOnlineSchedulingLink", link.id, "ALLOWED").catch(() => null);
-  return { link, appointmentTypes: limitedTypes, slotsBySlug };
+  return { link, appointmentTypes: limitedTypes, slotsBySlug, customForms };
 }
 
 export async function getOnlineSchedulingAvailability(slug: string, tenantId = defaultTenantId): Promise<PmsOnlineSlot[]> {
@@ -2111,13 +2151,20 @@ export async function createOnlineSchedulingLink(input: {
   requiresInsurance?: boolean;
   acceptedPayerNames?: string;
   notes?: string;
+  workflowKey?: string;
+  workflowName?: string;
+  workflowScreenSchema?: Record<string, unknown>;
+  customFormDefinitionIds?: string[];
+  bookingMode?: string;
+  patientIdentityPolicy?: string;
+  screenTheme?: Record<string, unknown>;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const slug = input.slug.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const result = await query(
     `insert into "PmsOnlineSchedulingLink"
-       ("id", "tenantId", "slug", "title", "audience", "sourceChannel", "status", "appointmentCategoryId", "providerId", "locationId", "earliestBookingDays", "maxBookingDays", "slotIntervalMinutes", "reservationFeeCents", "requiresInsurance", "acceptedPayerNames", "notes", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, 'ACTIVE', $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, current_timestamp)
+       ("id", "tenantId", "slug", "title", "audience", "sourceChannel", "status", "appointmentCategoryId", "providerId", "locationId", "earliestBookingDays", "maxBookingDays", "slotIntervalMinutes", "reservationFeeCents", "requiresInsurance", "acceptedPayerNames", "notes", "workflowKey", "workflowName", "workflowScreenSchema", "customFormDefinitionIds", "bookingMode", "patientIdentityPolicy", "screenTheme", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'ACTIVE', $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17, $18, $19::jsonb, $20, $21, $22, $23::jsonb, current_timestamp)
      on conflict ("tenantId", "slug") do update set
        "title" = excluded."title",
        "audience" = excluded."audience",
@@ -2132,6 +2179,13 @@ export async function createOnlineSchedulingLink(input: {
        "requiresInsurance" = excluded."requiresInsurance",
        "acceptedPayerNames" = excluded."acceptedPayerNames",
        "notes" = excluded."notes",
+       "workflowKey" = excluded."workflowKey",
+       "workflowName" = excluded."workflowName",
+       "workflowScreenSchema" = excluded."workflowScreenSchema",
+       "customFormDefinitionIds" = excluded."customFormDefinitionIds",
+       "bookingMode" = excluded."bookingMode",
+       "patientIdentityPolicy" = excluded."patientIdentityPolicy",
+       "screenTheme" = excluded."screenTheme",
        "updatedAt" = current_timestamp
      returning *`,
     [
@@ -2151,6 +2205,13 @@ export async function createOnlineSchedulingLink(input: {
       Boolean(input.requiresInsurance),
       payerNamesJson(input.acceptedPayerNames),
       input.notes?.trim() || null,
+      input.workflowKey || "new_patient_offer",
+      input.workflowName || "New patient offer",
+      JSON.stringify(input.workflowScreenSchema ?? {}),
+      input.customFormDefinitionIds ?? [],
+      input.bookingMode || "DIRECT_BOOKING",
+      input.patientIdentityPolicy || "PHONE_EMAIL_DOB",
+      JSON.stringify(input.screenTheme ?? {}),
     ],
   );
   await addAudit(tenantId, "front_desk", "ONLINE_SCHEDULING_LINK_UPSERTED", "PmsOnlineSchedulingLink", result.rows[0].id, "ALLOWED");
