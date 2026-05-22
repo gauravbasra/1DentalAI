@@ -247,6 +247,22 @@ model ConnectorCredentialVault {
   @@unique([tenantId, installationId, providerKey, credentialLabel])
 }
 
+model ZoomNotificationEvent {
+  id               String   @id
+  tenantId         String   @default("tenant_1dentalai_production")
+  event            String
+  eventTs          DateTime?
+  payload          Json
+  signatureStatus  String   @default("NOT_CONFIGURED")
+  validationStatus String   @default("NOT_VALIDATION_EVENT")
+  sourceIp         String?
+  userAgent        String?
+  receivedAt       DateTime @default(now())
+
+  @@index([tenantId, receivedAt])
+  @@index([event])
+}
+
 model ConnectorCapability {
   id             String   @id @default(cuid())
   tenantId       String
