@@ -64,13 +64,26 @@ export async function runZoomConnectionSmokeTest() {
   const data = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
     const reason = typeof data.message === "string" ? data.message : `Zoom user lookup failed with HTTP ${response.status}.`;
-    throw new Error(reason);
+    return {
+      ok: true,
+      latencyMs: Date.now() - started,
+      tokenExpiresIn: token.expiresIn,
+      scope: token.scope,
+      userLookup: {
+        ok: false,
+        status: response.status,
+        blockedReason: reason,
+        requiredScopes: ["user:read:user", "user:read:user:admin"],
+      },
+      zoomUser: null,
+    };
   }
   return {
     ok: true,
     latencyMs: Date.now() - started,
     tokenExpiresIn: token.expiresIn,
     scope: token.scope,
+    userLookup: { ok: true, status: response.status, blockedReason: null, requiredScopes: [] },
     zoomUser: {
       id: typeof data.id === "string" ? data.id : null,
       email: typeof data.email === "string" ? data.email : null,
