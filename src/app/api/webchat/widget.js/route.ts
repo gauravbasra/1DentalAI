@@ -44,6 +44,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     sending: false,
     settings: null,
     messages: [],
+    editingIdentity: false,
   };
   var root = document.createElement('div');
   root.id = 'one-dental-ai-webchat';
@@ -76,6 +77,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       '.head{background:#0a0a0a;color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px}' +
       '.title{font-size:14px;font-weight:850}.sub{font-size:11px;color:#cbd5e1;margin-top:2px}.close{background:transparent;border:0;color:#fff;font-size:24px;line-height:1;cursor:pointer}' +
       '.identity{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border-bottom:1px solid #e5e5e5;background:#fafafa}.identity input,.identity select{min-width:0;border:1px solid #d4d4d4;border-radius:9px;padding:10px;font-size:13px;background:#fff}.identity input:first-child{grid-column:1/-1}.wide{grid-column:1/-1}.consent{grid-column:1/-1;display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start;border:1px solid #e5e5e5;border-radius:9px;background:#fff;padding:9px;font-size:11px;line-height:1.35;color:#525252}.consent input{margin-top:2px}.consent b{color:#171717}' +
+      '.contactbar{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e5e5e5;background:#fff;padding:10px 12px}.contacttext{min-width:0}.contactname{font-size:13px;font-weight:850;color:#171717;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.contactmeta{margin-top:2px;font-size:11px;color:#737373;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.editbtn{border:1px solid #d4d4d4;border-radius:999px;background:#fff;padding:7px 10px;font-size:11px;font-weight:850;color:#171717;cursor:pointer}' +
       '.chips{display:flex;gap:7px;overflow-x:auto;padding:10px 12px;border-bottom:1px solid #e5e5e5;background:#fff}.chip{white-space:nowrap;border:1px solid #d4d4d4;background:#fff;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}.chip:hover{border-color:'+primary+';color:'+primary+'}' +
       '.msgs{flex:1;overflow:auto;padding:14px;background:#f5f5f4;display:flex;flex-direction:column;gap:10px}.msg{max-width:86%;border-radius:13px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap}.bot{align-self:flex-start;background:#fff;border:1px solid #e5e5e5}.me{align-self:flex-end;background:'+primary+';color:#fff}' +
       '.composer{display:grid;grid-template-columns:1fr auto;gap:8px;padding:12px;border-top:1px solid #e5e5e5;background:#fff}.composer textarea{height:44px;resize:none;border:1px solid #d4d4d4;border-radius:10px;padding:10px;font-size:13px;font-family:inherit}.composer button{border:0;border-radius:10px;background:#0a0a0a;color:#fff;font-weight:850;padding:0 14px;cursor:pointer}.composer button:disabled{opacity:.55;cursor:not-allowed}.meta{padding:9px 12px;font-size:10px;line-height:1.35;color:#525252;border-top:1px solid #eee;background:#fff;white-space:pre-line}' +
@@ -102,7 +104,8 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
 
   function panel(){
     var messages = h('div', { class: 'msgs' }, []);
-    if (!state.session) {
+    var readyForChat = canChat();
+    if (!readyForChat) {
       messages.appendChild(h('div', { class: 'msg bot', text: 'Hi. I can answer practice questions, capture appointment requests, and route urgent, insurance, or financing questions to the team. I will not finalize appointments, estimates, payments, or clinical advice without staff review.' }, []));
     }
     (state.messages || []).forEach(function(m){
@@ -116,7 +119,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
         ]),
         h('button', { class:'close', onclick: toggle, 'aria-label':'Close chat', text:'×' }, [])
       ]),
-      h('div', { class: 'identity' }, [
+      readyForChat && !state.editingIdentity ? contactBar() : h('div', { class: 'identity' }, [
         input('visitorName','Name'),
         input('visitorPhone','Phone'),
         input('visitorEmail','Email'),
@@ -134,6 +137,21 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       ]),
       h('div', { class:'meta' }, ['I can help with booking handoff, chart note routing context, insurance follow-up questions, and basic practice guidance.']),
       h('div', { class:'meta' }, ['Call 911 or emergency services for life-threatening symptoms.'])
+    ]);
+  }
+
+  function canChat(){
+    return state.visitor.consentAccepted === true && Boolean((state.visitor.visitorName || '').trim()) && Boolean(((state.visitor.visitorPhone || '').trim()) || ((state.visitor.visitorEmail || '').trim()));
+  }
+
+  function contactBar(){
+    var contact = [state.visitor.visitorPhone, state.visitor.visitorEmail].filter(Boolean).join(' · ') || 'contact captured';
+    return h('div', { class:'contactbar' }, [
+      h('div', { class:'contacttext' }, [
+        h('div', { class:'contactname', text: state.visitor.visitorName || 'Website visitor' }, []),
+        h('div', { class:'contactmeta', text: contact + ' · ' + (state.visitor.serviceLine || 'General question') }, []),
+      ]),
+      h('button', { class:'editbtn', type:'button', onclick:function(){ state.editingIdentity = true; render(); }, text:'Edit' }, [])
     ]);
   }
 
@@ -155,11 +173,11 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
   }
 
   function input(key, label){
-    return h('input', { placeholder: label, value: state.visitor[key] || '', oninput: function(event){ state.visitor[key] = event.target.value; saveVisitorState(); }, class: arguments[2] || '' }, []);
+    return h('input', { placeholder: label, value: state.visitor[key] || '', oninput: function(event){ state.visitor[key] = event.target.value; saveVisitorState(); if (canChat()) state.editingIdentity = false; }, class: arguments[2] || '' }, []);
   }
 
   function select(key, label, options){
-    var el = h('select', { 'aria-label': label, onchange: function(event){ state.visitor[key] = event.target.value; saveVisitorState(); } }, []);
+    var el = h('select', { 'aria-label': label, onchange: function(event){ state.visitor[key] = event.target.value; saveVisitorState(); if (canChat()) state.editingIdentity = false; } }, []);
     el.appendChild(h('option', { value:'', text: label }, []));
     options.forEach(function(option){
       var value = option[0];
@@ -185,7 +203,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
   function consentNotice(){
     var notice = (state.settings && state.settings.privacyNotice) || {};
     return h('label', { class:'consent' }, [
-      h('input', { type:'checkbox', checked: state.visitor.consentAccepted ? 'checked' : null, onchange: function(event){ state.visitor.consentAccepted = event.target.checked; saveVisitorState(); render(); } }, []),
+      h('input', { type:'checkbox', checked: state.visitor.consentAccepted ? 'checked' : null, onchange: function(event){ state.visitor.consentAccepted = event.target.checked; saveVisitorState(); if (canChat()) state.editingIdentity = false; render(); } }, []),
       h('span', {}, [
         h('b', { text:'Privacy notice: ' }, []),
         document.createTextNode(notice.label || 'This chat is saved for staff follow-up and does not replace emergency care, diagnosis, payments, or final appointment changes.')
@@ -330,6 +348,12 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
 
     if (!state.visitor.consentAccepted) {
       state.messages.push({ senderType:'ASSISTANT', body:'Please accept the privacy notice so I can save this chat for staff follow-up.' });
+      render();
+      return;
+    }
+    if (!canChat()) {
+      state.editingIdentity = true;
+      state.messages.push({ senderType:'ASSISTANT', body:'Please add your name and either phone or email so the practice can follow up if the chat disconnects.' });
       render();
       return;
     }
