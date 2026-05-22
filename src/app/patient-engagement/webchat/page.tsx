@@ -9,11 +9,14 @@ import {
   crawlKnowledgePage,
   createWebchatAppointmentHandoff,
   getConversationTranscript,
+  getWebchatAiRuntimeSettings,
   postStaffWebchatEntry,
+  updateWebchatAiRuntimeSettings,
   updateKnowledgeSourceReview,
   updateWebchatChannelSetting,
   upsertWebchatLeadForm,
   upsertWebchatSchedulingRule,
+  type WebchatAiRuntimeSettings,
 } from "@/lib/webchat/repository";
 
 export const dynamic = "force-dynamic";
@@ -101,13 +104,68 @@ async function channelSettingAction(formData: FormData) {
   revalidatePath("/patient-engagement/webchat");
 }
 
+async function aiRuntimeSettingsAction(formData: FormData) {
+  "use server";
+  const parseNumber = (name: string, fallback: number) => {
+    const value = Number(formData.get(name) ?? fallback);
+    return Number.isFinite(value) ? value : fallback;
+  };
+  const parseBoolean = (name: string, fallback: boolean) => {
+    const value = String(formData.get(name) ?? String(fallback));
+    return value === "true";
+  };
+  const parseCsv = (name: string, fallback: string[]) => {
+    const value = String(formData.get(name) ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+    return value.length ? value : fallback;
+  };
+  await updateWebchatAiRuntimeSettings({
+    actorRole: "practice_manager",
+    llmSettings: {
+      textModel: String(formData.get("textModel") ?? "gpt-4.1").trim(),
+      reasoningEffort: String(formData.get("reasoningEffort") ?? "none").trim(),
+      temperature: parseNumber("temperature", 0.25),
+      maxOutputTokens: Math.round(parseNumber("maxOutputTokens", 280)),
+      responseStyle: String(formData.get("responseStyle") ?? "concise_front_desk").trim(),
+      allowModelKnowledge: parseBoolean("allowModelKnowledge", false),
+      allowWebSearch: parseBoolean("allowWebSearch", false),
+    },
+    voiceSettings: {
+      realtimeModel: String(formData.get("realtimeModel") ?? "gpt-realtime-mini").trim(),
+      transcriptionModel: String(formData.get("transcriptionModel") ?? "gpt-realtime-whisper").trim(),
+      voice: String(formData.get("voice") ?? "alloy").trim(),
+      speed: parseNumber("speed", 1),
+      turnDetection: String(formData.get("turnDetection") ?? "server_vad").trim(),
+      silenceTimeoutMs: Math.round(parseNumber("silenceTimeoutMs", 900)),
+      bargeIn: parseBoolean("bargeIn", true),
+      recordingPolicy: String(formData.get("recordingPolicy") ?? "consent_required").trim(),
+    },
+    promptPolicy: {
+      systemPrompt: String(formData.get("systemPrompt") ?? "").trim(),
+      chatPrompt: String(formData.get("chatPrompt") ?? "").trim(),
+      voicePrompt: String(formData.get("voicePrompt") ?? "").trim(),
+      handoffPrompt: String(formData.get("handoffPrompt") ?? "").trim(),
+    },
+    ragPolicy: {
+      retrievalMode: String(formData.get("retrievalMode") ?? "APPROVED_LOCAL_KB_ONLY").trim(),
+      minimumChunks: Math.round(parseNumber("minimumChunks", 1)),
+      maxChunks: Math.round(parseNumber("maxChunks", 5)),
+      requireKnowledgeForGeneralAnswers: parseBoolean("requireKnowledgeForGeneralAnswers", true),
+      blockedWhenNoKnowledge: String(formData.get("blockedWhenNoKnowledge") ?? "").trim(),
+      allowedSourceStatuses: parseCsv("allowedSourceStatuses", ["READY_FOR_RETRIEVAL"]),
+      internetKnowledge: "DISABLED",
+      externalSearch: "DISABLED",
+    },
+  });
+  revalidatePath("/patient-engagement/webchat");
+}
+
 export default async function PatientEngagementWebchatPage({
   searchParams,
 }: {
   searchParams: Promise<{ conversationId?: string; view?: string; q?: string; channel?: string }>;
 }) {
   const params = await searchParams;
-  const view = ["inbox", "knowledge", "forms", "install"].includes(params.view ?? "") ? String(params.view) : "inbox";
+  const view = ["inbox", "knowledge", "forms", "install", "ai-settings"].includes(params.view ?? "") ? String(params.view) : "inbox";
   const center = await getPhoneOperatingCenter();
   const allChats = (center.webChats ?? []) as WebChatRow[];
   const query = String(params.q ?? "").trim().toLowerCase();
@@ -126,6 +184,7 @@ export default async function PatientEngagementWebchatPage({
   const forms = (center.leadForms ?? []) as LeadFormRow[];
   const schedulingRules = (center.schedulingRules ?? []) as SchedulingRuleRow[];
   const channel = ((center.channelSettings ?? []) as ChannelRow[]).find((row) => row.channel === "WEB_CHAT");
+  const aiSettings = await getWebchatAiRuntimeSettings();
   const installScript = `<script async src="https://app.1dentalai.com/api/webchat/widget.js?tenant=tenant_1dentalai_production&v=20260522-patient-chat-clean"></script>`;
 
   return (
@@ -136,6 +195,7 @@ export default async function PatientEngagementWebchatPage({
           ["inbox", "Inbox"],
           ["knowledge", "Knowledge base"],
           ["forms", "Lead forms and scheduling"],
+          ["ai-settings", "AI runtime"],
           ["install", "Widget install"],
         ].map(([key, label]) => (
           <Link
@@ -374,6 +434,10 @@ export default async function PatientEngagementWebchatPage({
           </WorkSurface>
         </section>
       ) : null}
+
+      {view === "ai-settings" ? (
+        <AiRuntimePanel settings={aiSettings} />
+      ) : null}
     </PatientEngagementShell>
   );
 }
@@ -430,6 +494,79 @@ type LeadFormRow = { id: string; name: string; serviceLine: string; status: stri
 type SchedulingRuleRow = { id: string; name: string; status: string; bookingWindowDays: number; pmsWritebackStatus: string };
 type ChannelRow = { channel: string; displayName: string; theme: unknown; nlpMode: string; connectorStatus: string; knowledgeBaseStatus: string; schedulingStatus: string; formsStatus: string; nextAction: string };
 
+function AiRuntimePanel({ settings }: { settings: WebchatAiRuntimeSettings }) {
+  return (
+    <form action={aiRuntimeSettingsAction} className="mt-5 space-y-5">
+      <WorkSurface title="AI runtime settings" eyebrow="OpenAI, prompt policy, and response behavior">
+        <div className="mb-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+          <p className="text-sm font-semibold text-emerald-950">Responses are locked to approved local knowledge.</p>
+          <p className="mt-1 text-sm leading-6 text-emerald-800">
+            Web search is disabled. General model knowledge is disabled by default. If the approved knowledge base does not contain an answer, the assistant must ask a clarifying question or hand the conversation to staff.
+          </p>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-4">
+          <Input name="textModel" label="Text model" defaultValue={settings.llmSettings.textModel} />
+          <Select name="reasoningEffort" label="Reasoning effort" options={["none", "minimal", "low", "medium", "high"]} defaultValue={settings.llmSettings.reasoningEffort} />
+          <Input name="temperature" label="Temperature" type="number" step="0.05" min="0" max="2" defaultValue={String(settings.llmSettings.temperature)} />
+          <Input name="maxOutputTokens" label="Max output tokens" type="number" min="80" max="2000" defaultValue={String(settings.llmSettings.maxOutputTokens)} />
+        </div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          <Input name="responseStyle" label="Response style" defaultValue={settings.llmSettings.responseStyle} />
+          <Select name="allowModelKnowledge" label="General model knowledge" options={["false", "true"]} defaultValue={String(settings.llmSettings.allowModelKnowledge)} />
+          <Select name="allowWebSearch" label="Web search" options={["false", "true"]} defaultValue={String(settings.llmSettings.allowWebSearch)} />
+        </div>
+      </WorkSurface>
+
+      <section className="grid gap-5 xl:grid-cols-2">
+        <WorkSurface title="Prompt policy" eyebrow="Chat and voice instructions">
+          <div className="grid gap-4">
+            <Textarea name="systemPrompt" label="System prompt" defaultValue={settings.promptPolicy.systemPrompt} rows={5} />
+            <Textarea name="chatPrompt" label="Webchat prompt" defaultValue={settings.promptPolicy.chatPrompt} rows={4} />
+            <Textarea name="voicePrompt" label="Voice prompt" defaultValue={settings.promptPolicy.voicePrompt} rows={4} />
+            <Textarea name="handoffPrompt" label="Staff handoff policy" defaultValue={settings.promptPolicy.handoffPrompt} rows={4} />
+          </div>
+        </WorkSurface>
+
+        <WorkSurface title="Knowledge base policy" eyebrow="Local RAG only">
+          <div className="grid gap-4">
+            <Input name="retrievalMode" label="Retrieval mode" defaultValue={settings.ragPolicy.retrievalMode} />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input name="minimumChunks" label="Minimum chunks" type="number" min="0" max="10" defaultValue={String(settings.ragPolicy.minimumChunks)} />
+              <Input name="maxChunks" label="Max chunks" type="number" min="1" max="12" defaultValue={String(settings.ragPolicy.maxChunks)} />
+            </div>
+            <Select name="requireKnowledgeForGeneralAnswers" label="Require knowledge for answers" options={["true", "false"]} defaultValue={String(settings.ragPolicy.requireKnowledgeForGeneralAnswers)} />
+            <Input name="allowedSourceStatuses" label="Allowed source statuses" defaultValue={settings.ragPolicy.allowedSourceStatuses.join(", ")} />
+            <Textarea name="blockedWhenNoKnowledge" label="No-knowledge response" defaultValue={settings.ragPolicy.blockedWhenNoKnowledge} rows={4} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Context label="Internet knowledge" value={settings.ragPolicy.internetKnowledge} detail="Hard-coded disabled in the save action." />
+              <Context label="External search" value={settings.ragPolicy.externalSearch} detail="No web search tool is sent to the model." />
+            </div>
+          </div>
+        </WorkSurface>
+      </section>
+
+      <WorkSurface title="Voice settings" eyebrow="Realtime assistant behavior">
+        <div className="grid gap-4 lg:grid-cols-4">
+          <Input name="realtimeModel" label="Realtime model" defaultValue={settings.voiceSettings.realtimeModel} />
+          <Input name="transcriptionModel" label="Transcription model" defaultValue={settings.voiceSettings.transcriptionModel} />
+          <Input name="voice" label="Voice" defaultValue={settings.voiceSettings.voice} />
+          <Input name="speed" label="Speed" type="number" step="0.05" min="0.6" max="1.4" defaultValue={String(settings.voiceSettings.speed)} />
+        </div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-4">
+          <Select name="turnDetection" label="Turn detection" options={["server_vad", "semantic_vad"]} defaultValue={settings.voiceSettings.turnDetection} />
+          <Input name="silenceTimeoutMs" label="Silence timeout ms" type="number" min="300" max="3000" defaultValue={String(settings.voiceSettings.silenceTimeoutMs)} />
+          <Select name="bargeIn" label="Barge in" options={["true", "false"]} defaultValue={String(settings.voiceSettings.bargeIn)} />
+          <Select name="recordingPolicy" label="Recording policy" options={["consent_required", "disabled", "practice_policy"]} defaultValue={settings.voiceSettings.recordingPolicy} />
+        </div>
+      </WorkSurface>
+
+      <div className="sticky bottom-4 flex justify-end">
+        <button className="rounded-xl bg-neutral-950 px-5 py-3 text-sm font-semibold text-white shadow-lg">Save AI runtime settings</button>
+      </div>
+    </form>
+  );
+}
+
 function MessageBubble({ message, visitorLabel }: { message: WebChatMessageRow; visitorLabel: string }) {
   const isIncoming = message.senderType === "VISITOR";
   const isNote = message.senderType === "STAFF_NOTE";
@@ -485,11 +622,20 @@ function Context({ label, value, detail }: { label: string; value: string; detai
   );
 }
 
-function Input({ name, label, placeholder, defaultValue, required }: { name: string; label: string; placeholder?: string; defaultValue?: string; required?: boolean }) {
+function Input({ name, label, placeholder, defaultValue, required, type = "text", step, min, max }: { name: string; label: string; placeholder?: string; defaultValue?: string; required?: boolean; type?: string; step?: string; min?: string; max?: string }) {
   return (
     <label className="block">
       <span className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</span>
-      <input name={name} placeholder={placeholder} defaultValue={defaultValue} required={required} className="mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100" />
+      <input type={type} step={step} min={min} max={max} name={name} placeholder={placeholder} defaultValue={defaultValue} required={required} className="mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100" />
+    </label>
+  );
+}
+
+function Textarea({ name, label, defaultValue, rows = 4 }: { name: string; label: string; defaultValue?: string; rows?: number }) {
+  return (
+    <label className="block">
+      <span className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</span>
+      <textarea name={name} rows={rows} defaultValue={defaultValue} className="mt-1 w-full resize-y rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100" />
     </label>
   );
 }

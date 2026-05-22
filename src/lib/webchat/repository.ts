@@ -714,6 +714,207 @@ export async function updateWebchatChannelSetting(input: {
   await addWebchatAudit(tenantId, "WEBCHAT_CHANNEL_SETTING_UPDATED", "WEB_CHAT", "ALLOWED", { connectorStatus: "CONNECTOR_REQUIRED" });
 }
 
+export type WebchatAiRuntimeSettings = {
+  llmSettings: {
+    textModel: string;
+    reasoningEffort: string;
+    temperature: number;
+    maxOutputTokens: number;
+    responseStyle: string;
+    allowModelKnowledge: boolean;
+    allowWebSearch: boolean;
+  };
+  voiceSettings: {
+    realtimeModel: string;
+    transcriptionModel: string;
+    voice: string;
+    speed: number;
+    turnDetection: string;
+    silenceTimeoutMs: number;
+    bargeIn: boolean;
+    recordingPolicy: string;
+  };
+  promptPolicy: {
+    systemPrompt: string;
+    chatPrompt: string;
+    voicePrompt: string;
+    handoffPrompt: string;
+  };
+  ragPolicy: {
+    retrievalMode: string;
+    minimumChunks: number;
+    maxChunks: number;
+    requireKnowledgeForGeneralAnswers: boolean;
+    blockedWhenNoKnowledge: string;
+    allowedSourceStatuses: string[];
+    internetKnowledge: string;
+    externalSearch: string;
+  };
+};
+
+export function defaultWebchatAiRuntimeSettings(): WebchatAiRuntimeSettings {
+  return {
+    llmSettings: {
+      textModel: "gpt-4.1",
+      reasoningEffort: "none",
+      temperature: 0.25,
+      maxOutputTokens: 280,
+      responseStyle: "concise_front_desk",
+      allowModelKnowledge: false,
+      allowWebSearch: false,
+    },
+    voiceSettings: {
+      realtimeModel: "gpt-realtime-mini",
+      transcriptionModel: "gpt-realtime-whisper",
+      voice: "alloy",
+      speed: 1,
+      turnDetection: "server_vad",
+      silenceTimeoutMs: 900,
+      bargeIn: true,
+      recordingPolicy: "consent_required",
+    },
+    promptPolicy: {
+      systemPrompt: "You are the patient-facing AI assistant for a dental practice. Speak like a calm, helpful front desk team member. Use only the approved knowledge base and scheduling tools. Do not diagnose, prescribe, promise insurance coverage, mention internal systems, or invent facts. If approved knowledge is missing, ask a clarifying question or offer staff handoff.",
+      chatPrompt: "For website chat, answer briefly, collect the minimum details needed, and route booking requests through the scheduling engine.",
+      voicePrompt: "For voice, use short natural sentences, confirm names and phone numbers carefully, and offer live staff handoff when the caller asks for a person or when policy requires review.",
+      handoffPrompt: "Escalate to staff for emergencies, low confidence, billing disputes, clinical advice, insurance guarantees, angry sentiment, same-day reschedules, or missing approved knowledge.",
+    },
+    ragPolicy: {
+      retrievalMode: "APPROVED_LOCAL_KB_ONLY",
+      minimumChunks: 1,
+      maxChunks: 5,
+      requireKnowledgeForGeneralAnswers: true,
+      blockedWhenNoKnowledge: "I want to answer that accurately. I do not have an approved practice knowledge article for that yet, so I can collect your question and have the dental team follow up.",
+      allowedSourceStatuses: ["READY_FOR_RETRIEVAL"],
+      internetKnowledge: "DISABLED",
+      externalSearch: "DISABLED",
+    },
+  };
+}
+
+function asObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringSetting(source: Record<string, unknown>, key: string, fallback: string) {
+  const value = source[key];
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function numberSetting(source: Record<string, unknown>, key: string, fallback: number, min: number, max: number) {
+  const value = Number(source[key]);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function booleanSetting(source: Record<string, unknown>, key: string, fallback: boolean) {
+  const value = source[key];
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function arraySetting(source: Record<string, unknown>, key: string, fallback: string[]) {
+  const value = source[key];
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : fallback;
+}
+
+export async function getWebchatAiRuntimeSettings(tenantId = defaultTenantId): Promise<WebchatAiRuntimeSettings> {
+  const defaults = defaultWebchatAiRuntimeSettings();
+  const result = await query<{
+    llmSettings: unknown;
+    voiceSettings: unknown;
+    promptPolicy: unknown;
+    ragPolicy: unknown;
+  }>(
+    `select "llmSettings", "voiceSettings", "promptPolicy", "ragPolicy"
+     from "PatientEngagementChannelSetting"
+     where "tenantId" = $1 and "channel" = 'WEB_CHAT'
+     limit 1`,
+    [tenantId],
+  );
+  const row = result.rows[0];
+  if (!row) return defaults;
+  const llm = asObject(row.llmSettings);
+  const voice = asObject(row.voiceSettings);
+  const prompt = asObject(row.promptPolicy);
+  const rag = asObject(row.ragPolicy);
+  return {
+    llmSettings: {
+      textModel: stringSetting(llm, "textModel", defaults.llmSettings.textModel),
+      reasoningEffort: stringSetting(llm, "reasoningEffort", defaults.llmSettings.reasoningEffort),
+      temperature: numberSetting(llm, "temperature", defaults.llmSettings.temperature, 0, 2),
+      maxOutputTokens: Math.round(numberSetting(llm, "maxOutputTokens", defaults.llmSettings.maxOutputTokens, 80, 2000)),
+      responseStyle: stringSetting(llm, "responseStyle", defaults.llmSettings.responseStyle),
+      allowModelKnowledge: booleanSetting(llm, "allowModelKnowledge", defaults.llmSettings.allowModelKnowledge),
+      allowWebSearch: booleanSetting(llm, "allowWebSearch", defaults.llmSettings.allowWebSearch),
+    },
+    voiceSettings: {
+      realtimeModel: stringSetting(voice, "realtimeModel", defaults.voiceSettings.realtimeModel),
+      transcriptionModel: stringSetting(voice, "transcriptionModel", defaults.voiceSettings.transcriptionModel),
+      voice: stringSetting(voice, "voice", defaults.voiceSettings.voice),
+      speed: numberSetting(voice, "speed", defaults.voiceSettings.speed, 0.6, 1.4),
+      turnDetection: stringSetting(voice, "turnDetection", defaults.voiceSettings.turnDetection),
+      silenceTimeoutMs: Math.round(numberSetting(voice, "silenceTimeoutMs", defaults.voiceSettings.silenceTimeoutMs, 300, 3000)),
+      bargeIn: booleanSetting(voice, "bargeIn", defaults.voiceSettings.bargeIn),
+      recordingPolicy: stringSetting(voice, "recordingPolicy", defaults.voiceSettings.recordingPolicy),
+    },
+    promptPolicy: {
+      systemPrompt: stringSetting(prompt, "systemPrompt", defaults.promptPolicy.systemPrompt),
+      chatPrompt: stringSetting(prompt, "chatPrompt", defaults.promptPolicy.chatPrompt),
+      voicePrompt: stringSetting(prompt, "voicePrompt", defaults.promptPolicy.voicePrompt),
+      handoffPrompt: stringSetting(prompt, "handoffPrompt", defaults.promptPolicy.handoffPrompt),
+    },
+    ragPolicy: {
+      retrievalMode: stringSetting(rag, "retrievalMode", defaults.ragPolicy.retrievalMode),
+      minimumChunks: Math.round(numberSetting(rag, "minimumChunks", defaults.ragPolicy.minimumChunks, 0, 10)),
+      maxChunks: Math.round(numberSetting(rag, "maxChunks", defaults.ragPolicy.maxChunks, 1, 12)),
+      requireKnowledgeForGeneralAnswers: booleanSetting(rag, "requireKnowledgeForGeneralAnswers", defaults.ragPolicy.requireKnowledgeForGeneralAnswers),
+      blockedWhenNoKnowledge: stringSetting(rag, "blockedWhenNoKnowledge", defaults.ragPolicy.blockedWhenNoKnowledge),
+      allowedSourceStatuses: arraySetting(rag, "allowedSourceStatuses", defaults.ragPolicy.allowedSourceStatuses),
+      internetKnowledge: stringSetting(rag, "internetKnowledge", defaults.ragPolicy.internetKnowledge),
+      externalSearch: stringSetting(rag, "externalSearch", defaults.ragPolicy.externalSearch),
+    },
+  };
+}
+
+export async function updateWebchatAiRuntimeSettings(input: {
+  tenantId?: string;
+  actorRole?: string;
+  llmSettings: WebchatAiRuntimeSettings["llmSettings"];
+  voiceSettings: WebchatAiRuntimeSettings["voiceSettings"];
+  promptPolicy: WebchatAiRuntimeSettings["promptPolicy"];
+  ragPolicy: WebchatAiRuntimeSettings["ragPolicy"];
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  await query(
+    `insert into "PatientEngagementChannelSetting"
+      ("id", "tenantId", "channel", "displayName", "status", "theme", "nlpMode", "knowledgeBaseStatus", "schedulingStatus", "formsStatus", "connectorStatus", "approvalPolicy", "llmSettings", "voiceSettings", "promptPolicy", "ragPolicy", "nextAction")
+     values ($1, $2, 'WEB_CHAT', '1DentalAI Web Chat', 'READY_FOR_REVIEW', $3::jsonb, 'RULES_AND_AI_DRAFT', 'NEEDS_REVIEW', 'READY', 'PMS_FORMS_REQUIRED', 'READY', $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, 'Review AI runtime after model, prompt, voice, and RAG policy changes.')
+     on conflict ("tenantId", "channel") do update set
+       "llmSettings" = excluded."llmSettings",
+       "voiceSettings" = excluded."voiceSettings",
+       "promptPolicy" = excluded."promptPolicy",
+       "ragPolicy" = excluded."ragPolicy",
+       "updatedAt" = current_timestamp`,
+    [
+      "eng_channel_webchat",
+      tenantId,
+      JSON.stringify({ primaryColor: "#0891b2", launcherText: "Need help?" }),
+      JSON.stringify({ humanApprovalRequiredForBooking: true, phiGuardrails: true, leadCaptureConsent: true }),
+      JSON.stringify(input.llmSettings),
+      JSON.stringify(input.voiceSettings),
+      JSON.stringify(input.promptPolicy),
+      JSON.stringify(input.ragPolicy),
+    ],
+  );
+  await addWebchatAudit(tenantId, "WEBCHAT_AI_RUNTIME_SETTINGS_UPDATED", "WEB_CHAT", "ALLOWED", {
+    actorRole: input.actorRole ?? "practice_manager",
+    textModel: input.llmSettings.textModel,
+    realtimeModel: input.voiceSettings.realtimeModel,
+    retrievalMode: input.ragPolicy.retrievalMode,
+    internetKnowledge: input.ragPolicy.internetKnowledge,
+  });
+}
+
 async function buildAiAutoReply(input: {
   tenantId: string;
   conversationId: string;
@@ -742,6 +943,25 @@ async function buildAiAutoReply(input: {
     };
   }
 
+  const runtimeSettings = await getWebchatAiRuntimeSettings(input.tenantId);
+  if (
+    runtimeSettings.ragPolicy.requireKnowledgeForGeneralAnswers &&
+    input.knowledge.length < runtimeSettings.ragPolicy.minimumChunks &&
+    !["SCHEDULE_APPOINTMENT", "RESCHEDULE_APPOINTMENT"].includes(input.analysis.intent)
+  ) {
+    return {
+      body: sanitizePatientReply(runtimeSettings.ragPolicy.blockedWhenNoKnowledge, input.analysis),
+      automationMode: "STAFF_TAKEOVER",
+      handoffReason: "APPROVED_KNOWLEDGE_REQUIRED",
+      actionStatus: "RAG_KNOWLEDGE_REQUIRED",
+      deliveryStatus: "SENT",
+      provider: "WEB_CHAT",
+      providerStatus: "DELIVERED_TO_WIDGET",
+      model: "rag_policy",
+      metadata: { ragPolicy: runtimeSettings.ragPolicy },
+    };
+  }
+
   const openAiReply = await generateOpenAiReply(input);
   if (openAiReply) {
     return {
@@ -752,7 +972,7 @@ async function buildAiAutoReply(input: {
       deliveryStatus: "SENT",
       provider: "WEB_CHAT",
       providerStatus: "DELIVERED_TO_WIDGET",
-      model: process.env.OPENAI_WEBCHAT_MODEL || "gpt-4o-mini",
+      model: runtimeSettings.llmSettings.textModel,
     };
   }
 
@@ -1191,48 +1411,57 @@ function classifyStaffHandoff(analysis: WebchatAnalysis, body: string) {
 }
 
 async function generateOpenAiReply(input: {
+  tenantId: string;
   body: string;
   analysis: WebchatAnalysis;
   knowledge: { heading: string | null; pageTitle: string; content: string }[];
   qualification: { leadScore: number; qualificationStage: string; nextBestAction: string };
 }) {
-  const openAi = await getOpenAiWebchatConfig(defaultTenantId);
+  const openAi = await getOpenAiWebchatConfig(input.tenantId);
   if (!openAi.apiKey) return null;
-  const model = openAi.model;
-  const knowledgeText = input.knowledge.slice(0, 4).map((row, index) => {
+  const runtimeSettings = await getWebchatAiRuntimeSettings(input.tenantId);
+  const model = runtimeSettings.llmSettings.textModel || openAi.model;
+  const knowledgeText = input.knowledge.slice(0, runtimeSettings.ragPolicy.maxChunks).map((row, index) => {
     const title = row.heading || row.pageTitle || `Source ${index + 1}`;
     return `${index + 1}. ${title}: ${row.content.slice(0, 700)}`;
   }).join("\n");
   const system = [
-    "You are the patient-facing webchat assistant for a dental practice.",
-    "Write like a helpful front desk assistant speaking to a patient, not like a software system.",
+    runtimeSettings.promptPolicy.systemPrompt,
+    runtimeSettings.promptPolicy.chatPrompt,
     "Never mention internal systems, PMS, RCM, writeback, connectors, workflows, claims, provider approvals, guardrails, statuses, or implementation limits.",
     "Do not diagnose, prescribe, or quote guaranteed insurance benefits.",
     "Booking requests are handled by the scheduling engine before this prompt. If a booking question reaches you, ask what procedure the visitor wants.",
     "For insurance or pricing, ask for the plan name and treatment and say the team will review before giving an estimate.",
-    "Keep answers concise, warm, and dental-practice appropriate.",
-    "Use approved patient-facing knowledge only. If knowledge sounds like product documentation or operations language, ignore it.",
+    "Use only the approved knowledge snippets provided in this request. Do not use internet knowledge, training-data facts, web search, or external sources.",
+    runtimeSettings.llmSettings.allowModelKnowledge ? "If approved knowledge is not relevant, ask a clarifying question instead of inventing details." : "If approved knowledge is missing or not relevant, say the team can follow up. Do not answer from general model knowledge.",
+    `Response style: ${runtimeSettings.llmSettings.responseStyle}.`,
+    `Handoff policy: ${runtimeSettings.promptPolicy.handoffPrompt}`,
   ].join(" ");
+  const payload: Record<string, unknown> = {
+    model,
+    temperature: runtimeSettings.llmSettings.temperature,
+    max_output_tokens: runtimeSettings.llmSettings.maxOutputTokens,
+    instructions: system,
+    input: [
+      `Visitor message: ${input.body}`,
+      `Intent: ${input.analysis.intent}`,
+      `Sentiment: ${input.analysis.sentiment}`,
+      `Lead stage: ${input.qualification.qualificationStage}`,
+      `Next best action: ${input.qualification.nextBestAction}`,
+      `RAG policy: ${runtimeSettings.ragPolicy.retrievalMode}; internet knowledge ${runtimeSettings.ragPolicy.internetKnowledge}; external search ${runtimeSettings.ragPolicy.externalSearch}`,
+      knowledgeText ? `Approved local knowledge:\n${knowledgeText}` : "Approved local knowledge: none available",
+    ].join("\n\n"),
+  };
+  if (runtimeSettings.llmSettings.reasoningEffort && runtimeSettings.llmSettings.reasoningEffort !== "none") {
+    payload.reasoning = { effort: runtimeSettings.llmSettings.reasoningEffort };
+  }
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${openAi.apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model,
-      temperature: 0.3,
-      max_output_tokens: 220,
-      instructions: system,
-      input: [
-        `Visitor message: ${input.body}`,
-        `Intent: ${input.analysis.intent}`,
-        `Sentiment: ${input.analysis.sentiment}`,
-        `Lead stage: ${input.qualification.qualificationStage}`,
-        `Next best action: ${input.qualification.nextBestAction}`,
-        knowledgeText ? `Approved knowledge:\n${knowledgeText}` : "Approved knowledge: none available",
-      ].join("\n\n"),
-    }),
+    body: JSON.stringify(payload),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) return null;
@@ -1331,6 +1560,9 @@ async function createWebchatTask(input: { tenantId: string; conversationId: stri
 }
 
 async function retrieveKnowledge(message: string, tenantId: string) {
+  const runtimeSettings = await getWebchatAiRuntimeSettings(tenantId);
+  const statuses = runtimeSettings.ragPolicy.allowedSourceStatuses.length ? runtimeSettings.ragPolicy.allowedSourceStatuses : ["READY_FOR_RETRIEVAL"];
+  const limit = Math.max(1, Math.min(12, runtimeSettings.ragPolicy.maxChunks));
   const terms = message
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, " ")
@@ -1341,14 +1573,14 @@ async function retrieveKnowledge(message: string, tenantId: string) {
     `select kc."id", kc."content", kc."heading", kp."title" as "pageTitle"
      from "PatientEngagementKnowledgeChunk" kc
      join "PatientEngagementKnowledgePage" kp on kp."id" = kc."pageId"
-     where kc."tenantId" = $1 and kc."status" = 'READY_FOR_RETRIEVAL'
+     where kc."tenantId" = $1 and kc."status" = any($3::text[])
      order by (
        select count(*)
        from unnest($2::text[]) term
        where lower(kc."content") like '%' || term || '%'
      ) desc, kc."updatedAt" desc
-     limit 3`,
-    [tenantId, terms],
+     limit $4`,
+    [tenantId, terms, statuses, limit],
   );
   return result.rows;
 }

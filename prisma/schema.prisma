@@ -1820,6 +1820,10 @@ model PatientEngagementChannelSetting {
   formsStatus         String   @default("PMS_FORMS_REQUIRED")
   connectorStatus     String   @default("CONNECTOR_REQUIRED")
   approvalPolicy      Json?
+  llmSettings         Json?
+  voiceSettings       Json?
+  promptPolicy        Json?
+  ragPolicy           Json?
   nextAction          String
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
