@@ -8,7 +8,7 @@ export async function OPTIONS() {
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const tenant = searchParams.get("tenant") ?? "tenant_1dentalai_production";
+  const tenant = searchParams.get("tenant") ?? searchParams.get("tenantId") ?? "tenant_1dentalai_production";
   const script = buildWidgetScript({ tenant });
   return new Response(script, {
     headers: {
@@ -24,10 +24,27 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
 (function(){
   if (window.__oneDentalAiWebchat) return;
   window.__oneDentalAiWebchat = true;
+
   var scriptEl = document.currentScript;
   var API_BASE = scriptEl && scriptEl.src ? new URL(scriptEl.src).origin : window.location.origin;
   var TENANT = ${JSON.stringify(tenant)};
-  var state = { open: false, session: null, visitor: { patientStatus: 'NEW_PATIENT', urgency: 'ROUTINE', consentAccepted: false, sourceChannel: 'WEBSITE', campaignSource: campaignSource(), referrerUrl: document.referrer || '', landingPageSlug: landingSlug() }, sending: false, settings: null, messages: [] };
+  var storageKey = 'oneDentalAiWebchat:' + TENANT + ':' + location.hostname;
+  var state = {
+    open: false,
+    session: null,
+    visitor: {
+      patientStatus: 'NEW_PATIENT',
+      urgency: 'ROUTINE',
+      consentAccepted: false,
+      sourceChannel: 'WEBSITE',
+      campaignSource: campaignSource(),
+      referrerUrl: document.referrer || '',
+      landingPageSlug: landingSlug(),
+    },
+    sending: false,
+    settings: null,
+    messages: [],
+  };
   var root = document.createElement('div');
   root.id = 'one-dental-ai-webchat';
   var shadow = root.attachShadow({ mode: 'open' });
@@ -42,11 +59,11 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       else if (key.indexOf('on') === 0) el.addEventListener(key.slice(2).toLowerCase(), attrs[key]);
       else el.setAttribute(key, attrs[key]);
     });
-    (children || []).forEach(function(child){ el.appendChild(typeof child === 'string' ? document.createTextNode(child) : child); });
+    (children || []).forEach(function(child){
+      el.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+    });
     return el;
   }
-
-  function escapeText(value){ return String(value || '').replace(/[<>&]/g, function(ch){ return ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]); }); }
 
   function render(){
     var theme = (state.settings && state.settings.theme) || {};
@@ -61,12 +78,12 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       '.identity{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border-bottom:1px solid #e5e5e5;background:#fafafa}.identity input,.identity select{min-width:0;border:1px solid #d4d4d4;border-radius:9px;padding:10px;font-size:13px;background:#fff}.identity input:first-child{grid-column:1/-1}.wide{grid-column:1/-1}.consent{grid-column:1/-1;display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start;border:1px solid #e5e5e5;border-radius:9px;background:#fff;padding:9px;font-size:11px;line-height:1.35;color:#525252}.consent input{margin-top:2px}.consent b{color:#171717}' +
       '.chips{display:flex;gap:7px;overflow-x:auto;padding:10px 12px;border-bottom:1px solid #e5e5e5;background:#fff}.chip{white-space:nowrap;border:1px solid #d4d4d4;background:#fff;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}.chip:hover{border-color:'+primary+';color:'+primary+'}' +
       '.msgs{flex:1;overflow:auto;padding:14px;background:#f5f5f4;display:flex;flex-direction:column;gap:10px}.msg{max-width:86%;border-radius:13px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap}.bot{align-self:flex-start;background:#fff;border:1px solid #e5e5e5}.me{align-self:flex-end;background:'+primary+';color:#fff}' +
-      '.composer{display:grid;grid-template-columns:1fr auto;gap:8px;padding:12px;border-top:1px solid #e5e5e5;background:#fff}.composer textarea{height:44px;resize:none;border:1px solid #d4d4d4;border-radius:10px;padding:10px;font-size:13px;font-family:inherit}.composer button{border:0;border-radius:10px;background:#0a0a0a;color:#fff;font-weight:850;padding:0 14px;cursor:pointer}.composer button:disabled{opacity:.55;cursor:not-allowed}.note{padding:9px 12px;font-size:11px;line-height:1.35;color:#525252;border-top:1px solid #eee;background:#fff}' +
+      '.composer{display:grid;grid-template-columns:1fr auto;gap:8px;padding:12px;border-top:1px solid #e5e5e5;background:#fff}.composer textarea{height:44px;resize:none;border:1px solid #d4d4d4;border-radius:10px;padding:10px;font-size:13px;font-family:inherit}.composer button{border:0;border-radius:10px;background:#0a0a0a;color:#fff;font-weight:850;padding:0 14px;cursor:pointer}.composer button:disabled{opacity:.55;cursor:not-allowed}.meta{padding:9px 12px;font-size:10px;line-height:1.35;color:#525252;border-top:1px solid #eee;background:#fff;white-space:pre-line}' +
       '@media(max-width:520px){.wrap{right:12px;bottom:12px}.panel{width:calc(100vw - 24px);height:calc(100vh - 88px)}.identity{grid-template-columns:1fr}}' +
       '</style>';
     var wrap = h('div', { class: 'wrap' }, []);
     if (state.open) wrap.appendChild(panel());
-    wrap.appendChild(h('button', { class: 'launcher', onclick: toggle, text: state.open ? 'Close chat' : ((theme.launcherLabel || 'Ask us') + '') }, []));
+    wrap.appendChild(h('button', { class: 'launcher', onclick: toggle, text: state.open ? 'Close chat' : ((theme.launcherText || theme.launcherLabel || 'Ask us') + '') }, []));
     shadow.appendChild(wrap);
     if (state.open) {
       var input = shadow.querySelector('textarea');
@@ -74,15 +91,29 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     }
   }
 
+  function formatMessageText(message){
+    var body = message.body || '';
+    var suffix = [];
+    if (message.actionStatus) suffix.push(message.actionStatus);
+    if (message.deliveryStatus) suffix.push(message.deliveryStatus);
+    if (message.automationMode) suffix.push('Mode ' + message.automationMode);
+    return suffix.length ? body + '\\n' + suffix.join(' · ') : body;
+  }
+
   function panel(){
     var messages = h('div', { class: 'msgs' }, []);
     if (!state.session) {
       messages.appendChild(h('div', { class: 'msg bot', text: 'Hi. I can answer practice questions, capture appointment requests, and route urgent, insurance, or financing questions to the team. I will not finalize appointments, estimates, payments, or clinical advice without staff review.' }, []));
     }
-    (state.messages || []).forEach(function(m){ messages.appendChild(h('div', { class: 'msg ' + (m.senderType === 'VISITOR' ? 'me' : 'bot'), text: m.body }, [])); });
+    (state.messages || []).forEach(function(m){
+      messages.appendChild(h('div', { class: 'msg ' + (m.senderType === 'VISITOR' ? 'me' : 'bot'), text: formatMessageText(m) }, []));
+    });
     return h('div', { class: 'panel' }, [
       h('div', { class: 'head' }, [
-        h('div', {}, [h('div', { class:'title', text:'1DentalAI Web Chat' }, []), h('div', { class:'sub', text:'Saved transcript · staff-reviewed scheduling handoff' }, [])]),
+        h('div', {}, [
+          h('div', { class:'title', text:'1DentalAI Web Chat' }, []),
+          h('div', { class:'sub', text:'Saved transcript · staff-reviewed scheduling handoff' }, [])
+        ]),
         h('button', { class:'close', onclick: toggle, 'aria-label':'Close chat', text:'×' }, [])
       ]),
       h('div', { class: 'identity' }, [
@@ -101,7 +132,8 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
         h('textarea', { name:'message', placeholder:'Ask a question or request an appointment', maxlength:'3000' }, []),
         h('button', { type:'submit', disabled: state.visitor.consentAccepted ? null : 'disabled', text: state.sending ? '...' : 'Send' }, [])
       ]),
-      h('div', { class:'note', text:'Appointment changes, insurance estimates, payments, and clinical decisions require staff verification and approved connectors.' }, [])
+      h('div', { class:'meta' }, ['I can help with booking handoff, chart note routing context, insurance follow-up questions, and basic practice guidance.']),
+      h('div', { class:'meta' }, ['Call 911 or emergency services for life-threatening symptoms.'])
     ]);
   }
 
@@ -115,7 +147,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
   }
 
   function seedPrompt(text){
-    var textarea = shadow.querySelector('textarea[name="message"]');
+    var textarea = shadow.querySelector('textarea[name=\"message\"]');
     if (textarea) {
       textarea.value = text;
       textarea.focus();
@@ -123,11 +155,11 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
   }
 
   function input(key, label){
-    return h('input', { placeholder: label, value: state.visitor[key] || '', oninput: function(event){ state.visitor[key] = event.target.value; }, class: arguments[2] || '' }, []);
+    return h('input', { placeholder: label, value: state.visitor[key] || '', oninput: function(event){ state.visitor[key] = event.target.value; saveVisitorState(); }, class: arguments[2] || '' }, []);
   }
 
   function select(key, label, options){
-    var el = h('select', { 'aria-label': label, onchange: function(event){ state.visitor[key] = event.target.value; } }, []);
+    var el = h('select', { 'aria-label': label, onchange: function(event){ state.visitor[key] = event.target.value; saveVisitorState(); } }, []);
     el.appendChild(h('option', { value:'', text: label }, []));
     options.forEach(function(option){
       var value = option[0];
@@ -153,7 +185,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
   function consentNotice(){
     var notice = (state.settings && state.settings.privacyNotice) || {};
     return h('label', { class:'consent' }, [
-      h('input', { type:'checkbox', checked: state.visitor.consentAccepted ? 'checked' : null, onchange: function(event){ state.visitor.consentAccepted = event.target.checked; render(); } }, []),
+      h('input', { type:'checkbox', checked: state.visitor.consentAccepted ? 'checked' : null, onchange: function(event){ state.visitor.consentAccepted = event.target.checked; saveVisitorState(); render(); } }, []),
       h('span', {}, [
         h('b', { text:'Privacy notice: ' }, []),
         document.createTextNode(notice.label || 'This chat is saved for staff follow-up and does not replace emergency care, diagnosis, payments, or final appointment changes.')
@@ -163,11 +195,21 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
 
   function toggle(){
     state.open = !state.open;
+    if (state.open) {
+      ensureSession();
+    }
     render();
   }
 
   async function ensureSession(){
-    if (state.session) return state.session;
+    if (state.session && state.session.id) return state.session;
+    var persisted = loadSession();
+    if (persisted && persisted.id) {
+      state.session = { id: persisted.id };
+      await loadTranscript();
+      return state.session;
+    }
+
     var response = await fetch(API_BASE + '/api/webchat/sessions', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -175,25 +217,129 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     });
     var json = await response.json();
     state.session = json.session;
+    saveSession();
     state.messages = [];
     return state.session;
   }
 
+  function saveSession(){
+    if (!state.session || !state.session.id) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ id: state.session.id, tenant: TENANT, origin: location.hostname, ts: Date.now() }));
+    } catch (error) {
+    }
+  }
+
+  function loadSession() {
+    try {
+      var raw = localStorage.getItem(storageKey);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (!parsed || parsed.tenant !== TENANT || parsed.origin !== location.hostname || !parsed.id) return null;
+      if (Date.now() - (parsed.ts || 0) > 14 * 24 * 60 * 60 * 1000) {
+        localStorage.removeItem(storageKey);
+        return null;
+      }
+      return { id: parsed.id };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function saveVisitorState() {
+    try {
+      var snapshot = {
+        visitorName: state.visitor.visitorName || '',
+        visitorPhone: state.visitor.visitorPhone || '',
+        visitorEmail: state.visitor.visitorEmail || '',
+        serviceLine: state.visitor.serviceLine || '',
+        preferredTime: state.visitor.preferredTime || '',
+        patientStatus: state.visitor.patientStatus || 'NEW_PATIENT',
+        urgency: state.visitor.urgency || 'ROUTINE',
+        sourceChannel: state.visitor.sourceChannel || 'WEBSITE',
+        consentAccepted: !!state.visitor.consentAccepted,
+        campaignSource: state.visitor.campaignSource || '',
+        referrerUrl: state.visitor.referrerUrl || '',
+        landingPageSlug: state.visitor.landingPageSlug || '',
+      };
+      localStorage.setItem(storageKey + ':visitor', JSON.stringify(snapshot));
+    } catch (error) {
+    }
+  }
+
+  function loadVisitorState() {
+    try {
+      var raw = localStorage.getItem(storageKey + ':visitor');
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      state.visitor = {
+        patientStatus: parsed.patientStatus || state.visitor.patientStatus,
+        urgency: parsed.urgency || state.visitor.urgency,
+        consentAccepted: !!parsed.consentAccepted,
+        sourceChannel: parsed.sourceChannel || state.visitor.sourceChannel,
+        campaignSource: parsed.campaignSource || state.visitor.campaignSource,
+        referrerUrl: parsed.referrerUrl || state.visitor.referrerUrl,
+        landingPageSlug: parsed.landingPageSlug || state.visitor.landingPageSlug,
+        visitorName: parsed.visitorName || state.visitor.visitorName,
+        visitorPhone: parsed.visitorPhone || state.visitor.visitorPhone,
+        visitorEmail: parsed.visitorEmail || state.visitor.visitorEmail,
+        serviceLine: parsed.serviceLine || state.visitor.serviceLine,
+        preferredTime: parsed.preferredTime || state.visitor.preferredTime,
+      };
+    } catch (error) {
+    }
+  }
+
+  async function loadTranscript() {
+    if (!state.session || !state.session.id) return;
+    try {
+      var response = await fetch(API_BASE + '/api/webchat/transcript?tenant=' + encodeURIComponent(TENANT) + '&conversationId=' + encodeURIComponent(state.session.id), {
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!response.ok) return;
+      var transcript = await response.json();
+      if (!transcript || !transcript.conversation) {
+        state.messages = [];
+        return;
+      }
+      if (transcript.conversation.status === 'CLOSED') {
+        localStorage.removeItem(storageKey);
+        state.session = null;
+        state.messages = [];
+        return;
+      }
+      state.messages = (transcript.messages || []).map(function(message){
+        return {
+          senderType: message.senderType,
+          body: message.body || '',
+          actionStatus: message.actionStatus,
+          deliveryStatus: message.deliveryStatus,
+          automationMode: message.automationMode,
+        };
+      });
+    } catch (error) {
+    }
+  }
+
   async function submitMessage(event){
     event.preventDefault();
-    var textarea = shadow.querySelector('textarea[name="message"]');
+    var textarea = shadow.querySelector('textarea[name=\"message\"]');
     var body = textarea && textarea.value ? textarea.value.trim() : '';
     if (!body || state.sending) return;
+
     if (!state.visitor.consentAccepted) {
       state.messages.push({ senderType:'ASSISTANT', body:'Please accept the privacy notice so I can save this chat for staff follow-up.' });
       render();
       return;
     }
+
     state.sending = true;
     var session = await ensureSession();
     state.messages.push({ senderType:'VISITOR', body: body });
     textarea.value = '';
     render();
+
     try {
       var response = await fetch(API_BASE + '/api/webchat/messages', {
         method:'POST',
@@ -201,10 +347,21 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
         body: JSON.stringify(capturePayload({ conversationId:session.id, body:body, senderName:state.visitor.visitorName }))
       });
       var json = await response.json();
-      state.messages.push({ senderType:'ASSISTANT', body: json.reply ? json.reply.body : 'The team needs to review this request.' });
+      if (json.reply) {
+        state.messages.push({
+          senderType:'ASSISTANT',
+          body: json.reply.body,
+          actionStatus: json.analysis ? json.analysis.actionStatus : null,
+          automationMode: json.automationMode,
+          deliveryStatus: json.replyId ? 'delivered' : 'blocked',
+        });
+      } else {
+        state.messages.push({ senderType:'ASSISTANT', body:'The team needs to review this request.' });
+      }
     } catch (error) {
       state.messages.push({ senderType:'ASSISTANT', body:'I could not save that message. Please call the practice or try again.' });
     }
+
     state.sending = false;
     render();
   }
@@ -252,7 +409,11 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     }
   }
 
-  fetch(API_BASE + '/api/webchat/settings?tenant=' + encodeURIComponent(TENANT)).then(function(r){ return r.json(); }).then(function(json){ state.settings = json; render(); }).catch(render);
-})();
-`;
+  loadVisitorState();
+  fetch(API_BASE + '/api/webchat/settings?tenant=' + encodeURIComponent(TENANT)).then(function(r){ return r.json(); }).then(function(json){
+    state.settings = json;
+    render();
+    return ensureSession();
+  }).then(function(){ render(); }).catch(render);
+})();\n`;
 }

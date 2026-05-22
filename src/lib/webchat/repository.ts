@@ -217,8 +217,42 @@ export async function postWebchatMessage(input: {
   leadCapture?: LeadCapture;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
-  const analysis = analyzeMessage(input.body);
   const leadCapture = normalizeLeadCapture(input.leadCapture ?? {});
+  if (leadCapture.sourceChannel !== "SMS" && leadCapture.consentAccepted !== true) {
+    await addWebchatAudit(tenantId, "WEBCHAT_MESSAGE_BLOCKED", input.conversationId, "BLOCKED", {
+      consentAccepted: false,
+      sourceChannel: leadCapture.sourceChannel || "WEBSITE",
+      reason: "CONSENT_REQUIRED",
+    });
+    await query(
+      `insert into "PatientWebChatEvent" ("id", "tenantId", "conversationId", "eventType", "payload")
+       values ($1, $2, $3, 'MESSAGE_BLOCKED_CONSENT_REQUIRED', $4::jsonb)`,
+      [newId("evt"), tenantId, input.conversationId, JSON.stringify({ intent: "CONSENT_REQUIRED", reason: "privacy consent missing" })],
+    );
+    return {
+      userMessageId: null,
+      replyId: null,
+      reply: {
+        body: "I can keep helping once you accept the privacy notice. Your information is stored only after consent is confirmed.",
+      },
+      analysis: {
+        intent: "CONSENT_REQUIRED",
+        sentiment: "NEEDS_HELP",
+        confidence: 100,
+        actionType: "CONSENT_BLOCK",
+        actionStatus: "CONSENT_REQUIRED",
+      },
+      qualification: {
+        leadScore: 0,
+        qualificationStage: "CONSENT_REQUIRED",
+        nextBestAction: "Get consent to enable messaging, then continue.",
+      },
+      automationMode: "BLOCKED",
+      handoffReason: "CONSENT_REQUIRED",
+    };
+  }
+
+  const analysis = analyzeMessage(input.body);
   const qualification = await updateLeadCapture({ tenantId, conversationId: input.conversationId, leadCapture, body: input.body, analysis });
   const userMessageId = newId("msg");
   await query(

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
-import { ProductPageTitle, StateBadge, WorkSurface } from "@/components/products/product-app-shell";
+import { StateBadge, WorkSurface } from "@/components/products/product-app-shell";
 import { PatientEngagementShell, clean } from "@/components/products/patient-engagement-shell";
 import { getPhoneOperatingCenter } from "@/lib/operating-system-repository";
 import {
@@ -120,22 +120,16 @@ export default async function PatientEngagementWebchatPage({
   const selectedConversation = chats.find((chat) => chat.id === params.conversationId) ?? chats[0] ?? null;
   const transcript = selectedConversation ? await getConversationTranscript(selectedConversation.id) : null;
   const messages = (transcript?.messages ?? []) as WebChatMessageRow[];
-  const events = (transcript?.events ?? []) as Record<string, unknown>[];
+  const events = (transcript?.events ?? []) as WebChatEventRow[];
   const knowledge = (center.knowledgeSources ?? []) as KnowledgeRow[];
   const forms = (center.leadForms ?? []) as LeadFormRow[];
   const schedulingRules = (center.schedulingRules ?? []) as SchedulingRuleRow[];
   const channel = ((center.channelSettings ?? []) as ChannelRow[]).find((row) => row.channel === "WEB_CHAT");
-  const installScript = `<script async src="https://app.1dentalai.com/api/webchat/widget.js" data-tenant-id="tenant_1dentalai_production"></script>`;
+  const installScript = `<script async src="https://app.1dentalai.com/api/webchat/widget.js?tenant=tenant_1dentalai_production"></script>`;
 
   return (
     <PatientEngagementShell active="/patient-engagement/webchat">
-      <ProductPageTitle
-        eyebrow="Unified messaging product"
-        title="Inbox for website chat and two-way SMS."
-        body="Website visitors and SMS patients land in one work queue. NLP answers routine questions automatically, escalates live-person requests to staff, and keeps appointment booking gated until scheduling handoff is approved."
-      />
-
-      <div className="mt-6 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap gap-2">
         {[
           ["inbox", "Inbox"],
           ["knowledge", "Knowledge base"],
@@ -153,123 +147,151 @@ export default async function PatientEngagementWebchatPage({
       </div>
 
       {view === "inbox" ? (
-        <section className="mt-5 grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)_340px]">
-          <WorkSurface title="Inbox" eyebrow="Website chat and SMS">
-            <form className="mb-3 space-y-3" action="/patient-engagement/webchat">
-              <input type="hidden" name="view" value="inbox" />
-              <input className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100" name="q" placeholder="Search visitor, phone, intent, source" defaultValue={params.q ?? ""} />
-              <div className="grid grid-cols-3 gap-2">
-                {["ALL", "WEB_CHAT", "SMS"].map((key) => (
-                  <button
-                    key={key}
-                    name="channel"
-                    value={key}
-                    className={`rounded-md px-2 py-2 text-xs font-semibold ${channelFilter === key ? "bg-neutral-950 text-white" : "border border-neutral-200 bg-white text-neutral-700"}`}
-                  >
-                    {key === "WEB_CHAT" ? "Web" : clean(key)}
-                  </button>
+        <section className="overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-sm">
+          <div className="grid min-h-[760px] xl:grid-cols-[82px_360px_minmax(0,1fr)_330px]">
+            <aside className="hidden border-r border-neutral-200 bg-white xl:flex xl:flex-col xl:items-center xl:justify-between xl:py-6">
+              <div className="space-y-6">
+                <Avatar label="FD" size="lg" tone="green" />
+                {[
+                  ["ALL", "All", "C"],
+                  ["WEB_CHAT", "Web", "W"],
+                  ["SMS", "SMS", "S"],
+                ].map(([key, label, icon]) => (
+                  <Link key={key} href={`/patient-engagement/webchat?channel=${key}`} className={`flex flex-col items-center gap-2 text-xs font-semibold ${channelFilter === key ? "text-blue-600" : "text-neutral-400 hover:text-neutral-700"}`}>
+                    <span className={`grid h-10 w-10 place-items-center rounded-2xl ${channelFilter === key ? "bg-blue-50 text-blue-600" : "bg-neutral-100"}`}>{icon}</span>
+                    {label}
+                  </Link>
                 ))}
               </div>
-            </form>
-            <div className="space-y-2">
-              {chats.length ? chats.map((chat) => (
-                <Link
-                  key={chat.id}
-                  href={`/patient-engagement/webchat?conversationId=${chat.id}&q=${encodeURIComponent(params.q ?? "")}&channel=${channelFilter}`}
-                  className={`block rounded-lg border p-3 ${selectedConversation?.id === chat.id ? "border-cyan-300 bg-cyan-50" : "border-neutral-200 bg-neutral-50 hover:bg-white"}`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-neutral-950">{chat.visitorName || "Website visitor"}</p>
-                      <p className="mt-1 truncate text-xs text-neutral-600">{chat.visitorPhone || chat.visitorEmail || chat.sourcePage || "contact not captured"}</p>
-                    </div>
-                    <StateBadge tone={chat.leadScore >= 80 ? "green" : "amber"}>{chat.leadScore}</StateBadge>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    <span className="rounded bg-white px-2 py-1 text-[11px] font-semibold text-neutral-600">{chat.sourceChannel === "SMS" ? "SMS" : "Web"}</span>
-                    <span className="rounded bg-white px-2 py-1 text-[11px] font-semibold text-neutral-600">{clean(chat.automationMode || "AI_AUTO")}</span>
-                  </div>
-                  <p className="mt-2 text-xs leading-5 text-neutral-600">{clean(chat.qualificationStage)} · {clean(chat.nlpIntent ?? "new")}</p>
-                </Link>
-              )) : <Empty title="No conversations match this view" body="Clear the search or switch channel filters. New website chat and SMS conversations appear here." />}
-            </div>
-          </WorkSurface>
+              <Link href="/patient-engagement/settings" className="flex flex-col items-center gap-2 text-xs font-semibold text-neutral-400 hover:text-neutral-700">
+                <span className="grid h-10 w-10 place-items-center rounded-2xl bg-neutral-100">S</span>
+                Settings
+              </Link>
+            </aside>
 
-          <WorkSurface title="Conversation" eyebrow="Auto NLP reply with staff takeover when needed">
-            {selectedConversation ? (
-              <>
-                <div className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
-                  <div>
-                    <p className="text-sm font-semibold text-neutral-950">{selectedConversation.visitorName || "Website visitor"}</p>
-                    <p className="mt-1 text-xs leading-5 text-neutral-600">{selectedConversation.sourceChannel === "SMS" ? "Two-way SMS thread" : "Website chat session"} · {selectedConversation.nextBestAction || "AI answers routine messages until takeover is required."}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <StateBadge tone={(selectedConversation.automationMode || "AI_AUTO") === "AI_AUTO" ? "green" : "amber"}>{clean(selectedConversation.automationMode || "AI_AUTO")}</StateBadge>
-                    <StateBadge tone={selectedConversation.pmsWritebackStatus === "READY" ? "green" : "amber"}>{clean(selectedConversation.pmsWritebackStatus)}</StateBadge>
-                  </div>
+            <aside className="border-r border-neutral-200 bg-white">
+              <form className="border-b border-neutral-200 p-4" action="/patient-engagement/webchat">
+                <input type="hidden" name="view" value="inbox" />
+                <input type="hidden" name="channel" value={channelFilter} />
+                <div className="flex items-center gap-2 rounded-2xl bg-neutral-100 px-4 py-3">
+                  <input className="min-w-0 flex-1 bg-transparent text-sm outline-none" name="q" placeholder="Search..." defaultValue={params.q ?? ""} />
+                  <button className="grid h-9 w-9 place-items-center rounded-full bg-white text-sm font-semibold text-neutral-700 shadow-sm">Go</button>
                 </div>
-
-                <div className="h-[430px] overflow-y-auto rounded-lg border border-neutral-200 bg-neutral-50 p-4">
-                  <div className="space-y-3">
-                    {messages.length ? messages.map((message) => (
-                      <div key={message.id} className={`max-w-[86%] rounded-lg p-3 shadow-sm ${message.senderType === "VISITOR" ? "bg-white" : message.senderType === "STAFF_NOTE" ? "bg-amber-50" : "ml-auto bg-cyan-50"}`}>
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">{clean(message.senderType)} · {clean(message.intent ?? message.actionType ?? "message")}</p>
-                        <p className="mt-2 text-sm leading-6 text-neutral-800">{message.body}</p>
-                        <p className="mt-2 text-xs text-neutral-500">{clean(message.actionStatus)} · {clean(message.deliveryStatus || "sent")}</p>
+              </form>
+              <div className="max-h-[690px] overflow-y-auto">
+                {chats.length ? chats.map((chat) => {
+                  const isSelected = selectedConversation?.id === chat.id;
+                  return (
+                    <Link
+                      key={chat.id}
+                      href={`/patient-engagement/webchat?conversationId=${chat.id}&q=${encodeURIComponent(params.q ?? "")}&channel=${channelFilter}`}
+                      className={`grid grid-cols-[64px_minmax(0,1fr)_auto] gap-3 border-b border-neutral-200 px-5 py-4 transition ${isSelected ? "bg-neutral-100" : "bg-white hover:bg-neutral-50"}`}
+                    >
+                      <Avatar label={personLabel(chat)} tone={chat.sourceChannel === "SMS" ? "blue" : "dark"} />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-neutral-950">{personLabel(chat)}</p>
+                        <p className="mt-1 truncate text-sm text-neutral-500">{chat.nextBestAction || clean(chat.nlpIntent ?? "new conversation")}</p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                          <span className="text-xs font-semibold text-neutral-500">{chat.sourceChannel === "SMS" ? "Two-way SMS" : "Website chat"}</span>
+                        </div>
                       </div>
-                    )) : <Empty title="No messages in this conversation" body="Visitor and assistant messages will appear here after the widget session starts." />}
-                  </div>
-                </div>
+                      <div className="text-right">
+                        <p className="text-xs text-neutral-500">now</p>
+                        <span className={`mt-4 inline-grid h-6 min-w-6 place-items-center rounded-full px-2 text-xs font-semibold ${chat.leadScore >= 80 ? "bg-blue-600 text-white" : "bg-neutral-200 text-neutral-700"}`}>
+                          {chat.leadScore}
+                        </span>
+                      </div>
+                    </Link>
+                  );
+                }) : <div className="p-5"><Empty title="No conversations match" body="Clear the search or switch channels." /></div>}
+              </div>
+            </aside>
 
-                <section className="mt-4 grid gap-3 lg:grid-cols-[0.85fr_1fr]">
-                  <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-4">
-                    <p className="text-sm font-semibold text-neutral-950">NLP auto-response</p>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      <Context label="Engine" value={process.env.OPENAI_API_KEY ? "OpenAI enabled" : "Rules fallback"} detail={process.env.OPENAI_API_KEY ? "Assistant response is generated server-side and logged." : "No OpenAI token is present, so the rule engine answers and marks the provider fallback."} />
-                      <Context label="Takeover" value={selectedConversation.handoffReason ? clean(selectedConversation.handoffReason) : "Not required"} detail={selectedConversation.handoffReason || "AI auto-response remains active for routine visitor messages."} />
+            <main className="flex min-w-0 flex-col bg-white">
+              {selectedConversation ? (
+                <>
+                  <header className="flex items-center justify-between gap-4 border-b border-neutral-200 px-6 py-4">
+                    <div>
+                      <h2 className="text-lg font-semibold text-neutral-950">{personLabel(selectedConversation)}</h2>
+                      <p className="text-sm text-neutral-500">{clean(selectedConversation.qualificationStage)} · {selectedConversation.sourceChannel === "SMS" ? "SMS thread" : "Website visitor"}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <StateBadge tone={(selectedConversation.automationMode || "AI_AUTO") === "AI_AUTO" ? "green" : "amber"}>{clean(selectedConversation.automationMode || "AI_AUTO")}</StateBadge>
+                      <Link href={`/patient-engagement/webchat?view=knowledge&conversationId=${selectedConversation.id}`} className="grid h-10 w-10 place-items-center rounded-full border border-neutral-200 text-sm font-semibold text-neutral-700">K</Link>
+                      <Link href="/patient-engagement/settings" className="grid h-10 w-10 place-items-center rounded-full border border-neutral-200 text-sm font-semibold text-neutral-700">S</Link>
+                    </div>
+                  </header>
+
+                  <div className="flex-1 overflow-y-auto bg-white px-6 py-5">
+                    <div className="mx-auto mb-6 w-fit rounded-full bg-neutral-100 px-4 py-2 text-xs font-semibold text-neutral-500">Today</div>
+                    <div className="space-y-5">
+                      {messages.length ? messages.map((message) => (
+                        <MessageBubble key={message.id} message={message} visitorLabel={personLabel(selectedConversation)} />
+                      )) : (
+                        <Empty title="No messages yet" body="The transcript appears here as soon as the widget or SMS thread receives a message." />
+                      )}
                     </div>
                   </div>
-                  <form action={appointmentHandoffAction} className="rounded-lg border border-neutral-200 bg-white p-4">
+
+                  <footer className="border-t border-neutral-200 bg-white px-6 py-4">
+                    <form action={staffEntryAction} className="flex items-end gap-3">
+                      <input type="hidden" name="conversationId" value={selectedConversation.id} />
+                      <input type="hidden" name="entryType" value={(selectedConversation.automationMode || "AI_AUTO") === "AI_AUTO" ? "STAFF_NOTE" : "STAFF_REPLY"} />
+                      <input type="hidden" name="status" value="OPEN" />
+                      <div className="flex min-h-14 flex-1 items-center gap-3 rounded-2xl bg-neutral-100 px-4">
+                        <span className="text-xl text-neutral-500">+</span>
+                        <textarea name="body" required className="min-h-12 flex-1 resize-none bg-transparent py-4 text-sm outline-none" placeholder={(selectedConversation.automationMode || "AI_AUTO") === "AI_AUTO" ? "Add internal staff note" : "Write live staff reply"} />
+                        <span className="text-xl text-neutral-500">mic</span>
+                      </div>
+                      <button className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-600 text-lg font-semibold text-white shadow-sm">Send</button>
+                    </form>
+                    <p className="mt-2 text-xs text-neutral-500">{(selectedConversation.automationMode || "AI_AUTO") === "AI_AUTO" ? "AI is still responding automatically. Staff notes stay internal." : "Staff reply is staged and remains connector-gated until live delivery is approved."}</p>
+                  </footer>
+                </>
+              ) : <div className="p-6"><Empty title="No conversation selected" body="Select a chat from the inbox." /></div>}
+            </main>
+
+            <aside className="hidden border-l border-neutral-200 bg-white p-6 xl:block">
+              {selectedConversation ? (
+                <div className="space-y-6">
+                  <div className="text-center">
+                    <div className="mx-auto w-fit"><Avatar label={personLabel(selectedConversation)} size="xl" tone="dark" /></div>
+                    <h3 className="mt-4 text-base font-semibold text-neutral-950">{personLabel(selectedConversation)}</h3>
+                    <p className="text-sm text-neutral-500">{selectedConversation.visitorPhone || selectedConversation.visitorEmail || "contact not captured"}</p>
+                  </div>
+
+                  <Context label="Lead" value={`${selectedConversation.leadScore} score`} detail={`${clean(selectedConversation.qualificationStage)}; owner ${clean(selectedConversation.ownerRoleKey)}`} />
+                  <Context label="Automation" value={clean(selectedConversation.automationMode || "AI_AUTO")} detail={selectedConversation.handoffReason || "NLP auto response is active."} />
+                  <Context label="Source" value={selectedConversation.campaignSource || selectedConversation.sourceChannel || "website"} detail={selectedConversation.landingPageSlug || selectedConversation.sourcePage || "page not captured"} />
+
+                  <form action={appointmentHandoffAction} className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
                     <input type="hidden" name="conversationId" value={selectedConversation.id} />
                     <p className="text-sm font-semibold text-neutral-950">Appointment handoff</p>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div className="mt-3 space-y-3">
                       <Input name="requestedWindow" label="Requested window" placeholder="Tomorrow morning" />
                       <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} />
                       <Select name="ownerRoleKey" label="Owner" options={["front_desk", "treatment_coordinator", "practice_manager"]} />
-                      <Input name="note" label="Handoff note" placeholder="Verify insurance first" />
+                      <Input name="note" label="Note" placeholder="Verify insurance first" />
                     </div>
-                    <button className="mt-3 rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white">Create handoff</button>
-                    <p className="mt-2 text-xs leading-5 text-neutral-500">Creates a PMS task and blocks direct appointment writeback until PMS scheduling connector/manual proof is approved.</p>
+                    <button className="mt-3 w-full rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Create handoff</button>
                   </form>
-                </section>
 
-                {(selectedConversation.automationMode || "AI_AUTO") !== "AI_AUTO" ? (
-                  <form action={staffEntryAction} className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-                    <input type="hidden" name="conversationId" value={selectedConversation.id} />
-                    <input type="hidden" name="entryType" value="STAFF_REPLY" />
-                    <input type="hidden" name="status" value="OPEN" />
-                    <p className="text-sm font-semibold text-neutral-950">Live staff takeover</p>
-                    <textarea name="body" required className="mt-3 min-h-24 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm" placeholder="Write the staff response. Delivery remains connector-gated and audited." />
-                    <button className="mt-3 rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white">Stage staff reply</button>
-                    <p className="mt-2 text-xs leading-5 text-neutral-600">This appears only when NLP escalates the thread for a human.</p>
-                  </form>
-                ) : null}
-              </>
-            ) : <Empty title="No conversation selected" body="Select a conversation from the inbox to work transcript, reply, and appointment handoff." />}
-          </WorkSurface>
-
-          <WorkSurface title="Visitor context" eyebrow="Lead, source, consent, handoff">
-            {selectedConversation ? (
-              <div className="space-y-3">
-                <Context label="Contact" value={selectedConversation.visitorPhone || selectedConversation.visitorEmail || "not captured"} detail={selectedConversation.visitorName || "name not captured"} />
-                <Context label="Lead stage" value={clean(selectedConversation.qualificationStage)} detail={`score ${selectedConversation.leadScore}; owner ${clean(selectedConversation.ownerRoleKey)}`} />
-                <Context label="Automation" value={clean(selectedConversation.automationMode || "AI_AUTO")} detail={selectedConversation.handoffReason || "AI auto response is active."} />
-                <Context label="Source" value={selectedConversation.campaignSource || selectedConversation.sourceChannel || "website"} detail={selectedConversation.landingPageSlug || selectedConversation.sourcePage || "page not captured"} />
-                <Context label="Scheduling" value={clean(selectedConversation.schedulingOutcome)} detail={selectedConversation.blockedReason || "No scheduling blocker recorded."} />
-                <Context label="Events" value={String(events.length)} detail="session, lead capture, message, and handoff audit trail" />
-              </div>
-            ) : <Empty title="No visitor selected" body="Visitor source, lead score, contact fields, and handoff state appear after selecting a chat." />}
-          </WorkSurface>
+                  <div>
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="text-sm font-semibold text-neutral-950">Audit trail</p>
+                      <span className="text-sm font-semibold text-blue-600">{events.length}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {events.slice(-4).map((event, index) => (
+                        <div key={index} className="rounded-xl bg-neutral-50 px-3 py-2 text-xs font-semibold text-neutral-600">{clean(event.eventType)}</div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </aside>
+          </div>
         </section>
       ) : null}
 
@@ -415,10 +437,56 @@ type WebChatMessageRow = {
   deliveryStatus: string;
 };
 
+type WebChatEventRow = { eventType: string; payload?: unknown };
 type KnowledgeRow = { id: string; title: string; status: string; ownerRoleKey: string; contentSummary: string };
 type LeadFormRow = { id: string; name: string; serviceLine: string; status: string; connectorStatus: string };
 type SchedulingRuleRow = { id: string; name: string; status: string; bookingWindowDays: number; pmsWritebackStatus: string };
 type ChannelRow = { channel: string; displayName: string; theme: unknown; nlpMode: string; connectorStatus: string; knowledgeBaseStatus: string; schedulingStatus: string; formsStatus: string; nextAction: string };
+
+function MessageBubble({ message, visitorLabel }: { message: WebChatMessageRow; visitorLabel: string }) {
+  const isIncoming = message.senderType === "VISITOR";
+  const isNote = message.senderType === "STAFF_NOTE";
+  return (
+    <div className={`flex items-end gap-3 ${isIncoming ? "justify-start" : "justify-end"}`}>
+      {isIncoming ? <Avatar label={visitorLabel} tone="rose" /> : null}
+      <div className={`max-w-[68%] rounded-2xl px-4 py-3 ${isIncoming ? "rounded-bl-md bg-neutral-100 text-neutral-950" : isNote ? "rounded-br-md bg-amber-50 text-neutral-900" : "rounded-br-md bg-blue-600 text-white"}`}>
+        <p className={`mb-1 text-sm font-semibold ${isIncoming ? "text-neutral-950" : isNote ? "text-neutral-950" : "text-white"}`}>
+          {isIncoming ? visitorLabel : isNote ? "Internal note" : "1DentalAI"}
+        </p>
+        <p className="text-sm leading-6">{message.body}</p>
+        <p className={`mt-2 text-right text-[11px] ${isIncoming || isNote ? "text-neutral-500" : "text-blue-100"}`}>
+          {clean(message.actionStatus || message.deliveryStatus || message.intent || "message")}
+        </p>
+      </div>
+      {!isIncoming ? <Avatar label="AI" tone="green" /> : null}
+    </div>
+  );
+}
+
+function Avatar({ label, tone = "dark", size = "md" }: { label: string; tone?: "dark" | "blue" | "green" | "rose"; size?: "md" | "lg" | "xl" }) {
+  const sizeClass = size === "xl" ? "h-20 w-20 text-xl" : size === "lg" ? "h-12 w-12 text-base" : "h-12 w-12 text-sm";
+  const toneClass = {
+    dark: "bg-neutral-950 text-white",
+    blue: "bg-blue-600 text-white",
+    green: "bg-emerald-100 text-emerald-900",
+    rose: "bg-rose-100 text-rose-900",
+  }[tone];
+  return (
+    <span className={`grid shrink-0 place-items-center rounded-full font-semibold ${sizeClass} ${toneClass}`}>
+      {initials(label)}
+    </span>
+  );
+}
+
+function initials(label: string) {
+  const parts = label.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "V";
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+}
+
+function personLabel(chat: WebChatRow) {
+  return chat.visitorName || chat.visitorPhone || chat.visitorEmail || (chat.sourceChannel === "SMS" ? "SMS patient" : "Website visitor");
+}
 
 function Context({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (

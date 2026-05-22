@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     theme: settings?.theme ?? {
       primaryColor: "#0891b2",
       backgroundColor: "#ffffff",
-      launcherLabel: "Ask us",
+      launcherText: "Ask us",
       position: "bottom-right",
       font: "system",
     },
