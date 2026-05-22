@@ -1115,7 +1115,7 @@ function inferSchedulingProcedure(body: string, serviceLine?: string) {
   const text = `${body} ${serviceLine ?? ""}`.toLowerCase();
   if (/(emergency|pain|swelling|broken|trauma|toothache|bleeding)/.test(text)) return { slug: "emergency-exam", label: "Emergency exam" };
   if (/(cleaning|hygiene|recall|recare|prophy)/.test(text)) return { slug: "hygiene-recare", label: "Hygiene cleaning" };
-  if (/(implant|aligner|invisalign|whitening|cosmetic|consult|crown|filling|root canal|exam|new patient|checkup|appointment|visit)/.test(text)) return { slug: "new-patient-exam", label: text.includes("implant") ? "Implant consultation" : "New patient exam" };
+  if (/(implant|aligner|invisalign|whitening|cosmetic|consult|crown|filling|root canal|exam|new patient|checkup)/.test(text)) return { slug: "new-patient-exam", label: text.includes("implant") ? "Implant consultation" : "New patient exam" };
   return null;
 }
 
@@ -1147,13 +1147,13 @@ function filterSlotsByRequestedDay(slots: PmsOnlineSlot[], requestedDay: string)
 
 function formatSlot(slot: PmsOnlineSlot) {
   const startsAt = new Date(slot.startsAt);
-  const date = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Denver" }).format(startsAt);
+  const date = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(startsAt);
   return `${date} with ${slot.providerName} in ${slot.operatoryName}`;
 }
 
 function formatExistingAppointment(appointment: { startsAt: string; appointmentType: string; providerName: string | null }) {
   const startsAt = new Date(appointment.startsAt);
-  const date = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Denver" }).format(startsAt);
+  const date = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(startsAt);
   return `${appointment.appointmentType} on ${date}${appointment.providerName ? ` with ${appointment.providerName}` : ""}`;
 }
 
