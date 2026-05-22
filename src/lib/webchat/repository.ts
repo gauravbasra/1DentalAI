@@ -714,6 +714,74 @@ export async function updateWebchatChannelSetting(input: {
   await addWebchatAudit(tenantId, "WEBCHAT_CHANNEL_SETTING_UPDATED", "WEB_CHAT", "ALLOWED", { connectorStatus: "CONNECTOR_REQUIRED" });
 }
 
+export async function upsertPatientEngagementChannelSetting(input: {
+  tenantId?: string;
+  channel: string;
+  displayName: string;
+  status: string;
+  primaryColor?: string;
+  launcherText?: string;
+  nlpMode?: string;
+  knowledgeBaseStatus?: string;
+  schedulingStatus?: string;
+  formsStatus?: string;
+  connectorStatus?: string;
+  staffApprovalRequired?: boolean;
+  appointmentWritebackRequiresPmsConnector?: boolean;
+  clinicalAdviceBlocked?: boolean;
+  nextAction?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const channel = input.channel.trim().toUpperCase().replaceAll(" ", "_") || "WEB_CHAT";
+  const theme = {
+    primaryColor: input.primaryColor?.trim() || "#0891b2",
+    launcherText: input.launcherText?.trim() || "Need help?",
+    position: "bottom-right",
+  };
+  const approvalPolicy = {
+    staffReplyRequiresApproval: input.staffApprovalRequired ?? true,
+    appointmentWritebackRequiresPmsConnector: input.appointmentWritebackRequiresPmsConnector ?? true,
+    clinicalAdviceBlocked: input.clinicalAdviceBlocked ?? true,
+  };
+  await query(
+    `insert into "PatientEngagementChannelSetting"
+      ("id", "tenantId", "channel", "displayName", "status", "theme", "nlpMode", "knowledgeBaseStatus", "schedulingStatus", "formsStatus", "connectorStatus", "approvalPolicy", "nextAction")
+     values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12::jsonb, $13)
+     on conflict ("tenantId", "channel") do update set
+       "displayName" = excluded."displayName",
+       "status" = excluded."status",
+       "theme" = excluded."theme",
+       "nlpMode" = excluded."nlpMode",
+       "knowledgeBaseStatus" = excluded."knowledgeBaseStatus",
+       "schedulingStatus" = excluded."schedulingStatus",
+       "formsStatus" = excluded."formsStatus",
+       "connectorStatus" = excluded."connectorStatus",
+       "approvalPolicy" = excluded."approvalPolicy",
+       "nextAction" = excluded."nextAction",
+       "updatedAt" = current_timestamp`,
+    [
+      newId("channel"),
+      tenantId,
+      channel,
+      input.displayName.trim() || channel.replaceAll("_", " "),
+      input.status || "READY_FOR_REVIEW",
+      JSON.stringify(theme),
+      input.nlpMode || "RULES_AND_AI_DRAFT",
+      input.knowledgeBaseStatus || "NEEDS_REVIEW",
+      input.schedulingStatus || "PMS_CONNECTOR_REQUIRED",
+      input.formsStatus || "PMS_FORMS_REQUIRED",
+      input.connectorStatus || "CONNECTOR_REQUIRED",
+      JSON.stringify(approvalPolicy),
+      input.nextAction?.trim() || "Review channel policy, connector readiness, consent, and scheduling handoff before live automation.",
+    ],
+  );
+  await addWebchatAudit(tenantId, "PATIENT_ENGAGEMENT_CHANNEL_SETTING_UPSERTED", channel, "ALLOWED", {
+    status: input.status,
+    connectorStatus: input.connectorStatus,
+    approvalPolicy,
+  });
+}
+
 export type WebchatAiRuntimeSettings = {
   llmSettings: {
     textModel: string;
