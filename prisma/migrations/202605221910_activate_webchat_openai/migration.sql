@@ -48,9 +48,9 @@ where "tenantId" = 'tenant_1dentalai_production'
 
 update "ConnectorInstallation" i
 set "approvalStatus" = 'APPROVED',
-    "webhookStatus" = case when "webhookStatus" in ('MISSING', 'PENDING') then 'NOT_REQUIRED' else "webhookStatus" end,
-    "status" = case when "credentialStatus" = 'VALIDATED' and "healthStatus" = 'PASS' then 'ACTIVE' else "status" end,
-    "nextAction" = case when "credentialStatus" = 'VALIDATED' and "healthStatus" = 'PASS'
+    "webhookStatus" = case when i."webhookStatus" in ('MISSING', 'PENDING') then 'NOT_REQUIRED' else i."webhookStatus" end,
+    "status" = case when i."credentialStatus" = 'VALIDATED' and i."healthStatus" = 'PASS' then 'ACTIVE' else i."status" end,
+    "nextAction" = case when i."credentialStatus" = 'VALIDATED' and i."healthStatus" = 'PASS'
       then 'OpenAI connector approved for BAA/PHI-gated webchat runtime. Keep model policy, audit logs, and approved local RAG enabled.'
       else "nextAction"
     end,

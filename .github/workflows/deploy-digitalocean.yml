@@ -146,7 +146,7 @@ jobs:
               if grep -q '^OPENAI_PHI_ALLOWED=' .env; then sed -i "s|^OPENAI_PHI_ALLOWED=.*|OPENAI_PHI_ALLOWED=\${OPENAI_PHI_ALLOWED_VALUE}|" .env; else printf '\\nOPENAI_PHI_ALLOWED=%s\\n' "\${OPENAI_PHI_ALLOWED_VALUE}" >> .env; fi
             fi
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
-            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm ci && (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true) && npx prisma migrate deploy' < /dev/null
+            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm ci && (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true) && (npx prisma migrate resolve --rolled-back 202605221910_activate_webchat_openai || true) && npx prisma migrate deploy' < /dev/null
           EOF
             sleep 10
           done
