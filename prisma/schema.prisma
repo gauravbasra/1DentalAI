@@ -488,6 +488,34 @@ model PmsAppointment {
   @@index([tenantId, status])
 }
 
+model PmsVirtualVisit {
+  id                String    @id
+  tenantId          String
+  appointmentId     String
+  patientId         String?
+  providerId        String?
+  provider          String    @default("ZOOM")
+  providerMeetingId String
+  providerUuid      String?
+  topic             String
+  startUrl          String?
+  joinUrl           String
+  password          String?
+  status            String    @default("CREATED")
+  participantStatus String    @default("NOT_STARTED")
+  startedAt         DateTime?
+  endedAt           DateTime?
+  lastEventAt       DateTime?
+  createdByRole     String    @default("front_desk")
+  metadata          Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([provider, providerMeetingId])
+  @@index([tenantId, appointmentId, createdAt])
+  @@index([provider, providerUuid])
+}
+
 model PmsAppointmentCategory {
   id                  String   @id @default(cuid())
   tenantId            String

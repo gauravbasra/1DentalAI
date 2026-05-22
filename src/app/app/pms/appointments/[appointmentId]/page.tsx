@@ -4,6 +4,7 @@ import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/compone
 import { EmptyPmsState, Money, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { addAppointmentProcedure, completeAppointmentCheckout, getAppointmentControl, listProcedureCodes } from "@/lib/pms-repository";
+import { createZoomMeetingForAppointment, listVirtualVisitsForAppointment } from "@/lib/zoom-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,17 @@ async function checkoutAction(appointmentId: string, formData: FormData) {
   revalidatePath("/app/pms/insurance");
 }
 
+async function createZoomMeetingAction(appointmentId: string, formData: FormData) {
+  "use server";
+  await createZoomMeetingForAppointment({
+    appointmentId,
+    actorRole: String(formData.get("actorRole") ?? "front_desk"),
+    agenda: String(formData.get("agenda") ?? ""),
+  });
+  revalidatePath(`/app/pms/appointments/${appointmentId}`);
+  revalidatePath("/app/pms/schedule");
+}
+
 export default async function AppointmentControlPage({
   params,
   searchParams,
@@ -54,7 +66,7 @@ export default async function AppointmentControlPage({
 }) {
   const [{ appointmentId }, query] = await Promise.all([params, searchParams]);
   const role = getRole(query.role);
-  const [control, procedureCodes] = await Promise.all([getAppointmentControl(appointmentId), listProcedureCodes()]);
+  const [control, procedureCodes, virtualVisits] = await Promise.all([getAppointmentControl(appointmentId), listProcedureCodes(), listVirtualVisitsForAppointment(appointmentId)]);
 
   if (!control) {
     return (
@@ -67,6 +79,7 @@ export default async function AppointmentControlPage({
   const appointment = control.appointment;
   const addProcedure = addProcedureAction.bind(null, appointment.id);
   const checkout = checkoutAction.bind(null, appointment.id);
+  const createZoom = createZoomMeetingAction.bind(null, appointment.id);
   const hardBlockers = control.readinessBlockers.filter((item) => item.severity === "HARD");
 
   return (
@@ -114,6 +127,36 @@ export default async function AppointmentControlPage({
               </div>
             ) : (
               <div className="rounded-md bg-emerald-50 p-3 text-sm font-medium text-emerald-900">Ready for standard checkout.</div>
+            )}
+          </PmsCard>
+
+          <PmsCard title="Virtual visit" eyebrow="Zoom">
+            {virtualVisits.length ? (
+              <div className="grid gap-3">
+                {virtualVisits.map((visit) => (
+                  <div key={visit.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-neutral-950">{visit.topic}</p>
+                        <p className="mt-1 text-xs text-neutral-500">Meeting {visit.providerMeetingId} · created {new Date(visit.createdAt).toLocaleString()}</p>
+                      </div>
+                      <StatusFor value={visit.status} />
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <a href={visit.joinUrl} target="_blank" rel="noreferrer" className="rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white">Open patient join link</a>
+                      {visit.startUrl ? <a href={visit.startUrl} target="_blank" rel="noreferrer" className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-800">Start as host</a> : null}
+                    </div>
+                    <p className="mt-2 text-xs text-neutral-600">Participant: {visit.participantStatus} · Last event: {visit.lastEventAt ? new Date(visit.lastEventAt).toLocaleString() : "none yet"}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <form action={createZoom} className="grid gap-3">
+                <input type="hidden" name="actorRole" value={role.key} />
+                <textarea name="agenda" rows={3} placeholder="Virtual consult agenda shown in Zoom meeting metadata" className="rounded-md border border-neutral-300 px-3 py-2 text-sm" />
+                <button className="rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white">Create Zoom meeting</button>
+                <p className="text-xs leading-5 text-neutral-500">Creates a real Zoom meeting, saves join/start URLs to this appointment, and records webhook status when Zoom sends events.</p>
+              </form>
             )}
           </PmsCard>
 

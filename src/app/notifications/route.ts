@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { isDatabaseConfigured, newId, query } from "@/lib/db";
+import { applyZoomWebhookToVirtualVisit } from "@/lib/zoom-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -117,5 +118,7 @@ export async function POST(request: NextRequest) {
   }
 
   await storeEvent({ body, request, signatureStatus, validationStatus: "NOT_VALIDATION_EVENT" });
+  const payload = body.payload && typeof body.payload === "object" ? body.payload as Record<string, unknown> : {};
+  await applyZoomWebhookToVirtualVisit({ event: body.event || "unknown", payload, eventTs: body.event_ts }).catch((error) => console.error("Zoom virtual visit webhook apply failed", error));
   return NextResponse.json({ ok: true, received: true });
 }
