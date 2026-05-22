@@ -26,6 +26,7 @@ Competitor references:
 Production workbench requirements:
 - Live call console with active calls, answer, hold, resume, transfer, park, warm transfer, outbound dial, voicemail, and call disposition.
 - Carrier/provider setup with trunk domain, caller ID, number porting, E911, SMS registration, recording policy, webhook status, smoke test result, and blocked next action.
+- Phone/AI voice/video work must re-check Zoom readiness before any phone-app video visit or conference workflow is called live: Zoom token minting works, but user lookup currently reports missing `user:read:user` / `user:read:user:admin`. If meeting creation or host lookup errors during phone-app work, add the required Zoom scope or configure a host user before launch.
 - Extensions and physical devices with MAC address, provisioning state, registration state, assigned staff, desk/room location, voicemail policy, and failover route.
 - PMS screen pop from caller number to patient/family/guarantor, appointments, ledger balance, open treatment, next recall, missed forms, and communication preferences.
 - AI call analytics with transcript, summary, sentiment, intent, booking opportunity, service recovery risk, and required staff follow-up.
