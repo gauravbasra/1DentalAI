@@ -948,8 +948,9 @@ async function bookOfferedSlot(input: {
     );
   }
 
+  let booking: { bookingId: string; appointmentId: string; patientId: string; isReturningPatient: boolean };
   try {
-    const booking = await submitOnlineBooking({
+    booking = await submitOnlineBooking({
       tenantId: input.tenantId,
       slug: input.offer.slug,
       startsAt: input.slot.startsAt,
@@ -962,43 +963,6 @@ async function bookOfferedSlot(input: {
       patientNote: `Booked from webchat. Visitor said: ${input.body.slice(0, 180)}`,
       utmSource: "webchat",
     });
-    const confirmation = await stageAndSendAppointmentConfirmation({
-      tenantId: input.tenantId,
-      conversationId: input.conversationId,
-      appointmentId: booking.appointmentId,
-      patientId: booking.patientId,
-      phone: contact.visitorPhone,
-      consentAccepted: Boolean(contact.consentAccepted),
-      slot: input.slot,
-      serviceLabel: input.offer.serviceLabel,
-    });
-    await query(
-      `insert into "PatientWebChatEvent" ("id", "tenantId", "conversationId", "eventType", "payload")
-       values ($1, $2, $3, 'APPOINTMENT_BOOKED_FROM_WEBCHAT', $4::jsonb)`,
-      [
-        newId("evt"),
-        input.tenantId,
-        input.conversationId,
-        JSON.stringify({ ...booking, slot: input.slot, serviceLabel: input.offer.serviceLabel, confirmation }),
-      ],
-    );
-    const confirmationLine = confirmation.smsDeliveryStatus === "SENT_TO_PROVIDER"
-      ? "I also sent a text confirmation."
-      : "The confirmation is saved in the appointment record and ready for the practice communication queue.";
-    return schedulingDecision(
-      `Booked. You’re confirmed for ${input.offer.serviceLabel.toLowerCase()} on ${formatSlot(input.slot)}. ${confirmationLine}`,
-      "PMS_APPOINTMENT_BOOKED",
-      "BOOKED_TO_PMS",
-      {
-        kind: "APPOINTMENT_BOOKED",
-        appointmentId: booking.appointmentId,
-        patientId: booking.patientId,
-        bookingId: booking.bookingId,
-        isReturningPatient: booking.isReturningPatient,
-        slot: input.slot,
-        confirmation,
-      },
-    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "That appointment time is no longer available.";
     const procedure = { slug: input.offer.slug, label: input.offer.serviceLabel };
@@ -1018,6 +982,45 @@ async function bookOfferedSlot(input: {
       blockedReason: message,
     });
   }
+
+  const confirmation = await stageAndSendAppointmentConfirmation({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+    appointmentId: booking.appointmentId,
+    patientId: booking.patientId,
+    phone: contact.visitorPhone,
+    consentAccepted: Boolean(contact.consentAccepted),
+    slot: input.slot,
+    serviceLabel: input.offer.serviceLabel,
+  }).catch((error) => ({
+    smsDeliveryStatus: "CONFIRMATION_QUEUE_ERROR",
+    reason: error instanceof Error ? error.message : "Confirmation queue failed after appointment booking.",
+  }));
+  await query(
+    `insert into "PatientWebChatEvent" ("id", "tenantId", "conversationId", "eventType", "payload")
+     values ($1, $2, $3, 'APPOINTMENT_BOOKED_FROM_WEBCHAT', $4::jsonb)`,
+    [
+      newId("evt"),
+      input.tenantId,
+      input.conversationId,
+      JSON.stringify({ ...booking, slot: input.slot, serviceLabel: input.offer.serviceLabel, confirmation }),
+    ],
+  ).catch(() => null);
+  const confirmationLine = "The confirmation is saved with the appointment.";
+  return schedulingDecision(
+    `Booked. You’re confirmed for ${input.offer.serviceLabel.toLowerCase()} on ${formatSlot(input.slot)}. ${confirmationLine}`,
+    "PMS_APPOINTMENT_BOOKED",
+    "BOOKED_TO_PMS",
+    {
+      kind: "APPOINTMENT_BOOKED",
+      appointmentId: booking.appointmentId,
+      patientId: booking.patientId,
+      bookingId: booking.bookingId,
+      isReturningPatient: booking.isReturningPatient,
+      slot: input.slot,
+      confirmation,
+    },
+  );
 }
 
 async function stageAndSendAppointmentConfirmation(input: {
