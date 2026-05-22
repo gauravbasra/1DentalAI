@@ -50,6 +50,9 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     voiceListening: false,
     voiceStatus: '',
     draft: '',
+    pendingPrompt: '',
+    lastConversationStatus: '',
+    lastSchedulingOutcome: '',
   };
   var root = document.createElement('div');
   root.id = 'one-dental-ai-webchat';
@@ -97,13 +100,13 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       ':host{all:initial;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111827}' +
       '.wrap{position:fixed;right:20px;bottom:20px;z-index:2147483000;display:flex;flex-direction:column;align-items:flex-end;gap:12px}' +
       '.launcher{border:0;border-radius:999px;background:'+primary+';color:white;padding:13px 17px;font-size:14px;font-weight:800;box-shadow:0 14px 34px rgba(0,0,0,.22);cursor:pointer}' +
-      '.panel{width:min(384px,calc(100vw - 24px));height:min(620px,calc(100vh - 88px));background:#fff;border:1px solid #d4d4d4;border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.22);overflow:hidden;display:flex;flex-direction:column}' +
+      '.panel{width:min(430px,calc(100vw - 24px));height:min(680px,calc(100vh - 88px));background:#fff;border:1px solid #d4d4d4;border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.22);overflow:hidden;display:flex;flex-direction:column}' +
       '.head{background:#0a0a0a;color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px}' +
-      '.title{font-size:14px;font-weight:850}.sub{font-size:11px;color:#cbd5e1;margin-top:2px}.close{background:transparent;border:0;color:#fff;font-size:24px;line-height:1;cursor:pointer}' +
+      '.title{font-size:14px;font-weight:850}.sub{font-size:11px;color:#cbd5e1;margin-top:2px}.headActions{display:flex;align-items:center;gap:8px}.newchat{border:1px solid rgba(255,255,255,.28);border-radius:999px;background:rgba(255,255,255,.08);color:#fff;padding:7px 10px;font-size:11px;font-weight:850;cursor:pointer}.close{background:transparent;border:0;color:#fff;font-size:24px;line-height:1;cursor:pointer}' +
       '.identity{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border-bottom:1px solid #e5e5e5;background:#fafafa}.identity input,.identity select{min-width:0;border:1px solid #d4d4d4;border-radius:9px;padding:10px;font-size:13px;background:#fff}.identity input:first-child{grid-column:1/-1}.wide{grid-column:1/-1}.consent{grid-column:1/-1;display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start;border:1px solid #e5e5e5;border-radius:9px;background:#fff;padding:9px;font-size:11px;line-height:1.35;color:#525252}.consent input{margin-top:2px}.consent b{color:#171717}' +
       '.contactbar{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e5e5e5;background:#fff;padding:10px 12px}.contacttext{min-width:0}.contactname{font-size:13px;font-weight:850;color:#171717;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.contactmeta{margin-top:2px;font-size:11px;color:#737373;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.editbtn{border:1px solid #d4d4d4;border-radius:999px;background:#fff;padding:7px 10px;font-size:11px;font-weight:850;color:#171717;cursor:pointer}' +
       '.chips{display:flex;gap:7px;overflow-x:auto;padding:10px 12px;border-bottom:1px solid #e5e5e5;background:#fff}.chip{white-space:nowrap;border:1px solid #d4d4d4;background:#fff;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}.chip:hover{border-color:'+primary+';color:'+primary+'}' +
-      '.msgs{flex:1;overflow:auto;padding:14px;background:#f5f5f4;display:flex;flex-direction:column;gap:10px}.msg{max-width:86%;border-radius:13px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap}.bot{align-self:flex-start;background:#fff;border:1px solid #e5e5e5}.me{align-self:flex-end;background:'+primary+';color:#fff}' +
+      '.msgs{flex:1;overflow:auto;padding:14px;background:#f5f5f4;display:flex;flex-direction:column;gap:10px}.msg{max-width:88%;border-radius:13px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap}.bot{align-self:flex-start;background:#fff;border:1px solid #e5e5e5}.me{align-self:flex-end;background:'+primary+';color:#fff}.guided{align-self:stretch;border:1px solid #bfdbfe;background:#eff6ff;border-radius:14px;padding:12px}.guidedTitle{font-size:12px;font-weight:900;color:#172554}.guidedText{margin-top:3px;font-size:12px;line-height:1.45;color:#1e3a8a}.slotlist{display:grid;gap:8px;margin-top:10px}.slotbtn{width:100%;text-align:left;border:1px solid #bfdbfe;background:#fff;border-radius:12px;padding:10px 11px;color:#111827;cursor:pointer;font-size:12px;line-height:1.35}.slotbtn:hover{border-color:'+primary+'}.slotidx{display:inline-grid;width:22px;height:22px;place-items:center;border-radius:999px;background:'+primary+';color:#fff;font-size:11px;font-weight:900;margin-right:8px}.status{align-self:stretch;border-radius:13px;padding:10px 12px;font-size:12px;line-height:1.45;border:1px solid #bbf7d0;background:#f0fdf4;color:#14532d}.status b{display:block;margin-bottom:2px}' +
       '.composer{display:grid;grid-template-columns:1fr auto auto;gap:8px;padding:12px;border-top:1px solid #e5e5e5;background:#fff}.composer textarea{height:44px;resize:none;border:1px solid #d4d4d4;border-radius:10px;padding:10px;font-size:13px;font-family:inherit}.composer button{border:0;border-radius:10px;background:#0a0a0a;color:#fff;font-weight:850;padding:0 14px;cursor:pointer}.composer button:disabled{opacity:.55;cursor:not-allowed}.iconbtn{width:44px;height:44px;display:grid;place-items:center;border-radius:999px!important;border:1px solid #d4d4d4!important;background:#fff!important;color:#111827!important;padding:0!important}.iconbtn svg{width:20px;height:20px}.iconbtn.listening{border-color:#fecaca!important;background:#fef2f2!important;color:#b91c1c!important}.voiceStatus{grid-column:1/-1;font-size:11px;font-weight:700;color:#525252;min-height:14px}.meta{padding:9px 12px;font-size:10px;line-height:1.35;color:#525252;border-top:1px solid #eee;background:#fff;white-space:pre-line}' +
       '@media(max-width:520px){.wrap{right:12px;bottom:12px}.panel{width:calc(100vw - 24px);height:calc(100vh - 88px)}.identity{grid-template-columns:1fr}}' +
       '</style>';
@@ -155,6 +158,8 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
           render();
           return;
         }
+        state.lastConversationStatus = transcript.conversation.status || '';
+        state.lastSchedulingOutcome = transcript.conversation.schedulingOutcome || '';
         state.messages = (transcript.messages || []).map(normalizeMessage);
         render();
       } catch (error) {}
@@ -174,14 +179,25 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     }
     (state.messages || []).forEach(function(m){
       messages.appendChild(h('div', { class: 'msg ' + (m.senderType === 'VISITOR' ? 'me' : 'bot'), text: formatMessageText(m) }, []));
+      var slots = appointmentSlots(m);
+      if (slots.length) messages.appendChild(slotPicker(slots));
     });
+    if (state.lastSchedulingOutcome === 'PMS_APPOINTMENT_BOOKED') {
+      messages.appendChild(h('div', { class:'status' }, [
+        h('b', { text:'Appointment booked' }, []),
+        document.createTextNode('This conversation has a confirmed appointment in the practice calendar. Start a new chat for another request.')
+      ]));
+    }
     return h('div', { class: 'panel' }, [
       h('div', { class: 'head' }, [
         h('div', {}, [
           h('div', { class:'title', text:'1DentalAI Web Chat' }, []),
           h('div', { class:'sub', text:'Live chat · scheduling connected' }, [])
         ]),
-        h('button', { class:'close', onclick: toggle, 'aria-label':'Close chat', text:'×' }, [])
+        h('div', { class:'headActions' }, [
+          h('button', { class:'newchat', type:'button', onclick: resetConversation, text:'New chat' }, []),
+          h('button', { class:'close', onclick: toggle, 'aria-label':'Close chat', text:'×' }, [])
+        ])
       ]),
       readyForChat && !state.editingIdentity ? contactBar() : h('div', { class: 'identity' }, [
         input('visitorName','Name'),
@@ -203,6 +219,30 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       ]),
       h('div', { class:'meta' }, ['I can help with appointments, services, insurance questions, forms, and follow-up requests.']),
       h('div', { class:'meta' }, ['Call 911 or emergency services for life-threatening symptoms.'])
+    ]);
+  }
+
+  function appointmentSlots(message){
+    if (!message || message.senderType === 'VISITOR') return [];
+    var status = message.actionStatus || '';
+    var body = message.body || '';
+    if (status !== 'PMS_SLOTS_OFFERED' && !/Reply with the number you want/i.test(body)) return [];
+    return body.split('\\n').map(function(line){
+      var match = line.match(/^\\s*(\\d+)\\.\\s+(.+)$/);
+      return match ? { index: match[1], label: match[2] } : null;
+    }).filter(Boolean).slice(0, 6);
+  }
+
+  function slotPicker(slots){
+    return h('div', { class:'guided' }, [
+      h('div', { class:'guidedTitle', text:'Choose an appointment time' }, []),
+      h('div', { class:'guidedText', text:'These openings were read from the practice schedule. Selecting one attempts to book and block the calendar.' }, []),
+      h('div', { class:'slotlist' }, slots.map(function(slot){
+        return h('button', { class:'slotbtn', type:'button', onclick:function(){ submitText(String(slot.index)); } }, [
+          h('span', { class:'slotidx', text:String(slot.index) }, []),
+          document.createTextNode(slot.label)
+        ]);
+      }))
     ]);
   }
 
@@ -281,10 +321,10 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
 
   function quickChips(){
     return h('div', { class:'chips' }, [
-      h('button', { class:'chip', type:'button', onclick:function(){ seedPrompt('I want to schedule a dental appointment.'); }, text:'Book visit' }, []),
-      h('button', { class:'chip', type:'button', onclick:function(){ seedPrompt('I have tooth pain or swelling and need help.'); }, text:'Urgent pain' }, []),
-      h('button', { class:'chip', type:'button', onclick:function(){ seedPrompt('I want to know insurance or financing options.'); }, text:'Insurance/cost' }, []),
-      h('button', { class:'chip', type:'button', onclick:function(){ seedPrompt('I need to reschedule my appointment.'); }, text:'Reschedule' }, [])
+      h('button', { class:'chip', type:'button', onclick:function(){ submitText('I want to schedule a dental appointment.'); }, text:'Book visit' }, []),
+      h('button', { class:'chip', type:'button', onclick:function(){ submitText('I have tooth pain or swelling and need help.'); }, text:'Urgent pain' }, []),
+      h('button', { class:'chip', type:'button', onclick:function(){ submitText('I want to know insurance or financing options.'); }, text:'Insurance/cost' }, []),
+      h('button', { class:'chip', type:'button', onclick:function(){ submitText('I need to reschedule my appointment.'); }, text:'Reschedule' }, [])
     ]);
   }
 
@@ -343,6 +383,20 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     render();
   }
 
+  function resetConversation(){
+    if (state.stream) state.stream.close();
+    state.stream = null;
+    state.session = null;
+    state.messages = [];
+    state.draft = '';
+    state.pendingPrompt = '';
+    state.lastConversationStatus = '';
+    state.lastSchedulingOutcome = '';
+    localStorage.removeItem(storageKey);
+    ensureSession();
+    render();
+  }
+
   async function ensureSession(){
     if (state.session && state.session.id) return state.session;
     var persisted = loadSession();
@@ -380,7 +434,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       if (!raw) return null;
       var parsed = JSON.parse(raw);
       if (!parsed || parsed.tenant !== TENANT || parsed.origin !== location.hostname || !parsed.id) return null;
-      if (Date.now() - (parsed.ts || 0) > 14 * 24 * 60 * 60 * 1000) {
+      if (Date.now() - (parsed.ts || 0) > 4 * 60 * 60 * 1000) {
         localStorage.removeItem(storageKey);
         return null;
       }
@@ -453,6 +507,8 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
         state.messages = [];
         return;
       }
+      state.lastConversationStatus = transcript.conversation.status || '';
+      state.lastSchedulingOutcome = transcript.conversation.schedulingOutcome || '';
       state.messages = (transcript.messages || []).map(normalizeMessage);
     } catch (error) {
     }
@@ -462,24 +518,39 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     event.preventDefault();
     var textarea = shadow.querySelector('textarea[name=\"message\"]');
     var body = textarea && textarea.value ? textarea.value.trim() : (state.draft || '').trim();
+    await submitText(body);
+  }
+
+  async function submitText(body){
+    body = (body || '').trim();
     if (!body || state.sending) return;
 
     if (!state.visitor.consentAccepted) {
       state.messages.push({ senderType:'ASSISTANT', body:'Please accept the privacy notice so I can save this chat for staff follow-up.' });
+      state.pendingPrompt = body;
       render();
       return;
     }
     if (!canChat()) {
       state.editingIdentity = true;
       state.messages.push({ senderType:'ASSISTANT', body:'Please add your name and either phone or email so the practice can follow up if the chat disconnects.' });
+      state.pendingPrompt = body;
       render();
       return;
     }
 
     state.sending = true;
     var session = await ensureSession();
+    if (state.lastSchedulingOutcome === 'PMS_APPOINTMENT_BOOKED') {
+      state.messages.push({ senderType:'ASSISTANT', body:'This appointment is already booked. Start a new chat if you need another visit or a different request.' });
+      state.sending = false;
+      render();
+      return;
+    }
     state.messages.push({ senderType:'VISITOR', body: body });
     state.draft = '';
+    state.pendingPrompt = '';
+    var textarea = shadow.querySelector('textarea[name=\"message\"]');
     if (textarea) textarea.value = '';
     render();
 
@@ -506,7 +577,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     }
 
     state.sending = false;
-    loadTranscript();
+    await loadTranscript();
     render();
   }
 

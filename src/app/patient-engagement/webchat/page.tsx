@@ -342,20 +342,21 @@ export default async function PatientEngagementWebchatPage({
                     </div>
                   </header>
 
-                  <div className="flex-1 overflow-y-auto bg-white px-6 py-5">
-                    <div className="mx-auto mb-6 w-fit rounded-full bg-neutral-100 px-4 py-2 text-xs font-semibold text-neutral-500">Today</div>
-                    <div className="space-y-5">
-                      {messages.length ? messages.map((message) => (
-                        <MessageBubble key={message.id} message={message} visitorLabel={personLabel(selectedConversation)} />
-                      )) : (
-                        <Empty title="No messages yet" body="The transcript appears here as soon as the widget or SMS thread receives a message." />
-                      )}
-                    </div>
-                  </div>
+                  <div className="grid min-h-0 flex-1 xl:grid-cols-[minmax(0,1fr)_400px]">
+                    <section className="flex min-w-0 flex-col">
+                      <div className="flex-1 overflow-y-auto bg-white px-6 py-5">
+                        <div className="mx-auto mb-6 w-fit rounded-full bg-neutral-100 px-4 py-2 text-xs font-semibold text-neutral-500">Today</div>
+                        <div className="space-y-5">
+                          {messages.length ? messages.map((message) => (
+                            <MessageBubble key={message.id} message={message} visitorLabel={personLabel(selectedConversation)} />
+                          )) : (
+                            <Empty title="No messages yet" body="The transcript appears here as soon as the widget or SMS thread receives a message." />
+                          )}
+                        </div>
+                      </div>
 
-                  <footer className="border-t border-neutral-200 bg-white px-6 py-5">
-                    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-                      <div className="space-y-4">
+                      <footer className="border-t border-neutral-200 bg-white px-6 py-5">
+                        <div className="space-y-4">
                         <form action={staffEntryAction} className="flex items-end gap-3">
                           <input type="hidden" name="conversationId" value={selectedConversation.id} />
                           <input type="hidden" name="entryType" value="STAFF_REPLY" />
@@ -372,10 +373,13 @@ export default async function PatientEngagementWebchatPage({
                             <button className="rounded-xl bg-amber-900 px-4 py-3 text-sm font-semibold text-white">Add note</button>
                           </div>
                         </form>
-                      </div>
+                        </div>
+                      </footer>
+                    </section>
+                    <aside className="min-h-0 overflow-y-auto border-l border-neutral-200 bg-neutral-50 p-4">
                       <TeamCollaborationPanel conversation={selectedConversation} team={teamPresence} />
-                    </div>
-                  </footer>
+                    </aside>
+                  </div>
                 </>
               ) : <div className="p-6"><Empty title="No conversation selected" body="Select a chat from the inbox." /></div>}
             </main>
