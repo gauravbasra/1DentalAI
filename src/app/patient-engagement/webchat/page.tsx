@@ -148,7 +148,7 @@ export default async function PatientEngagementWebchatPage({
 
       {view === "inbox" ? (
         <section className="overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-sm">
-          <div className="grid min-h-[760px] xl:grid-cols-[82px_360px_minmax(0,1fr)_330px]">
+          <div className="grid min-h-[760px] xl:grid-cols-[82px_380px_minmax(0,1fr)]">
             <aside className="hidden border-r border-neutral-200 bg-white xl:flex xl:flex-col xl:items-center xl:justify-between xl:py-6">
               <div className="space-y-6">
                 <Avatar label="FD" size="lg" tone="green" />
@@ -212,9 +212,14 @@ export default async function PatientEngagementWebchatPage({
               {selectedConversation ? (
                 <>
                   <header className="flex items-center justify-between gap-4 border-b border-neutral-200 px-6 py-4">
-                    <div>
-                      <h2 className="text-lg font-semibold text-neutral-950">{personLabel(selectedConversation)}</h2>
-                      <p className="text-sm text-neutral-500">{clean(selectedConversation.qualificationStage)} · {selectedConversation.sourceChannel === "SMS" ? "SMS thread" : "Website visitor"}</p>
+                    <div className="min-w-0">
+                      <h2 className="truncate text-lg font-semibold text-neutral-950">{personLabel(selectedConversation)}</h2>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-neutral-500">
+                        <span>{clean(selectedConversation.qualificationStage)}</span>
+                        <span>{selectedConversation.sourceChannel === "SMS" ? "SMS thread" : "Website visitor"}</span>
+                        <span>{selectedConversation.visitorPhone || selectedConversation.visitorEmail || "contact not captured"}</span>
+                        <span>{selectedConversation.leadScore} lead score</span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <StateBadge tone={(selectedConversation.automationMode || "AI_AUTO") === "AI_AUTO" ? "green" : "amber"}>{clean(selectedConversation.automationMode || "AI_AUTO")}</StateBadge>
@@ -235,6 +240,14 @@ export default async function PatientEngagementWebchatPage({
                   </div>
 
                   <footer className="border-t border-neutral-200 bg-white px-6 py-4">
+                    <form action={appointmentHandoffAction} className="mb-3 grid gap-2 rounded-2xl bg-neutral-50 p-3 lg:grid-cols-[1fr_140px_170px_1fr_auto]">
+                      <input type="hidden" name="conversationId" value={selectedConversation.id} />
+                      <Input name="requestedWindow" label="Requested window" placeholder="Tomorrow morning" />
+                      <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} />
+                      <Select name="ownerRoleKey" label="Owner" options={["front_desk", "treatment_coordinator", "practice_manager"]} />
+                      <Input name="note" label="Note" placeholder="Verify insurance first" />
+                      <button className="self-end rounded-xl bg-neutral-950 px-4 py-2 text-sm font-semibold text-white">Handoff</button>
+                    </form>
                     <form action={staffEntryAction} className="flex items-end gap-3">
                       <input type="hidden" name="conversationId" value={selectedConversation.id} />
                       <input type="hidden" name="entryType" value={(selectedConversation.automationMode || "AI_AUTO") === "AI_AUTO" ? "STAFF_NOTE" : "STAFF_REPLY"} />
@@ -252,45 +265,6 @@ export default async function PatientEngagementWebchatPage({
               ) : <div className="p-6"><Empty title="No conversation selected" body="Select a chat from the inbox." /></div>}
             </main>
 
-            <aside className="hidden border-l border-neutral-200 bg-white p-6 xl:block">
-              {selectedConversation ? (
-                <div className="space-y-6">
-                  <div className="text-center">
-                    <div className="mx-auto w-fit"><Avatar label={personLabel(selectedConversation)} size="xl" tone="dark" /></div>
-                    <h3 className="mt-4 text-base font-semibold text-neutral-950">{personLabel(selectedConversation)}</h3>
-                    <p className="text-sm text-neutral-500">{selectedConversation.visitorPhone || selectedConversation.visitorEmail || "contact not captured"}</p>
-                  </div>
-
-                  <Context label="Lead" value={`${selectedConversation.leadScore} score`} detail={`${clean(selectedConversation.qualificationStage)}; owner ${clean(selectedConversation.ownerRoleKey)}`} />
-                  <Context label="Automation" value={clean(selectedConversation.automationMode || "AI_AUTO")} detail={selectedConversation.handoffReason || "NLP auto response is active."} />
-                  <Context label="Source" value={selectedConversation.campaignSource || selectedConversation.sourceChannel || "website"} detail={selectedConversation.landingPageSlug || selectedConversation.sourcePage || "page not captured"} />
-
-                  <form action={appointmentHandoffAction} className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-                    <input type="hidden" name="conversationId" value={selectedConversation.id} />
-                    <p className="text-sm font-semibold text-neutral-950">Appointment handoff</p>
-                    <div className="mt-3 space-y-3">
-                      <Input name="requestedWindow" label="Requested window" placeholder="Tomorrow morning" />
-                      <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} />
-                      <Select name="ownerRoleKey" label="Owner" options={["front_desk", "treatment_coordinator", "practice_manager"]} />
-                      <Input name="note" label="Note" placeholder="Verify insurance first" />
-                    </div>
-                    <button className="mt-3 w-full rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Create handoff</button>
-                  </form>
-
-                  <div>
-                    <div className="mb-3 flex items-center justify-between">
-                      <p className="text-sm font-semibold text-neutral-950">Audit trail</p>
-                      <span className="text-sm font-semibold text-blue-600">{events.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {events.slice(-4).map((event, index) => (
-                        <div key={index} className="rounded-xl bg-neutral-50 px-3 py-2 text-xs font-semibold text-neutral-600">{clean(event.eventType)}</div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </aside>
           </div>
         </section>
       ) : null}
