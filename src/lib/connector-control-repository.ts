@@ -357,7 +357,7 @@ export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
     status: string;
     policy: unknown;
   }>(
-    `select i."id", i."credentialStatus", i."approvalStatus", i."healthStatus", i."status", i."costPolicyJson" as "policy"
+    `select i."id", i."credentialStatus", i."approvalStatus", i."healthStatus", i."status", i."costPolicy" as "policy"
      from "ConnectorInstallation" i
      join "ConnectorDefinition" d on d."id" = i."definitionId"
      where i."tenantId" = $1 and d."category" = 'AI_LLM'
