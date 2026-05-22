@@ -46,6 +46,10 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     messages: [],
     editingIdentity: false,
     stream: null,
+    speech: null,
+    voiceListening: false,
+    voiceStatus: '',
+    draft: '',
   };
   var root = document.createElement('div');
   root.id = 'one-dental-ai-webchat';
@@ -67,6 +71,25 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     return el;
   }
 
+  function svgIcon(kind){
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    if (kind === 'mic') {
+      [['path','M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z'],['path','M19 10v2a7 7 0 0 1-14 0v-2'],['path','M12 19v3'],['path','M8 22h8']].forEach(function(item){
+        var path = document.createElementNS('http://www.w3.org/2000/svg', item[0]);
+        path.setAttribute('d', item[1]);
+        svg.appendChild(path);
+      });
+    }
+    return svg;
+  }
+
   function render(){
     var theme = (state.settings && state.settings.theme) || {};
     var primary = theme.primaryColor || '#0891b2';
@@ -81,7 +104,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       '.contactbar{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #e5e5e5;background:#fff;padding:10px 12px}.contacttext{min-width:0}.contactname{font-size:13px;font-weight:850;color:#171717;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.contactmeta{margin-top:2px;font-size:11px;color:#737373;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.editbtn{border:1px solid #d4d4d4;border-radius:999px;background:#fff;padding:7px 10px;font-size:11px;font-weight:850;color:#171717;cursor:pointer}' +
       '.chips{display:flex;gap:7px;overflow-x:auto;padding:10px 12px;border-bottom:1px solid #e5e5e5;background:#fff}.chip{white-space:nowrap;border:1px solid #d4d4d4;background:#fff;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}.chip:hover{border-color:'+primary+';color:'+primary+'}' +
       '.msgs{flex:1;overflow:auto;padding:14px;background:#f5f5f4;display:flex;flex-direction:column;gap:10px}.msg{max-width:86%;border-radius:13px;padding:10px 12px;font-size:13px;line-height:1.45;white-space:pre-wrap}.bot{align-self:flex-start;background:#fff;border:1px solid #e5e5e5}.me{align-self:flex-end;background:'+primary+';color:#fff}' +
-      '.composer{display:grid;grid-template-columns:1fr auto;gap:8px;padding:12px;border-top:1px solid #e5e5e5;background:#fff}.composer textarea{height:44px;resize:none;border:1px solid #d4d4d4;border-radius:10px;padding:10px;font-size:13px;font-family:inherit}.composer button{border:0;border-radius:10px;background:#0a0a0a;color:#fff;font-weight:850;padding:0 14px;cursor:pointer}.composer button:disabled{opacity:.55;cursor:not-allowed}.meta{padding:9px 12px;font-size:10px;line-height:1.35;color:#525252;border-top:1px solid #eee;background:#fff;white-space:pre-line}' +
+      '.composer{display:grid;grid-template-columns:1fr auto auto;gap:8px;padding:12px;border-top:1px solid #e5e5e5;background:#fff}.composer textarea{height:44px;resize:none;border:1px solid #d4d4d4;border-radius:10px;padding:10px;font-size:13px;font-family:inherit}.composer button{border:0;border-radius:10px;background:#0a0a0a;color:#fff;font-weight:850;padding:0 14px;cursor:pointer}.composer button:disabled{opacity:.55;cursor:not-allowed}.iconbtn{width:44px;height:44px;display:grid;place-items:center;border-radius:999px!important;border:1px solid #d4d4d4!important;background:#fff!important;color:#111827!important;padding:0!important}.iconbtn svg{width:20px;height:20px}.iconbtn.listening{border-color:#fecaca!important;background:#fef2f2!important;color:#b91c1c!important}.voiceStatus{grid-column:1/-1;font-size:11px;font-weight:700;color:#525252;min-height:14px}.meta{padding:9px 12px;font-size:10px;line-height:1.35;color:#525252;border-top:1px solid #eee;background:#fff;white-space:pre-line}' +
       '@media(max-width:520px){.wrap{right:12px;bottom:12px}.panel{width:calc(100vw - 24px);height:calc(100vh - 88px)}.identity{grid-template-columns:1fr}}' +
       '</style>';
     var wrap = h('div', { class: 'wrap' }, []);
@@ -173,12 +196,72 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       quickChips(),
       messages,
       h('form', { class:'composer', onsubmit: submitMessage }, [
-        h('textarea', { name:'message', placeholder:'Ask a question or request an appointment', maxlength:'3000' }, []),
-        h('button', { type:'submit', disabled: state.visitor.consentAccepted ? null : 'disabled', text: state.sending ? '...' : 'Send' }, [])
+        h('textarea', { name:'message', placeholder:'Ask a question or request an appointment', maxlength:'3000', oninput: function(event){ state.draft = event.target.value; } }, [state.draft || '']),
+        h('button', { type:'button', class:'iconbtn ' + (state.voiceListening ? 'listening' : ''), onclick: toggleVoiceTyping, 'aria-label': state.voiceListening ? 'Stop voice typing' : 'Start voice typing', title: state.voiceListening ? 'Stop voice typing' : 'Start voice typing' }, [svgIcon('mic')]),
+        h('button', { type:'submit', disabled: state.visitor.consentAccepted ? null : 'disabled', text: state.sending ? '...' : 'Send' }, []),
+        h('div', { class:'voiceStatus', text: state.voiceStatus || '' }, [])
       ]),
       h('div', { class:'meta' }, ['I can help with appointments, services, insurance questions, forms, and follow-up requests.']),
       h('div', { class:'meta' }, ['Call 911 or emergency services for life-threatening symptoms.'])
     ]);
+  }
+
+  function appendTranscript(text){
+    if (!text || !text.trim()) return;
+    var prefix = state.draft && state.draft.trim() ? state.draft.trim() + ' ' : '';
+    state.draft = (prefix + text.trim()).trim();
+    var textarea = shadow.querySelector('textarea[name="message"]');
+    if (textarea) {
+      textarea.value = state.draft;
+      textarea.focus();
+    }
+  }
+
+  function toggleVoiceTyping(){
+    if (state.voiceListening) {
+      if (state.speech) state.speech.stop();
+      state.voiceListening = false;
+      state.voiceStatus = '';
+      render();
+      return;
+    }
+    var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      state.voiceStatus = 'Voice typing is not supported in this browser.';
+      render();
+      return;
+    }
+    var recognition = new Recognition();
+    state.speech = recognition;
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.onresult = function(event){
+      var finalText = '';
+      var interimText = '';
+      for (var index = event.resultIndex; index < event.results.length; index += 1) {
+        var transcript = event.results[index][0] && event.results[index][0].transcript ? event.results[index][0].transcript : '';
+        if (event.results[index].isFinal) finalText += transcript;
+        else interimText += transcript;
+      }
+      if (finalText) appendTranscript(finalText);
+      state.voiceStatus = interimText ? 'Listening: ' + interimText : 'Listening...';
+      render();
+    };
+    recognition.onerror = function(){
+      state.voiceListening = false;
+      state.voiceStatus = 'Microphone access failed. Check browser permission and try again.';
+      render();
+    };
+    recognition.onend = function(){
+      state.voiceListening = false;
+      state.voiceStatus = '';
+      render();
+    };
+    recognition.start();
+    state.voiceListening = true;
+    state.voiceStatus = 'Listening...';
+    render();
   }
 
   function canChat(){
@@ -378,7 +461,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
   async function submitMessage(event){
     event.preventDefault();
     var textarea = shadow.querySelector('textarea[name=\"message\"]');
-    var body = textarea && textarea.value ? textarea.value.trim() : '';
+    var body = textarea && textarea.value ? textarea.value.trim() : (state.draft || '').trim();
     if (!body || state.sending) return;
 
     if (!state.visitor.consentAccepted) {
@@ -396,7 +479,8 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     state.sending = true;
     var session = await ensureSession();
     state.messages.push({ senderType:'VISITOR', body: body });
-    textarea.value = '';
+    state.draft = '';
+    if (textarea) textarea.value = '';
     render();
 
     try {

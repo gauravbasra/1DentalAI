@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { StateBadge, WorkSurface } from "@/components/products/product-app-shell";
 import { PatientEngagementShell, clean } from "@/components/products/patient-engagement-shell";
 import { LivePanelRefresh } from "@/components/products/live-panel-refresh";
+import { SpeechComposer } from "@/components/products/speech-composer";
 import { getPhoneOperatingCenter } from "@/lib/operating-system-repository";
 import {
   crawlKnowledgePage,
@@ -253,11 +254,7 @@ export default async function PatientEngagementWebchatPage({
                       <input type="hidden" name="conversationId" value={selectedConversation.id} />
                       <input type="hidden" name="entryType" value="STAFF_REPLY" />
                       <input type="hidden" name="status" value="OPEN" />
-                      <div className="flex min-h-14 flex-1 items-center gap-3 rounded-2xl bg-neutral-100 px-4">
-                        <span className="text-xl text-neutral-500">+</span>
-                        <textarea name="body" required className="min-h-12 flex-1 resize-none bg-transparent py-4 text-sm outline-none" placeholder="Write a live reply to the visitor" />
-                        <span className="text-xl text-neutral-500">mic</span>
-                      </div>
+                      <SpeechComposer name="body" required placeholder="Write a live reply to the visitor" />
                       <button className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-600 text-lg font-semibold text-white shadow-sm">Send</button>
                     </form>
                     <p className="mt-2 text-xs text-neutral-500">Staff replies are delivered into the website chat stream in real time. Internal notes belong in the handoff form, not the visitor composer.</p>
