@@ -2241,9 +2241,9 @@ async function matchOrCreateOnlinePatient(input: { tenantId: string; firstName: 
      from "PmsPatient"
      where "tenantId" = $1
        and (
-        (lower(coalesce("email", '')) = lower($2) and $2 <> '')
-        or (regexp_replace(coalesce("phone", ''), '[^0-9]', '', 'g') = regexp_replace($3, '[^0-9]', '', 'g') and $3 <> '')
-        or (lower("firstName") = lower($4) and lower("lastName") = lower($5) and "dateOfBirth"::date = $6::date)
+        (lower(coalesce("email", '')) = lower($2::text) and $2::text <> '')
+        or (regexp_replace(coalesce("phone", ''), '[^0-9]', '', 'g') = regexp_replace($3::text, '[^0-9]', '', 'g') and $3::text <> '')
+        or (lower("firstName") = lower($4::text) and lower("lastName") = lower($5::text) and "dateOfBirth"::date = $6::date)
        )
      order by "updatedAt" desc
      limit 1`,
