@@ -627,7 +627,7 @@ async function buildAiAutoReply(input: {
   const openAiReply = await generateOpenAiReply(input);
   if (openAiReply) {
     return {
-      body: openAiReply,
+      body: sanitizePatientReply(openAiReply, input.analysis),
       automationMode: "AI_AUTO",
       handoffReason: null,
       actionStatus: input.analysis.actionStatus ?? "AI_AUTO_RESPONDED",
@@ -640,7 +640,7 @@ async function buildAiAutoReply(input: {
 
   const fallback = buildReply(input.analysis, input.knowledge);
   return {
-    body: fallback.body,
+    body: sanitizePatientReply(fallback.body, input.analysis),
     automationMode: "AI_AUTO",
     handoffReason: null,
     actionStatus: "AI_RULES_FALLBACK_RESPONDED",
@@ -674,12 +674,14 @@ async function generateOpenAiReply(input: {
     return `${index + 1}. ${title}: ${row.content.slice(0, 700)}`;
   }).join("\n");
   const system = [
-    "You are 1DentalAI's dental practice webchat and SMS assistant.",
-    "Answer automatically unless the user asks for a live person or the message is an emergency/clinical risk.",
+    "You are the patient-facing webchat assistant for a dental practice.",
+    "Write like a helpful front desk assistant speaking to a patient, not like a software system.",
+    "Never mention internal systems, PMS, RCM, writeback, connectors, workflows, claims, provider approvals, guardrails, statuses, or implementation limits.",
     "Do not diagnose, prescribe, quote guaranteed insurance benefits, or claim an appointment is booked.",
-    "For booking requests, collect preference and explain the team or scheduling system will confirm availability.",
-    "Keep answers concise, friendly, and dental-practice appropriate.",
-    "Use approved knowledge when provided. If not enough info is available, say so and route to the team.",
+    "For booking requests, ask for the patient's preferred day/time and say the front desk will confirm available options.",
+    "For insurance or pricing, ask for the plan name and treatment and say the team will review before giving an estimate.",
+    "Keep answers concise, warm, and dental-practice appropriate.",
+    "Use approved patient-facing knowledge only. If knowledge sounds like product documentation or operations language, ignore it.",
   ].join(" ");
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -711,6 +713,35 @@ async function generateOpenAiReply(input: {
   if (!response.ok) return null;
   const content = data?.choices?.[0]?.message?.content;
   return typeof content === "string" && content.trim() ? content.trim() : null;
+}
+
+function sanitizePatientReply(reply: string, analysis: WebchatAnalysis) {
+  const text = reply.trim();
+  const forbidden =
+    /PMS|RCM|writeback|connector|workflow|claim|provider approval|guardrail|approved knowledge base|STAFF_|AI_RULES|SENT_WITH|ANSWERED_WITH|RECEIVED|delivery|automation mode|cannot finalize|blocked|staged|route this to the right dental team member/i;
+  if (!text || forbidden.test(text)) {
+    return patientSafeFallback(analysis);
+  }
+  return text;
+}
+
+function patientSafeFallback(analysis: WebchatAnalysis) {
+  if (analysis.intent === "SCHEDULE_APPOINTMENT") {
+    return "I can help with that. Please share the best day and time for your visit, and the front desk will confirm the available appointment options with you.";
+  }
+  if (analysis.intent === "RESCHEDULE_APPOINTMENT") {
+    return "I can help start that request. Please share the appointment you want to move and your preferred time window. The team will verify your details before changing anything.";
+  }
+  if (analysis.intent === "INSURANCE_OR_PRICE") {
+    return "I can help get that reviewed. Please share your insurance plan name and the treatment you are asking about, and the team will confirm details before giving an estimate.";
+  }
+  if (analysis.intent === "EMERGENCY_TRIAGE") {
+    return "I’m going to flag this as urgent for the practice team. If you have severe swelling, uncontrolled bleeding, trauma, or trouble breathing, call emergency services now. Please share what happened and the best number to reach you.";
+  }
+  if (analysis.intent === "LIVE_PERSON_REQUEST") {
+    return "Absolutely. I’m bringing this to the front desk so a live person can help you from here.";
+  }
+  return "I can help with appointments, services, insurance questions, forms, and follow-up requests. What would you like help with today?";
 }
 
 export async function ingestSmsIntoAiConversation(input: { tenantId?: string; from: string; to: string; body: string; providerMessageId?: string }) {
