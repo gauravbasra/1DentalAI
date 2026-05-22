@@ -39,8 +39,26 @@ export async function GET(request: Request) {
             send("transcript", {
               conversationId,
               state,
-              messages: transcript.messages,
-              conversation: transcript.conversation,
+              messages: transcript.messages.filter((message) => message.senderType !== "STAFF_NOTE").map((message) => ({
+                id: message.id,
+                senderType: message.senderType,
+                senderName: message.senderType === "STAFF" ? "Practice team" : undefined,
+                body: message.body,
+                intent: message.intent,
+                sentiment: message.sentiment,
+                actionType: message.actionType,
+                actionStatus: message.actionStatus,
+                deliveryStatus: message.deliveryStatus,
+              })),
+              conversation: transcript.conversation
+                ? {
+                  id: transcript.conversation.id,
+                  status: transcript.conversation.status,
+                  visitorName: transcript.conversation.visitorName,
+                  sourceChannel: transcript.conversation.sourceChannel,
+                  schedulingOutcome: transcript.conversation.schedulingOutcome,
+                }
+                : null,
               analytics: transcript.analytics,
             });
           } else if (index % 20 === 0) {
