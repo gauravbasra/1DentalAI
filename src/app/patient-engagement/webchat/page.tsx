@@ -120,7 +120,6 @@ export default async function PatientEngagementWebchatPage({
   const selectedConversation = chats.find((chat) => chat.id === params.conversationId) ?? chats[0] ?? null;
   const transcript = selectedConversation ? await getConversationTranscript(selectedConversation.id) : null;
   const messages = (transcript?.messages ?? []) as WebChatMessageRow[];
-  const events = (transcript?.events ?? []) as WebChatEventRow[];
   const knowledge = (center.knowledgeSources ?? []) as KnowledgeRow[];
   const forms = (center.leadForms ?? []) as LeadFormRow[];
   const schedulingRules = (center.schedulingRules ?? []) as SchedulingRuleRow[];
@@ -411,7 +410,6 @@ type WebChatMessageRow = {
   deliveryStatus: string;
 };
 
-type WebChatEventRow = { eventType: string; payload?: unknown };
 type KnowledgeRow = { id: string; title: string; status: string; ownerRoleKey: string; contentSummary: string };
 type LeadFormRow = { id: string; name: string; serviceLine: string; status: string; connectorStatus: string };
 type SchedulingRuleRow = { id: string; name: string; status: string; bookingWindowDays: number; pmsWritebackStatus: string };
