@@ -1,14 +1,11 @@
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { Money, PmsCard, StatusFor } from "@/components/pms-ui";
 import {
   createConnectorRouteDecision,
   getConnectorControlCenter,
   recordConnectorHealthCheck,
-  storeConnectorCredential,
   updateConnectorInstallation,
-  validateOpenAiCredential,
 } from "@/lib/connector-control-repository";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 
@@ -72,43 +69,6 @@ async function recordHealthCheckAction(formData: FormData) {
     actorRole: value(formData, "actorRole") || "support_admin",
   });
   revalidatePath("/app/connectors");
-}
-
-async function storeCredentialAction(formData: FormData) {
-  "use server";
-  const role = value(formData, "actorRole") || "support_admin";
-  const providerKey = value(formData, "providerKey");
-  const credentialLabel = value(formData, "credentialLabel");
-  try {
-    await storeConnectorCredential({
-      installationId: value(formData, "installationId"),
-      providerKey,
-      credentialLabel,
-      credentialType: value(formData, "credentialType"),
-      secretValue: value(formData, "secretValue"),
-      actorRole: role,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Credential could not be stored.";
-    redirect(`/app/connectors?view=credentials&role=${encodeURIComponent(role)}&error=${encodeURIComponent(message)}`);
-  }
-  revalidatePath("/app/connectors");
-  redirect(`/app/connectors?view=credentials&role=${encodeURIComponent(role)}&saved=${encodeURIComponent(`${providerKey} ${credentialLabel}`)}`);
-}
-
-async function validateOpenAiCredentialAction(formData: FormData) {
-  "use server";
-  const role = value(formData, "actorRole") || "support_admin";
-  try {
-    await validateOpenAiCredential({
-      actorRole: role,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "OpenAI credential validation failed.";
-    redirect(`/app/connectors?view=credentials&role=${encodeURIComponent(role)}&error=${encodeURIComponent(message)}`);
-  }
-  revalidatePath("/app/connectors");
-  redirect(`/app/connectors?view=credentials&role=${encodeURIComponent(role)}&validated=OpenAI`);
 }
 
 function textList(value: unknown) {
@@ -223,7 +183,8 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
       {activeView === "credentials" ? (
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <PmsCard title="Credential vault intake" eyebrow="Twilio, NexHealth, Stedi keys">
-          <form action={storeCredentialAction} className="grid gap-3">
+          <LatestCredentialActivity credentials={data.credentialVault} />
+          <form action="/app/connectors/credentials" method="post" className="mt-3 grid gap-3">
             <input type="hidden" name="actorRole" value={role.key} />
             <label className="block text-xs font-semibold text-neutral-600">
               Connector installation
@@ -270,7 +231,7 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
               Secrets are encrypted at rest and never displayed after saving. Saving a key changes readiness to pending only; Twilio calls/SMS, NexHealth PMS writes, and Stedi payer transactions still require webhook verification, tenant approval, smoke tests, and provider response evidence.
             </p>
           </form>
-          <form action={validateOpenAiCredentialAction} className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3">
+          <form action="/app/connectors/credentials/validate-openai" method="post" className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3">
             <input type="hidden" name="actorRole" value={role.key} />
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-sky-800">OpenAI smoke test</p>
             <p className="mt-1 text-xs leading-5 text-sky-900">
@@ -614,6 +575,33 @@ function FallbackQueue({ data }: { data: Awaited<ReturnType<typeof getConnectorC
         ))}
       </div>
     </PmsCard>
+  );
+}
+
+function LatestCredentialActivity({ credentials }: { credentials: Awaited<ReturnType<typeof getConnectorControlCenter>>["credentialVault"] }) {
+  const latest = [...credentials].sort((a, b) => new Date(String(b.rotatedAt ?? b.createdAt ?? 0)).getTime() - new Date(String(a.rotatedAt ?? a.createdAt ?? 0)).getTime())[0];
+  if (!latest) {
+    return (
+      <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Vault status</p>
+        <p className="mt-1 text-sm font-semibold text-neutral-950">No credentials stored yet</p>
+        <p className="mt-1 text-xs leading-5 text-neutral-600">After saving, the latest stored credential fingerprint will appear here and in the list on the right.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-emerald-800">Latest vault activity</p>
+          <p className="mt-1 text-sm font-semibold text-emerald-950">{latest.providerKey} · {latest.credentialLabel}</p>
+          <p className="mt-1 text-xs leading-5 text-emerald-900">
+            Stored {formatDate(latest.rotatedAt ?? latest.createdAt)} · status {latest.status} · ending {latest.lastFour ?? "n/a"}
+          </p>
+        </div>
+        <StatusFor value={latest.status} />
+      </div>
+    </div>
   );
 }
 
