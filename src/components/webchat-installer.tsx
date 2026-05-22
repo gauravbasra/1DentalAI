@@ -15,5 +15,5 @@ export function WebchatInstaller() {
     pathname?.startsWith("/login") ||
     pathname?.startsWith("/signup")
   ) return null;
-  return <Script src="/api/webchat/widget.js?tenant=tenant_1dentalai_production" strategy="afterInteractive" />;
+  return <Script src="/api/webchat/widget.js?tenant=tenant_1dentalai_production&v=20260522-patient-chat-clean" strategy="afterInteractive" />;
 }

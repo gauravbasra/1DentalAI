@@ -797,36 +797,38 @@ async function retrieveKnowledge(message: string, tenantId: string) {
 
 function buildReply(analysis: WebchatAnalysis, knowledge: Array<{ content: string; heading: string | null; pageTitle: string }>) {
   const knowledgeExcerpt = summarizeKnowledge(knowledge[0]);
-  const context = knowledgeExcerpt ? `Here is what I can share from the approved knowledge base: ${knowledgeExcerpt}` : "I can help route this to the right dental team member.";
+  const context = knowledgeExcerpt || "I can help with appointments, services, insurance questions, forms, and follow-up requests.";
   if (analysis.intent === "SCHEDULE_APPOINTMENT") {
-    return { body: `${context}\n\nI can collect your request and have the front desk confirm appointment options. I cannot finalize a booking until PMS scheduling writeback is approved.` };
+    return { body: `I can help with that. ${context}\n\nPlease share the best day and time, and the front desk will confirm the appointment options with you.` };
   }
   if (analysis.intent === "RESCHEDULE_APPOINTMENT") {
-    return { body: "I can help start a reschedule request. For privacy, the team must verify identity before changing an appointment. Please share your name, phone, and preferred time window." };
+    return { body: "I can help start that request. Please share the appointment you want to move and your preferred time window. The team will verify your details before changing anything." };
   }
   if (analysis.intent === "EMERGENCY_TRIAGE") {
-    return { body: "I’m going to flag this as urgent for the practice team. If you have severe swelling, uncontrolled bleeding, trauma, or trouble breathing, seek emergency care immediately. Please share your phone number and what happened." };
+    return { body: "I’m going to flag this as urgent for the practice team. If you have severe swelling, uncontrolled bleeding, trauma, or trouble breathing, call emergency services now. Please share what happened and the best number to reach you." };
   }
   if (analysis.intent === "INSURANCE_OR_PRICE") {
-    return { body: `${context}\n\nFor insurance, pricing, or financing, I can collect your question and route it for staff review. Exact benefits or estimates require payer/PMS verification.` };
+    return { body: `I can pass this to the team for review. ${context}\n\nFor insurance or financing, please share your plan name and the treatment you are asking about. The team will confirm details before giving any estimate.` };
   }
-  return { body: `${context}\n\nWhat would you like help with: booking, rescheduling, insurance, forms, or a service question?` };
+  return { body: `${context}\n\nWhat would you like help with today?` };
 }
 
 function summarizeKnowledge(row?: { content: string; heading: string | null; pageTitle: string }) {
   if (!row?.content) return "";
   const title = row.heading || row.pageTitle;
-  if (/1DentalAI is the operating system|From first ring to final payment|Product\s+Solutions\s+Features/i.test(row.content)) {
+  if (/1DentalAI|operating system|workflow|PMS|RCM|claim|provider approval|Product\s+Solutions\s+Features|first ring|final payment|patient timeline/i.test(row.content)) {
     return "";
   }
   const text = row.content
     .replace(/\s+/g, " ")
-    .replace(/\b(Product|Solutions|Features|Use Cases|Workflows|Resources|Blog|About|Contact|Open platform|Request access)\b/gi, "")
+    .replace(/\b(Product|Solutions|Features|Use Cases|Workflows|Resources|Blog|About|Contact|Open platform|Request access|PMS|RCM|AI|workflow|claim|provider approval)\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
+  if (!text || text.length < 80) return "";
   const sentences = text.split(/(?<=[.!?])\s+/).filter((sentence) => sentence.length > 35);
   const excerpt = (sentences.slice(0, 2).join(" ") || text).slice(0, 420).trim();
-  return `${title ? `${title}: ` : ""}${excerpt}${excerpt.length >= 420 ? "..." : ""}`;
+  if (!excerpt || /ssed calls|insurance blockers|unscheduled treatment|review recovery|claim delays|patient timeline/i.test(excerpt)) return "";
+  return `${title && !/1DentalAI|Product/i.test(title) ? `${title}: ` : ""}${excerpt}${excerpt.length >= 420 ? "..." : ""}`;
 }
 
 export async function crawlKnowledgePage(input: { tenantId?: string; url: string }) {

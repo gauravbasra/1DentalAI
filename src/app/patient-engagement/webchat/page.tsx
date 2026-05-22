@@ -124,7 +124,7 @@ export default async function PatientEngagementWebchatPage({
   const forms = (center.leadForms ?? []) as LeadFormRow[];
   const schedulingRules = (center.schedulingRules ?? []) as SchedulingRuleRow[];
   const channel = ((center.channelSettings ?? []) as ChannelRow[]).find((row) => row.channel === "WEB_CHAT");
-  const installScript = `<script async src="https://app.1dentalai.com/api/webchat/widget.js?tenant=tenant_1dentalai_production"></script>`;
+  const installScript = `<script async src="https://app.1dentalai.com/api/webchat/widget.js?tenant=tenant_1dentalai_production&v=20260522-patient-chat-clean"></script>`;
 
   return (
     <PatientEngagementShell active="/patient-engagement/webchat">
