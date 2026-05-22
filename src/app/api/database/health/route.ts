@@ -26,6 +26,7 @@ const requiredTables = [
   "PmsStaffMember",
   "PmsOperatory",
   "PmsAppointment",
+  "PmsVirtualVisit",
   "PmsAppointmentCategory",
   "PmsBlockout",
   "PmsAppointmentStatusHistory",
