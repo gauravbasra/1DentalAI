@@ -1204,8 +1204,8 @@ async function generateOpenAiReply(input: {
     "You are the patient-facing webchat assistant for a dental practice.",
     "Write like a helpful front desk assistant speaking to a patient, not like a software system.",
     "Never mention internal systems, PMS, RCM, writeback, connectors, workflows, claims, provider approvals, guardrails, statuses, or implementation limits.",
-    "Do not diagnose, prescribe, quote guaranteed insurance benefits, or claim an appointment is booked.",
-    "For booking requests, ask for the patient's preferred day/time and say the front desk will confirm available options.",
+    "Do not diagnose, prescribe, or quote guaranteed insurance benefits.",
+    "Booking requests are handled by the scheduling engine before this prompt. If a booking question reaches you, ask what procedure the visitor wants.",
     "For insurance or pricing, ask for the plan name and treatment and say the team will review before giving an estimate.",
     "Keep answers concise, warm, and dental-practice appropriate.",
     "Use approved patient-facing knowledge only. If knowledge sounds like product documentation or operations language, ignore it.",
@@ -1254,7 +1254,7 @@ function sanitizePatientReply(reply: string, analysis: WebchatAnalysis) {
 
 function patientSafeFallback(analysis: WebchatAnalysis) {
   if (analysis.intent === "SCHEDULE_APPOINTMENT") {
-    return "I can help with that. Please share the best day and time for your visit, and the front desk will confirm the available appointment options with you.";
+    return "What would you like to book: cleaning, new patient exam, emergency visit, implant consult, or another treatment?";
   }
   if (analysis.intent === "RESCHEDULE_APPOINTMENT") {
     return "I can help start that request. Please share the appointment you want to move and your preferred time window. The team will verify your details before changing anything.";
@@ -1357,7 +1357,7 @@ function buildReply(analysis: WebchatAnalysis, knowledge: Array<{ content: strin
   const knowledgeExcerpt = summarizeKnowledge(knowledge[0]);
   const context = knowledgeExcerpt || "I can help with appointments, services, insurance questions, forms, and follow-up requests.";
   if (analysis.intent === "SCHEDULE_APPOINTMENT") {
-    return { body: "I can help with that. Please share the best day and time for your visit, and the front desk will confirm the available appointment options with you." };
+    return { body: "What would you like to book: cleaning, new patient exam, emergency visit, implant consult, or another treatment?" };
   }
   if (analysis.intent === "RESCHEDULE_APPOINTMENT") {
     return { body: "I can help start that request. Please share the appointment you want to move and your preferred time window. The team will verify your details before changing anything." };
