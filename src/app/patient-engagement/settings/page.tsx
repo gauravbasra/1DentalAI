@@ -111,6 +111,9 @@ async function saveChannelAction(formData: FormData) {
       staffApprovalRequired: bool(formData, "staffApprovalRequired"),
       appointmentWritebackRequiresPmsConnector: bool(formData, "appointmentWritebackRequiresPmsConnector"),
       clinicalAdviceBlocked: bool(formData, "clinicalAdviceBlocked"),
+      pricingPolicy: value(formData, "pricingPolicy"),
+      warmTransferMonitoring: value(formData, "warmTransferMonitoring"),
+      callbackRouting: value(formData, "callbackRouting"),
       nextAction: value(formData, "nextAction"),
     });
   } catch (error) {
@@ -311,6 +314,9 @@ function DeviceForm({ device }: { device: Row }) {
 }
 
 function ChannelForm({ channel }: { channel: Row }) {
+  const policy = channel.approvalPolicy && typeof channel.approvalPolicy === "object" && !Array.isArray(channel.approvalPolicy)
+    ? channel.approvalPolicy as Record<string, unknown>
+    : {};
   return (
     <form action={saveChannelAction} className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
       <input type="hidden" name="channel" value={String(channel.channel)} />
@@ -328,6 +334,9 @@ function ChannelForm({ channel }: { channel: Row }) {
         <Select name="staffApprovalRequired" label="Staff approval" defaultValue="true" options={["true", "false"]} />
         <Select name="appointmentWritebackRequiresPmsConnector" label="PMS writeback gate" defaultValue="true" options={["true", "false"]} />
         <Select name="clinicalAdviceBlocked" label="Clinical advice blocked" defaultValue="true" options={["true", "false"]} />
+        <Select name="pricingPolicy" label="Pricing policy" defaultValue={String(policy.pricingPolicy ?? "NO_PUBLIC_PRICING_STAFF_ONLY")} options={["NO_PUBLIC_PRICING_STAFF_ONLY", "STAFF_CAN_SHARE_RANGES", "DISABLED"]} />
+        <Select name="warmTransferMonitoring" label="Warm transfer monitor" defaultValue={String(policy.warmTransferMonitoring ?? "AI_MONITORS_UNTIL_STAFF_RESPONDS")} options={["AI_MONITORS_UNTIL_STAFF_RESPONDS", "STAFF_ONLY_AFTER_TRANSFER"]} />
+        <Select name="callbackRouting" label="Callback order" defaultValue={String(policy.callbackRouting ?? "CALL_OFFICE_FIRST_THEN_VISITOR")} options={["CALL_OFFICE_FIRST_THEN_VISITOR", "CALL_VISITOR_DIRECTLY"]} />
       </div>
       <Textarea name="nextAction" label="Next action" defaultValue={String(channel.nextAction ?? "")} />
       <SaveButton label="Save channel policy" />

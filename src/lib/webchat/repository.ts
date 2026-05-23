@@ -100,7 +100,7 @@ export function analyzeMessage(message: string): WebchatAnalysis {
   if (/^(?:[1-5]|one|two|three|four|five|first|second|third|fourth|fifth|option\s+[1-5]|slot\s+[1-5]|book\s+[1-5])$/.test(text.trim())) {
     return { intent: "SCHEDULE_APPOINTMENT", sentiment: "HIGH_INTENT", confidence: 88, actionType: "DIRECT_PMS_SCHEDULING", actionStatus: "SLOT_SELECTION_RECEIVED" };
   }
-  if (/(live person|human|representative|front desk|talk to someone|call me|staff)/.test(text)) {
+  if (/(live person|human|representative|front desk|talk to someone|call me|phone call|call back|callback|staff)/.test(text)) {
     return { intent: "LIVE_PERSON_REQUEST", sentiment: "NEEDS_HELP", confidence: 91, actionType: "STAFF_TAKEOVER", actionStatus: "STAFF_REQUIRED" };
   }
   if (/(reschedule|move my appointment|change appointment|cancel)/.test(text)) {
@@ -460,6 +460,7 @@ export async function postWebchatMessage(input: {
   if (aiDecision.automationMode !== "AI_AUTO" || schedulingNeedsStaffTask || (analysis.actionType && !["KNOWLEDGE_RESPONSE", "DIRECT_PMS_SCHEDULING", "RESCHEDULE_APPOINTMENT"].includes(analysis.actionType))) {
     await createWebchatTask({ tenantId, conversationId: input.conversationId, analysis, body: input.body, leadCapture });
   }
+  await executeWebchatHandoffPlan({ tenantId, conversationId: input.conversationId, aiDecision, analysis, body: input.body, leadCapture });
   await addWebchatAudit(tenantId, "WEBCHAT_MESSAGE_PROCESSED", input.conversationId, "ALLOWED", {
     intent: analysis.intent,
     actionType: analysis.actionType ?? null,
@@ -943,6 +944,9 @@ export async function upsertPatientEngagementChannelSetting(input: {
   staffApprovalRequired?: boolean;
   appointmentWritebackRequiresPmsConnector?: boolean;
   clinicalAdviceBlocked?: boolean;
+  pricingPolicy?: string;
+  warmTransferMonitoring?: string;
+  callbackRouting?: string;
   nextAction?: string;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
@@ -956,6 +960,9 @@ export async function upsertPatientEngagementChannelSetting(input: {
     staffReplyRequiresApproval: input.staffApprovalRequired ?? true,
     appointmentWritebackRequiresPmsConnector: input.appointmentWritebackRequiresPmsConnector ?? true,
     clinicalAdviceBlocked: input.clinicalAdviceBlocked ?? true,
+    pricingPolicy: input.pricingPolicy || "NO_PUBLIC_PRICING_STAFF_ONLY",
+    warmTransferMonitoring: input.warmTransferMonitoring || "AI_MONITORS_UNTIL_STAFF_RESPONDS",
+    callbackRouting: input.callbackRouting || "CALL_OFFICE_FIRST_THEN_VISITOR",
   };
   await query(
     `insert into "PatientEngagementChannelSetting"
@@ -1228,19 +1235,28 @@ async function buildAiAutoReply(input: {
   const schedulingReply = await buildSchedulingReply(input);
   if (schedulingReply) return schedulingReply;
 
+  const policy = await getWebchatChannelPolicy(input.tenantId);
+  const pricingReply = buildPricingPolicyReply(input.body, input.analysis, policy);
+  if (pricingReply) return pricingReply;
+
   const handoffReason = classifyStaffHandoff(input.analysis, input.body);
   if (handoffReason) {
+    const callbackRequested = wantsPhoneCallback(input.body);
+    const transferTarget = callbackRequested ? "phone_callback" : "live_chat";
     return {
-      body: handoffReason === "LIVE_PERSON_REQUEST"
-        ? "Absolutely. I’m bringing this to the dental team so a live person can help you from here."
-        : "I’m going to bring this to the dental team for review so you get the right help safely.",
+      body: callbackRequested
+        ? "Absolutely. I’ll ask the office team to call the practice first, then call you at the number you shared. I’ll stay here in the chat too, so you’re not left waiting."
+        : handoffReason === "LIVE_PERSON_REQUEST"
+        ? "Absolutely. I’m bringing a team member into the chat now. I’ll stay here and keep helping until someone joins."
+        : "I’m going to bring this to the dental team for review so you get the right help safely. I’ll stay here while they’re being notified.",
       automationMode: "STAFF_TAKEOVER",
       handoffReason,
-      actionStatus: "STAFF_REQUIRED",
+      actionStatus: callbackRequested ? "PHONE_CALLBACK_REQUESTED" : "STAFF_REQUIRED",
       deliveryStatus: "SENT",
       provider: "WEB_CHAT",
       providerStatus: "DELIVERED_TO_WIDGET",
       model: "handoff_policy",
+      metadata: { warmTransfer: true, transferTarget, policy },
     };
   }
 
@@ -1294,6 +1310,78 @@ async function buildAiAutoReply(input: {
     model: openAi.ready ? "rules_fallback_after_openai_empty" : "rules_fallback_openai_connector_blocked",
     metadata: { openAiConnector: { ready: openAi.ready, source: openAi.source, blockedReason: openAi.blockedReason } },
   };
+}
+
+async function getWebchatChannelPolicy(tenantId: string) {
+  const result = await query<{ approvalPolicy: unknown }>(
+    `select "approvalPolicy"
+     from "PatientEngagementChannelSetting"
+     where "tenantId" = $1 and "channel" = 'WEB_CHAT'
+     limit 1`,
+    [tenantId],
+  );
+  const policy = result.rows[0]?.approvalPolicy;
+  return policy && typeof policy === "object" && !Array.isArray(policy)
+    ? policy as Record<string, unknown>
+    : {};
+}
+
+function wantsPhoneCallback(body: string) {
+  return /(call me|phone call|call back|callback|give me a call|speak by phone)/i.test(body);
+}
+
+function asksForPricing(body: string) {
+  return /(how much|price|pricing|cost|fee|fees|quote|estimate|cash price|implant cost|cleaning cost|whitening cost|root canal cost|crown cost)/i.test(body);
+}
+
+function buildPricingPolicyReply(body: string, analysis: WebchatAnalysis, policy: Record<string, unknown>): WebchatAiDecision | null {
+  if (analysis.intent !== "INSURANCE_OR_PRICE" || !asksForPricing(body)) return null;
+  const callbackFirst = policy.callbackRouting !== "CALL_VISITOR_DIRECTLY";
+  const callbackLine = callbackFirst
+    ? "If you’d rather talk by phone, I can ask the office to call the practice first and then call you at the number you shared."
+    : "If you’d rather talk by phone, I can ask the office to call you at the number you shared.";
+  return {
+    body: [
+      "I understand. Pricing matters, and I don’t want to give you an inaccurate number here.",
+      "Treatment fees can depend on the exam findings, X-rays, insurance benefits, materials, and the doctor’s plan. Pricing can be discussed by a qualified team member during your visit.",
+      "If you’d like, I can connect you with our staff now. I’ll stay in the chat and keep an eye on the conversation until someone responds.",
+      callbackLine,
+    ].join("\n\n"),
+    automationMode: "AI_AUTO",
+    handoffReason: "PRICING_POLICY",
+    actionStatus: "PRICING_STAFF_REVIEW_OFFERED",
+    deliveryStatus: "SENT",
+    provider: "WEB_CHAT",
+    providerStatus: "DELIVERED_TO_WIDGET",
+    model: "pricing_policy",
+    metadata: { pricingPolicy: "NO_PUBLIC_PRICING_STAFF_ONLY", warmTransferOffered: true, callbackRouting: policy.callbackRouting ?? "CALL_OFFICE_FIRST_THEN_VISITOR" },
+  };
+}
+
+async function executeWebchatHandoffPlan(input: {
+  tenantId: string;
+  conversationId: string;
+  aiDecision: WebchatAiDecision;
+  analysis: WebchatAnalysis;
+  body: string;
+  leadCapture: LeadCapture;
+}) {
+  if (!input.aiDecision.metadata?.warmTransfer && input.aiDecision.actionStatus !== "PHONE_CALLBACK_REQUESTED") return;
+  const team = await getWebchatTeamPresence(input.tenantId).catch(() => []);
+  const preferredRole = input.aiDecision.actionStatus === "PHONE_CALLBACK_REQUESTED" ? "front_desk" : "front_desk";
+  const online = team.find((member) => member.roleKey === preferredRole && member.presenceStatus === "ONLINE") ?? team.find((member) => member.presenceStatus === "ONLINE");
+  await transferWebchatConversation({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+    ownerRoleKey: online?.roleKey ?? preferredRole,
+    assignedStaffId: online?.id,
+    priority: input.aiDecision.actionStatus === "PHONE_CALLBACK_REQUESTED" ? "HIGH" : "NORMAL",
+    dueMinutes: online ? 2 : 5,
+    createTask: true,
+    note: input.aiDecision.actionStatus === "PHONE_CALLBACK_REQUESTED"
+      ? `Phone callback requested. Call the office/practice line first, then call ${input.leadCapture.visitorName || "the visitor"} at ${input.leadCapture.visitorPhone || "the captured phone number"}. AI remains on chat until staff responds.`
+      : `Warm webchat transfer requested. ${online ? `Assigning to ${online.displayName}.` : "No online staff detected; route to front desk queue."} AI remains on chat until staff responds.`,
+  });
 }
 
 async function buildSchedulingReply(input: {
