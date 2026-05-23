@@ -33,8 +33,8 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     open: false,
     session: null,
     visitor: {
-      patientStatus: 'NEW_PATIENT',
-      urgency: 'ROUTINE',
+      patientStatus: '',
+      urgency: '',
       consentAccepted: false,
       sourceChannel: 'WEBSITE',
       campaignSource: campaignSource(),
@@ -272,10 +272,9 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
   function chooseBookingService(serviceLine, serviceLabel){
     state.bookingMode = false;
     state.visitor.serviceLine = serviceLine;
-    state.visitor.preferredTime = state.visitor.preferredTime || 'Today or next available';
-    state.visitor.urgency = serviceLine === 'Emergency' ? 'URGENT' : 'ROUTINE';
+    state.visitor.urgency = serviceLine === 'Emergency' ? 'URGENT' : state.visitor.urgency;
     saveVisitorState();
-    submitText('I want to schedule a ' + serviceLabel + '. Please show available appointment times.');
+    submitText('I want to schedule a ' + serviceLabel + '.');
   }
 
   function appendTranscript(text){
@@ -437,7 +436,8 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     state.lastSchedulingOutcome = '';
     state.visitor.serviceLine = '';
     state.visitor.preferredTime = '';
-    state.visitor.urgency = 'ROUTINE';
+    state.visitor.patientStatus = '';
+    state.visitor.urgency = '';
     saveVisitorState();
     localStorage.removeItem(storageKey);
     ensureSession();
@@ -643,8 +643,8 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
       visitorEmail:state.visitor.visitorEmail,
       serviceLine:state.visitor.serviceLine,
       preferredTime:state.visitor.preferredTime,
-      patientStatus:state.visitor.patientStatus,
-      urgency:state.visitor.urgency,
+      patientStatus:state.visitor.patientStatus || '',
+      urgency:state.visitor.urgency || '',
       sourceChannel:state.visitor.sourceChannel,
       campaignSource:state.visitor.campaignSource,
       referrerUrl:state.visitor.referrerUrl,

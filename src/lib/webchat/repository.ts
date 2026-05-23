@@ -73,6 +73,15 @@ type SchedulingOffer = {
   options: PmsOnlineSlot[];
 };
 
+type SchedulingIntake = {
+  procedure: { slug: string; label: string } | null;
+  patientStatus: string | null;
+  urgencyStatus: string | null;
+  insuranceStatus: string | null;
+  preferredWindow: string | null;
+  missing: Array<"procedure" | "patientStatus" | "urgencyStatus" | "insuranceStatus" | "preferredWindow">;
+};
+
 export type WebchatTeamMember = {
   id: string;
   displayName: string;
@@ -1282,7 +1291,8 @@ async function buildSchedulingReply(input: {
   leadCapture: LeadCapture;
   qualification: { leadScore: number; qualificationStage: string; nextBestAction: string };
 }): Promise<WebchatAiDecision | null> {
-  if (!["SCHEDULE_APPOINTMENT", "RESCHEDULE_APPOINTMENT"].includes(input.analysis.intent)) return null;
+  const activeScheduling = await getLatestSchedulingContext(input.tenantId, input.conversationId);
+  if (!["SCHEDULE_APPOINTMENT", "RESCHEDULE_APPOINTMENT"].includes(input.analysis.intent) && !activeScheduling) return null;
 
   if (input.analysis.intent === "RESCHEDULE_APPOINTMENT") {
     return buildRescheduleReply(input);
@@ -1311,18 +1321,20 @@ async function buildSchedulingReply(input: {
     return bookOfferedSlot({ ...input, offer, slot });
   }
 
-  const procedure = inferSchedulingProcedure(input.body, input.leadCapture.serviceLine);
-  if (!procedure) {
+  const intake = await buildSchedulingIntake(input.tenantId, input.conversationId, input.body, input.leadCapture);
+  if (intake.missing.length) {
+    const nextQuestion = schedulingIntakeQuestion(intake);
     return schedulingDecision(
-      "What would you like to book: cleaning, new patient exam, emergency visit, implant consult, or another treatment?",
-      "SCHEDULING_NEEDS_PROCEDURE",
-      "NEEDS_PROCEDURE",
-      { reason: "PROCEDURE_REQUIRED" },
+      nextQuestion.body,
+      "SCHEDULING_QUALIFICATION_IN_PROGRESS",
+      "QUALIFICATION_REQUIRED_BEFORE_SLOT_LOOKUP",
+      { kind: "SCHEDULING_INTAKE", intake, askFor: nextQuestion.askFor },
     );
   }
 
+  const procedure = intake.procedure!;
   const slots = await getOnlineSchedulingAvailability(procedure.slug, input.tenantId);
-  const requestedDay = inferRequestedDay(input.body);
+  const requestedDay = inferRequestedDay(intake.preferredWindow || input.body);
   const dayFiltered = filterSlotsByRequestedDay(slots, requestedDay);
   const options = (dayFiltered.length ? dayFiltered : slots).slice(0, 5);
 
@@ -1339,6 +1351,7 @@ async function buildSchedulingReply(input: {
     ? "I don’t see an online-bookable opening today, but I found the next available times:"
     : `I found these openings for ${procedure.label.toLowerCase()}:`;
   const body = [
+    `Thanks. I have ${procedure.label.toLowerCase()}, ${cleanPatientStatus(intake.patientStatus)}, ${cleanUrgencyStatus(intake.urgencyStatus)}, ${cleanInsuranceStatus(intake.insuranceStatus)}, and ${intake.preferredWindow}.`,
     dayPrefix,
     ...options.map((slot, index) => `${index + 1}. ${formatSlot(slot)}`),
     "Reply with the number you want and I’ll book it into the calendar.",
@@ -1349,8 +1362,25 @@ async function buildSchedulingReply(input: {
     slug: procedure.slug,
     serviceLabel: procedure.label,
     requestedDay,
+    intake,
     options,
   });
+}
+
+async function getLatestSchedulingContext(tenantId: string, conversationId: string) {
+  const result = await query<{ metadata: unknown }>(
+    `select "metadata"
+     from "PatientWebChatMessage"
+     where "tenantId" = $1
+       and "conversationId" = $2
+       and "senderType" = 'ASSISTANT'
+       and "metadata"->'scheduling'->>'kind' in ('SCHEDULING_INTAKE','SLOT_OFFER')
+     order by "createdAt" desc
+     limit 1`,
+    [tenantId, conversationId],
+  );
+  const scheduling = (result.rows[0]?.metadata as { scheduling?: { kind?: string } } | undefined)?.scheduling;
+  return scheduling?.kind ?? null;
 }
 
 async function buildRescheduleReply(input: {
@@ -1629,6 +1659,121 @@ function inferSchedulingProcedure(body: string, serviceLine?: string) {
   if (/(cleaning|hygiene|recall|recare|prophy)/.test(text)) return { slug: "hygiene-recare", label: "Hygiene cleaning" };
   if (/(implant|aligner|invisalign|whitening|cosmetic|consult|crown|filling|root canal|exam|new patient|checkup)/.test(text)) return { slug: "new-patient-exam", label: text.includes("implant") ? "Implant consultation" : "New patient exam" };
   return null;
+}
+
+async function buildSchedulingIntake(tenantId: string, conversationId: string, body: string, leadCapture: LeadCapture): Promise<SchedulingIntake> {
+  const result = await query<{ body: string; senderType: string }>(
+    `select "body", "senderType"
+     from "PatientWebChatMessage"
+     where "tenantId" = $1 and "conversationId" = $2
+     order by "createdAt" desc
+     limit 20`,
+    [tenantId, conversationId],
+  );
+  const visitorTranscript = result.rows
+    .filter((row) => row.senderType === "VISITOR")
+    .map((row) => row.body)
+    .reverse()
+    .join(" ");
+  const text = `${visitorTranscript} ${body} ${leadCapture.serviceLine ?? ""} ${leadCapture.preferredTime ?? ""} ${leadCapture.patientStatus ?? ""} ${leadCapture.urgency ?? ""}`.toLowerCase();
+  const procedure = inferSchedulingProcedure(text, leadCapture.serviceLine);
+  const patientStatus = inferPatientStatus(text, leadCapture.patientStatus);
+  const urgencyStatus = inferUrgencyStatus(text, leadCapture.urgency, procedure?.slug);
+  const insuranceStatus = inferInsuranceStatus(text);
+  const preferredWindow = inferPreferredWindow(text, leadCapture.preferredTime);
+  const missing: SchedulingIntake["missing"] = [];
+  if (!procedure) missing.push("procedure");
+  if (!patientStatus) missing.push("patientStatus");
+  if (!urgencyStatus) missing.push("urgencyStatus");
+  if (!insuranceStatus) missing.push("insuranceStatus");
+  if (!preferredWindow) missing.push("preferredWindow");
+  return { procedure, patientStatus, urgencyStatus, insuranceStatus, preferredWindow, missing };
+}
+
+function schedulingIntakeQuestion(intake: SchedulingIntake) {
+  const askFor = intake.missing[0];
+  if (askFor === "procedure") {
+    return {
+      askFor,
+      body: "I can help book that. What type of visit do you need: cleaning, new patient exam, emergency tooth pain visit, implant consult, cosmetic consult, or something else?",
+    };
+  }
+  if (askFor === "patientStatus") {
+    return {
+      askFor,
+      body: `Got it: ${intake.procedure?.label ?? "that visit"}. Are you a new patient, an existing patient, or booking for someone else?`,
+    };
+  }
+  if (askFor === "urgencyStatus") {
+    return {
+      askFor,
+      body: "Before I show times, is this routine, or are you having pain, swelling, bleeding, a broken tooth, or an injury?",
+    };
+  }
+  if (askFor === "insuranceStatus") {
+    return {
+      askFor,
+      body: "Will you be using dental insurance, a membership plan, or self-pay? If you know the insurance plan name, share it here.",
+    };
+  }
+  return {
+    askFor,
+    body: "What day and time window works best for you: today, tomorrow, morning, afternoon, or a specific day?",
+  };
+}
+
+function inferPatientStatus(text: string, patientStatus?: string) {
+  const combined = `${text} ${patientStatus ?? ""}`.toLowerCase();
+  if (/(new patient|first visit|never been|new_patient)/.test(combined)) return "NEW_PATIENT";
+  if (/(existing patient|returning|current patient|been there|existing_patient)/.test(combined)) return "EXISTING_PATIENT";
+  if (/(my child|for my|someone else|caregiver|spouse|parent)/.test(combined)) return "CAREGIVER";
+  return null;
+}
+
+function inferUrgencyStatus(text: string, urgency?: string, procedureSlug?: string) {
+  const combined = `${text} ${urgency ?? ""}`.toLowerCase();
+  if (/(facial swelling|trouble breathing|uncontrolled bleeding|trauma|injury|severe pain|urgent|emergency|toothache|broken tooth|infection|bleeding|swelling|urgent)/.test(combined)) return "URGENT_SYMPTOMS";
+  if (/(routine|no pain|not urgent|regular|cleaning|checkup|check-up|recall|hygiene|routine)/.test(combined)) return "ROUTINE";
+  if (procedureSlug === "emergency-exam") return "URGENT_SYMPTOMS";
+  return null;
+}
+
+function inferInsuranceStatus(text: string) {
+  if (/(self pay|self-pay|cash|no insurance|without insurance|membership|plan member)/.test(text)) return "SELF_PAY_OR_MEMBERSHIP";
+  if (/(insurance|ppo|hmo|medicaid|medicare|delta|aetna|cigna|metlife|guardian|united|uhc|humana|principal|anthem|blue cross|bcbs)/.test(text)) return "INSURANCE";
+  return null;
+}
+
+function inferPreferredWindow(text: string, preferredTime?: string) {
+  const direct = preferredTime?.trim();
+  if (direct && !/today or next available/i.test(direct)) return direct.slice(0, 120);
+  if (/\btoday\b/.test(text)) return "today";
+  if (/\btomorrow\b/.test(text)) return "tomorrow";
+  if (/\bmorning\b/.test(text)) return "morning";
+  if (/\bafternoon\b/.test(text)) return "afternoon";
+  if (/\bevening\b/.test(text)) return "evening";
+  const weekday = text.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
+  if (weekday) return weekday[1];
+  return null;
+}
+
+function cleanPatientStatus(value: string | null) {
+  if (value === "NEW_PATIENT") return "new patient";
+  if (value === "EXISTING_PATIENT") return "existing patient";
+  if (value === "CAREGIVER") return "caregiver booking";
+  return "patient status captured";
+}
+
+function cleanUrgencyStatus(value: string | null) {
+  if (value === "URGENT_SYMPTOMS") return "urgent symptoms screened";
+  if (value === "ROUTINE") return "routine urgency";
+  return "urgency screened";
+}
+
+function cleanInsuranceStatus(value: string | null) {
+  if (value === "INSURANCE") return "insurance context";
+  if (value === "SELF_PAY_OR_MEMBERSHIP") return "self-pay or membership context";
+  return "payment context";
 }
 
 function parseSlotSelection(body: string) {
