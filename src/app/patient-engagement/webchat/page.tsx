@@ -239,12 +239,164 @@ export default async function PatientEngagementWebchatPage({
     : [null, null] as const;
   const installScript = `<script async src="https://app.1dentalai.com/api/webchat/widget.js?tenant=tenant_1dentalai_production&v=20260522-patient-chat-clean"></script>`;
 
+  if (view === "inbox") {
+    return (
+      <div className="min-h-screen bg-[#20312b] px-5 py-8">
+        <LivePanelRefresh intervalMs={2500} />
+        <section className="mx-auto flex h-[calc(100vh-64px)] min-h-[780px] max-w-[1840px] overflow-hidden rounded-[30px] border border-white/15 bg-white shadow-2xl shadow-emerald-950/40">
+          <aside className="hidden w-[72px] shrink-0 border-r border-neutral-200 bg-white xl:flex xl:flex-col xl:items-center xl:justify-between xl:py-6">
+            <div className="space-y-5">
+              <Avatar label="1D" size="lg" tone="green" />
+              {[
+                ["ALL", "All", "C"],
+                ["WEB_CHAT", "Web", "W"],
+                ["SMS", "SMS", "S"],
+              ].map(([key, label, icon]) => (
+                <Link key={key} href={`/patient-engagement/webchat?channel=${key}`} className={`flex flex-col items-center gap-2 text-xs font-semibold ${channelFilter === key ? "text-emerald-700" : "text-neutral-400 hover:text-neutral-700"}`}>
+                  <span className={`grid h-10 w-10 place-items-center rounded-2xl ${channelFilter === key ? "bg-emerald-50 text-emerald-700" : "bg-neutral-100"}`}>{icon}</span>
+                  {label}
+                </Link>
+              ))}
+              <div className="my-2 h-px w-10 bg-neutral-200" />
+              {[
+                ["KB", "knowledge", "K"],
+                ["Forms", "forms", "F"],
+                ["AI", "ai-settings", "A"],
+                ["Install", "install", "I"],
+              ].map(([label, key, icon]) => (
+                <Link key={key} href={`/patient-engagement/webchat?view=${key}${selectedConversation ? `&conversationId=${selectedConversation.id}` : ""}`} className="flex flex-col items-center gap-2 text-xs font-semibold text-neutral-400 hover:text-neutral-700">
+                  <span className="grid h-10 w-10 place-items-center rounded-2xl bg-neutral-100">{icon}</span>
+                  {label}
+                </Link>
+              ))}
+            </div>
+            <div className="space-y-4">
+              <Link href="/wrapper" className="grid h-10 w-10 place-items-center rounded-2xl bg-neutral-100 text-xs font-semibold text-neutral-500">↗</Link>
+              <Link href="/logout" className="grid h-10 w-10 place-items-center rounded-2xl bg-neutral-950 text-xs font-semibold text-white">⎋</Link>
+            </div>
+          </aside>
+
+          <aside className="w-[360px] shrink-0 border-r border-neutral-200 bg-white">
+            <div className="border-b border-neutral-200 p-5">
+              <div className="mb-5 flex items-center justify-between">
+                <div>
+                  <p className="text-2xl font-semibold text-neutral-950">Inbox</p>
+                  <p className="mt-1 text-sm text-neutral-500">{chats.length} active conversations</p>
+                </div>
+                <Link href="/patient-engagement/settings" className="grid h-11 w-11 place-items-center rounded-2xl border border-neutral-200 text-neutral-500">⌘</Link>
+              </div>
+              <form action="/patient-engagement/webchat">
+                <input type="hidden" name="view" value="inbox" />
+                <input type="hidden" name="channel" value={channelFilter} />
+                <div className="flex items-center gap-2 rounded-2xl bg-neutral-100 px-4 py-3">
+                  <span className="text-neutral-400">⌕</span>
+                  <input className="min-w-0 flex-1 bg-transparent text-sm outline-none" name="q" placeholder="Search inbox..." defaultValue={params.q ?? ""} />
+                </div>
+              </form>
+              <div className="mt-5 grid gap-2">
+                {[
+                  ["ALL", "All conversations"],
+                  ["WEB_CHAT", "Website chat"],
+                  ["SMS", "Text messages"],
+                ].map(([key, label]) => (
+                  <Link key={key} href={`/patient-engagement/webchat?channel=${key}`} className={`rounded-xl px-3 py-2 text-sm font-semibold ${channelFilter === key ? "bg-emerald-50 text-emerald-700" : "text-neutral-600 hover:bg-neutral-50"}`}>
+                    {label}
+                  </Link>
+                ))}
+              </div>
+            </div>
+            <div className="h-[calc(100%-217px)] overflow-y-auto">
+              {chats.length ? chats.map((chat) => {
+                const isSelected = selectedConversation?.id === chat.id;
+                return (
+                  <Link
+                    key={chat.id}
+                    href={`/patient-engagement/webchat?conversationId=${chat.id}&q=${encodeURIComponent(params.q ?? "")}&channel=${channelFilter}`}
+                    className={`grid grid-cols-[52px_minmax(0,1fr)_auto] gap-3 border-b border-neutral-100 px-5 py-4 transition ${isSelected ? "bg-emerald-50" : "bg-white hover:bg-neutral-50"}`}
+                  >
+                    <Avatar label={personLabel(chat)} tone={chat.sourceChannel === "SMS" ? "blue" : "dark"} size="sm" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-neutral-950">{personLabel(chat)}</p>
+                      <p className="mt-1 truncate text-sm text-neutral-500">{chat.lastMessageBody || chat.nextBestAction || clean(chat.nlpIntent ?? "new conversation")}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-neutral-500">{relativeTime(chat.updatedAt || chat.createdAt)}</p>
+                      <span className={`mt-4 inline-grid h-6 min-w-6 place-items-center rounded-full px-2 text-xs font-semibold ${chat.leadScore >= 80 ? "bg-emerald-600 text-white" : "bg-amber-100 text-amber-700"}`}>
+                        {chat.leadScore}
+                      </span>
+                    </div>
+                  </Link>
+                );
+              }) : <div className="p-5"><Empty title="No conversations match" body="Clear the search or switch channels." /></div>}
+            </div>
+          </aside>
+
+          <main className="flex min-w-0 flex-1 flex-col bg-white">
+            {selectedConversation ? (
+              <>
+                <header className="flex items-center justify-between gap-4 border-b border-neutral-200 px-7 py-5">
+                  <div className="min-w-0">
+                    <h2 className="truncate text-lg font-semibold text-neutral-950">{personLabel(selectedConversation)}</h2>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-neutral-500">
+                      <span>{selectedConversation.sourceChannel === "SMS" ? "SMS thread" : "Website visitor"}</span>
+                      <span>{selectedConversation.visitorPhone || selectedConversation.visitorEmail || "contact not captured"}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Link href={`/patient-engagement/webchat?view=knowledge&conversationId=${selectedConversation.id}`} className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-sm font-semibold text-neutral-700">K</Link>
+                    <Link href="/patient-engagement/settings" className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-sm font-semibold text-neutral-700">S</Link>
+                  </div>
+                </header>
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="flex-1 overflow-y-auto bg-white px-8 py-6">
+                    <div className="mx-auto mb-6 w-fit rounded-full bg-neutral-100 px-4 py-2 text-xs font-semibold text-neutral-500">Today</div>
+                    <div className="space-y-5">
+                      {messages.length ? messages.map((message) => (
+                        <MessageBubble key={message.id} message={message} visitorLabel={personLabel(selectedConversation)} />
+                      )) : (
+                        <Empty title="No messages yet" body="The transcript appears here as soon as the widget or SMS thread receives a message." />
+                      )}
+                    </div>
+                  </div>
+                  <footer className="border-t border-neutral-200 bg-white px-7 py-5">
+                    <div className="space-y-3">
+                      <TeamCollaborationPanel conversation={selectedConversation} team={teamPresence} />
+                      <form action={staffEntryAction} className="flex items-end gap-3">
+                        <input type="hidden" name="conversationId" value={selectedConversation.id} />
+                        <input type="hidden" name="entryType" value="STAFF_REPLY" />
+                        <input type="hidden" name="status" value="OPEN" />
+                        <SpeechComposer name="body" required placeholder="Write a message" />
+                        <button className="grid h-14 shrink-0 place-items-center rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm">Send</button>
+                      </form>
+                      <details className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
+                        <summary className="cursor-pointer text-sm font-semibold text-neutral-700">Add internal note</summary>
+                        <form action={staffEntryAction} className="mt-3">
+                          <input type="hidden" name="conversationId" value={selectedConversation.id} />
+                          <input type="hidden" name="entryType" value="STAFF_NOTE" />
+                          <input type="hidden" name="status" value="OPEN" />
+                          <div className="flex items-end gap-3">
+                            <Textarea name="body" label="Internal team note" rows={2} />
+                            <button className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Save</button>
+                          </div>
+                        </form>
+                      </details>
+                    </div>
+                  </footer>
+                </div>
+              </>
+            ) : <div className="p-6"><Empty title="No conversation selected" body="Select a chat from the inbox." /></div>}
+          </main>
+
+          {selectedConversation ? <CustomerInfoPanel conversation={selectedConversation} team={teamPresence} /> : <aside className="hidden w-[320px] border-l border-neutral-200 bg-white xl:block" />}
+        </section>
+      </div>
+    );
+  }
+
   return (
     <PatientEngagementShell active="/patient-engagement/webchat">
-      {view === "inbox" ? <LivePanelRefresh intervalMs={2500} /> : null}
       <div className="mb-4 flex flex-wrap gap-2">
         {[
-          ["inbox", "Inbox"],
           ["knowledge", "Knowledge base"],
           ["forms", "Lead forms and scheduling"],
           ["ai-settings", "AI runtime"],
@@ -259,149 +411,6 @@ export default async function PatientEngagementWebchatPage({
           </Link>
         ))}
       </div>
-
-      {view === "inbox" ? (
-        <section className="overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-sm">
-          <div className="grid min-h-[780px] xl:grid-cols-[72px_360px_minmax(620px,1fr)_320px]">
-            <aside className="hidden border-r border-neutral-200 bg-white xl:flex xl:flex-col xl:items-center xl:justify-between xl:py-6">
-              <div className="space-y-6">
-                <Avatar label="FD" size="lg" tone="green" />
-                {[
-                  ["ALL", "All", "C"],
-                  ["WEB_CHAT", "Web", "W"],
-                  ["SMS", "SMS", "S"],
-                ].map(([key, label, icon]) => (
-                  <Link key={key} href={`/patient-engagement/webchat?channel=${key}`} className={`flex flex-col items-center gap-2 text-xs font-semibold ${channelFilter === key ? "text-blue-600" : "text-neutral-400 hover:text-neutral-700"}`}>
-                    <span className={`grid h-10 w-10 place-items-center rounded-2xl ${channelFilter === key ? "bg-blue-50 text-blue-600" : "bg-neutral-100"}`}>{icon}</span>
-                    {label}
-                  </Link>
-                ))}
-              </div>
-              <Link href="/patient-engagement/settings" className="flex flex-col items-center gap-2 text-xs font-semibold text-neutral-400 hover:text-neutral-700">
-                <span className="grid h-10 w-10 place-items-center rounded-2xl bg-neutral-100">S</span>
-                Settings
-              </Link>
-            </aside>
-
-            <aside className="border-r border-neutral-200 bg-white">
-              <div className="border-b border-neutral-200 p-4">
-                <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-xl font-semibold text-neutral-950">Inbox</p>
-                    <p className="mt-1 text-xs font-medium text-neutral-500">{chats.length} active conversations</p>
-                  </div>
-                  <Link href="/patient-engagement/settings" className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-neutral-500">⌘</Link>
-                </div>
-                <form action="/patient-engagement/webchat">
-                  <input type="hidden" name="view" value="inbox" />
-                  <input type="hidden" name="channel" value={channelFilter} />
-                  <div className="flex items-center gap-2 rounded-2xl bg-neutral-100 px-4 py-3">
-                    <span className="text-neutral-400">⌕</span>
-                    <input className="min-w-0 flex-1 bg-transparent text-sm outline-none" name="q" placeholder="Search inbox..." defaultValue={params.q ?? ""} />
-                  </div>
-                </form>
-                <div className="mt-4 grid gap-2">
-                  {[
-                    ["ALL", "All conversations"],
-                    ["WEB_CHAT", "Website chat"],
-                    ["SMS", "Text messages"],
-                  ].map(([key, label]) => (
-                    <Link key={key} href={`/patient-engagement/webchat?channel=${key}`} className={`rounded-xl px-3 py-2 text-sm font-semibold ${channelFilter === key ? "bg-emerald-50 text-emerald-700" : "text-neutral-600 hover:bg-neutral-50"}`}>
-                      {label}
-                    </Link>
-                  ))}
-                </div>
-              </div>
-              <div className="max-h-[600px] overflow-y-auto">
-                {chats.length ? chats.map((chat) => {
-                  const isSelected = selectedConversation?.id === chat.id;
-                  return (
-                    <Link
-                      key={chat.id}
-                      href={`/patient-engagement/webchat?conversationId=${chat.id}&q=${encodeURIComponent(params.q ?? "")}&channel=${channelFilter}`}
-                      className={`grid grid-cols-[52px_minmax(0,1fr)_auto] gap-3 border-b border-neutral-100 px-4 py-4 transition ${isSelected ? "bg-emerald-50" : "bg-white hover:bg-neutral-50"}`}
-                    >
-                      <Avatar label={personLabel(chat)} tone={chat.sourceChannel === "SMS" ? "blue" : "dark"} size="sm" />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-neutral-950">{personLabel(chat)}</p>
-                        <p className="mt-1 truncate text-sm text-neutral-500">{chat.lastMessageBody || chat.nextBestAction || clean(chat.nlpIntent ?? "new conversation")}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs text-neutral-500">{relativeTime(chat.updatedAt || chat.createdAt)}</p>
-                        <span className={`mt-4 inline-grid h-6 min-w-6 place-items-center rounded-full px-2 text-xs font-semibold ${chat.leadScore >= 80 ? "bg-emerald-600 text-white" : "bg-amber-100 text-amber-700"}`}>
-                          {chat.leadScore}
-                        </span>
-                      </div>
-                    </Link>
-                  );
-                }) : <div className="p-5"><Empty title="No conversations match" body="Clear the search or switch channels." /></div>}
-              </div>
-            </aside>
-
-            <main className="flex min-w-0 flex-col bg-white">
-              {selectedConversation ? (
-                <>
-                  <header className="flex items-center justify-between gap-4 border-b border-neutral-200 px-7 py-5">
-                    <div className="min-w-0">
-                      <h2 className="truncate text-lg font-semibold text-neutral-950">{personLabel(selectedConversation)}</h2>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-neutral-500">
-                        <span>{selectedConversation.sourceChannel === "SMS" ? "SMS thread" : "Website visitor"}</span>
-                        <span>{selectedConversation.visitorPhone || selectedConversation.visitorEmail || "contact not captured"}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Link href={`/patient-engagement/webchat?view=knowledge&conversationId=${selectedConversation.id}`} className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-sm font-semibold text-neutral-700">K</Link>
-                      <Link href="/patient-engagement/settings" className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-sm font-semibold text-neutral-700">S</Link>
-                    </div>
-                  </header>
-
-                  <div className="flex min-h-0 flex-1">
-                    <section className="flex min-w-0 flex-1 flex-col">
-                      <div className="flex-1 overflow-y-auto bg-white px-8 py-6">
-                        <div className="mx-auto mb-6 w-fit rounded-full bg-neutral-100 px-4 py-2 text-xs font-semibold text-neutral-500">Today</div>
-                        <div className="space-y-5">
-                          {messages.length ? messages.map((message) => (
-                            <MessageBubble key={message.id} message={message} visitorLabel={personLabel(selectedConversation)} />
-                          )) : (
-                            <Empty title="No messages yet" body="The transcript appears here as soon as the widget or SMS thread receives a message." />
-                          )}
-                        </div>
-                      </div>
-
-                      <footer className="border-t border-neutral-200 bg-white px-7 py-5">
-                        <div className="space-y-3">
-                          <TeamCollaborationPanel conversation={selectedConversation} team={teamPresence} />
-                          <form action={staffEntryAction} className="flex items-end gap-3">
-                            <input type="hidden" name="conversationId" value={selectedConversation.id} />
-                            <input type="hidden" name="entryType" value="STAFF_REPLY" />
-                            <input type="hidden" name="status" value="OPEN" />
-                            <SpeechComposer name="body" required placeholder="Reply to the website visitor" />
-                            <button className="grid h-14 shrink-0 place-items-center rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm">Send</button>
-                          </form>
-                          <details className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
-                            <summary className="cursor-pointer text-sm font-semibold text-neutral-700">Add internal note</summary>
-                            <form action={staffEntryAction} className="mt-3">
-                            <input type="hidden" name="conversationId" value={selectedConversation.id} />
-                            <input type="hidden" name="entryType" value="STAFF_NOTE" />
-                            <input type="hidden" name="status" value="OPEN" />
-                            <div className="flex items-end gap-3">
-                              <Textarea name="body" label="Internal team note" rows={2} />
-                              <button className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Save</button>
-                            </div>
-                            </form>
-                          </details>
-                        </div>
-                      </footer>
-                    </section>
-                  </div>
-                </>
-              ) : <div className="p-6"><Empty title="No conversation selected" body="Select a chat from the inbox." /></div>}
-            </main>
-            {selectedConversation ? <CustomerInfoPanel conversation={selectedConversation} team={teamPresence} /> : <aside className="hidden border-l border-neutral-200 bg-white xl:block" />}
-
-          </div>
-        </section>
-      ) : null}
 
       {view === "knowledge" ? (
         <section className="mt-5 grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
@@ -649,7 +658,7 @@ function PresenceDot({ status }: { status: WebchatTeamMember["presenceStatus"] }
 function CustomerInfoPanel({ conversation, team }: { conversation: WebChatRow; team: WebchatTeamMember[] }) {
   const assigned = team.find((member) => member.id === conversation.assignedStaffId);
   return (
-    <aside className="hidden border-l border-neutral-200 bg-white xl:block">
+    <aside className="hidden w-[320px] shrink-0 border-l border-neutral-200 bg-white xl:block">
       <div className="border-b border-neutral-200 px-5 py-4">
         <div className="flex items-center justify-between">
           <div className="flex gap-5 text-sm font-semibold">
