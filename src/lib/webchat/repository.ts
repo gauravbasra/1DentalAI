@@ -1967,7 +1967,9 @@ async function generateOpenAiReply(input: {
     "Never mention internal systems, PMS, RCM, writeback, connectors, workflows, claims, provider approvals, guardrails, statuses, or implementation limits.",
     "Do not diagnose, prescribe, or quote guaranteed insurance benefits.",
     "Booking requests are handled by the scheduling engine before this prompt. If a booking question reaches you, ask what procedure the visitor wants.",
-    "For insurance or pricing, ask for the plan name and treatment and say the team will review before giving an estimate.",
+    "For pricing, do not share fees, ranges, cash prices, discounts, or estimates. Say pricing is discussed by qualified team members during the visit and offer a warm transfer.",
+    "For insurance, ask for the plan name and treatment and say the team will review benefits before giving an estimate.",
+    "When the visitor asks what a dental term means, answer that exact term in the first sentence, then give a short process explanation. Do not start with unrelated terms from the same knowledge snippet.",
     "Use only the approved knowledge snippets provided in this request. Do not use internet knowledge, training-data facts, web search, or external sources.",
     runtimeSettings.llmSettings.allowModelKnowledge ? "If approved knowledge is not relevant, ask a clarifying question instead of inventing details." : "If approved knowledge is missing or not relevant, say the team can follow up. Do not answer from general model knowledge.",
     `Response style: ${runtimeSettings.llmSettings.responseStyle}.`,
@@ -2131,9 +2133,48 @@ async function retrieveKnowledge(message: string, tenantId: string) {
        where lower(kc."content") like '%' || term || '%'
      ) desc, kc."updatedAt" desc
      limit $4`,
-    [tenantId, terms, statuses, limit],
+    [tenantId, terms, statuses, Math.max(20, limit * 3)],
   );
-  return result.rows;
+  return result.rows
+    .sort((left, right) => scoreKnowledgeRow(message, right) - scoreKnowledgeRow(message, left))
+    .slice(0, limit);
+}
+
+function scoreKnowledgeRow(message: string, row: { content: string; heading: string | null; pageTitle: string }) {
+  const text = `${row.heading ?? ""} ${row.pageTitle} ${row.content}`.toLowerCase();
+  const normalized = message.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const importantPhrases = [
+    "scaling and root planing",
+    "deep cleaning",
+    "periodontal maintenance",
+    "root canal",
+    "dental implant",
+    "implant",
+    "crown",
+    "filling",
+    "extraction",
+    "bridge",
+    "veneer",
+    "whitening",
+    "clear aligner",
+    "emergency",
+    "new patient",
+    "hygiene",
+    "insurance verification",
+    "forms",
+    "pricing",
+    "cost",
+  ];
+  let score = 0;
+  for (const phrase of importantPhrases) {
+    if (normalized.includes(phrase) && text.includes(phrase)) score += phrase.split(" ").length > 1 ? 20 : 10;
+  }
+  const terms = normalized.split(" ").filter((term) => term.length > 3);
+  for (const term of terms) {
+    if ((row.heading ?? "").toLowerCase().includes(term)) score += 6;
+    if (row.content.toLowerCase().includes(term)) score += 2;
+  }
+  return score;
 }
 
 function buildReply(analysis: WebchatAnalysis, knowledge: Array<{ content: string; heading: string | null; pageTitle: string }>) {
