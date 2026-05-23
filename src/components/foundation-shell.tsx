@@ -11,6 +11,7 @@ const appNav = [
   { href: "/app/overview", label: "Overview", group: "Practice" },
   { href: "/app/huddle", label: "Morning huddle", group: "Practice" },
   { href: "/app/patient-finder", label: "Patient finder", group: "Practice" },
+  { href: "/app/clinical-ai", label: "Clinical AI", group: "Clinical ops" },
   { href: "/app/pms", label: "PMS", group: "Clinical ops" },
   { href: "/app/rcm", label: "RCM", group: "Clinical ops" },
   { href: "/app/phone", label: "Patient engagement", group: "Growth" },
