@@ -1,6 +1,9 @@
 name: Deploy 1DentalAI to DigitalOcean
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
