@@ -262,7 +262,7 @@ export default async function PatientEngagementWebchatPage({
 
       {view === "inbox" ? (
         <section className="overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-sm">
-          <div className="grid min-h-[760px] xl:grid-cols-[82px_380px_minmax(0,1fr)]">
+          <div className="grid min-h-[780px] xl:grid-cols-[72px_360px_minmax(620px,1fr)_320px]">
             <aside className="hidden border-r border-neutral-200 bg-white xl:flex xl:flex-col xl:items-center xl:justify-between xl:py-6">
               <div className="space-y-6">
                 <Avatar label="FD" size="lg" tone="green" />
@@ -284,35 +284,51 @@ export default async function PatientEngagementWebchatPage({
             </aside>
 
             <aside className="border-r border-neutral-200 bg-white">
-              <form className="border-b border-neutral-200 p-4" action="/patient-engagement/webchat">
-                <input type="hidden" name="view" value="inbox" />
-                <input type="hidden" name="channel" value={channelFilter} />
-                <div className="flex items-center gap-2 rounded-2xl bg-neutral-100 px-4 py-3">
-                  <input className="min-w-0 flex-1 bg-transparent text-sm outline-none" name="q" placeholder="Search..." defaultValue={params.q ?? ""} />
-                  <button className="grid h-9 w-9 place-items-center rounded-full bg-white text-sm font-semibold text-neutral-700 shadow-sm">Go</button>
+              <div className="border-b border-neutral-200 p-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-xl font-semibold text-neutral-950">Inbox</p>
+                    <p className="mt-1 text-xs font-medium text-neutral-500">{chats.length} active conversations</p>
+                  </div>
+                  <Link href="/patient-engagement/settings" className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-neutral-500">⌘</Link>
                 </div>
-              </form>
-              <div className="max-h-[690px] overflow-y-auto">
+                <form action="/patient-engagement/webchat">
+                  <input type="hidden" name="view" value="inbox" />
+                  <input type="hidden" name="channel" value={channelFilter} />
+                  <div className="flex items-center gap-2 rounded-2xl bg-neutral-100 px-4 py-3">
+                    <span className="text-neutral-400">⌕</span>
+                    <input className="min-w-0 flex-1 bg-transparent text-sm outline-none" name="q" placeholder="Search inbox..." defaultValue={params.q ?? ""} />
+                  </div>
+                </form>
+                <div className="mt-4 grid gap-2">
+                  {[
+                    ["ALL", "All conversations"],
+                    ["WEB_CHAT", "Website chat"],
+                    ["SMS", "Text messages"],
+                  ].map(([key, label]) => (
+                    <Link key={key} href={`/patient-engagement/webchat?channel=${key}`} className={`rounded-xl px-3 py-2 text-sm font-semibold ${channelFilter === key ? "bg-emerald-50 text-emerald-700" : "text-neutral-600 hover:bg-neutral-50"}`}>
+                      {label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+              <div className="max-h-[600px] overflow-y-auto">
                 {chats.length ? chats.map((chat) => {
                   const isSelected = selectedConversation?.id === chat.id;
                   return (
                     <Link
                       key={chat.id}
                       href={`/patient-engagement/webchat?conversationId=${chat.id}&q=${encodeURIComponent(params.q ?? "")}&channel=${channelFilter}`}
-                      className={`grid grid-cols-[64px_minmax(0,1fr)_auto] gap-3 border-b border-neutral-200 px-5 py-4 transition ${isSelected ? "bg-neutral-100" : "bg-white hover:bg-neutral-50"}`}
+                      className={`grid grid-cols-[52px_minmax(0,1fr)_auto] gap-3 border-b border-neutral-100 px-4 py-4 transition ${isSelected ? "bg-emerald-50" : "bg-white hover:bg-neutral-50"}`}
                     >
-                      <Avatar label={personLabel(chat)} tone={chat.sourceChannel === "SMS" ? "blue" : "dark"} />
+                      <Avatar label={personLabel(chat)} tone={chat.sourceChannel === "SMS" ? "blue" : "dark"} size="sm" />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-neutral-950">{personLabel(chat)}</p>
                         <p className="mt-1 truncate text-sm text-neutral-500">{chat.lastMessageBody || chat.nextBestAction || clean(chat.nlpIntent ?? "new conversation")}</p>
-                        <div className="mt-2 flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                          <span className="text-xs font-semibold text-neutral-500">{chat.sourceChannel === "SMS" ? "Two-way SMS" : "Website chat"}</span>
-                        </div>
                       </div>
                       <div className="text-right">
                         <p className="text-xs text-neutral-500">{relativeTime(chat.updatedAt || chat.createdAt)}</p>
-                        <span className={`mt-4 inline-grid h-6 min-w-6 place-items-center rounded-full px-2 text-xs font-semibold ${chat.leadScore >= 80 ? "bg-blue-600 text-white" : "bg-neutral-200 text-neutral-700"}`}>
+                        <span className={`mt-4 inline-grid h-6 min-w-6 place-items-center rounded-full px-2 text-xs font-semibold ${chat.leadScore >= 80 ? "bg-emerald-600 text-white" : "bg-amber-100 text-amber-700"}`}>
                           {chat.leadScore}
                         </span>
                       </div>
@@ -325,26 +341,23 @@ export default async function PatientEngagementWebchatPage({
             <main className="flex min-w-0 flex-col bg-white">
               {selectedConversation ? (
                 <>
-                  <header className="flex items-center justify-between gap-4 border-b border-neutral-200 px-6 py-4">
+                  <header className="flex items-center justify-between gap-4 border-b border-neutral-200 px-7 py-5">
                     <div className="min-w-0">
                       <h2 className="truncate text-lg font-semibold text-neutral-950">{personLabel(selectedConversation)}</h2>
                       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-neutral-500">
-                        <span>{clean(selectedConversation.qualificationStage)}</span>
                         <span>{selectedConversation.sourceChannel === "SMS" ? "SMS thread" : "Website visitor"}</span>
                         <span>{selectedConversation.visitorPhone || selectedConversation.visitorEmail || "contact not captured"}</span>
-                        <span>{selectedConversation.leadScore} lead score</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <StateBadge tone={(selectedConversation.automationMode || "AI_AUTO") === "AI_AUTO" ? "green" : "amber"}>{clean(selectedConversation.automationMode || "AI_AUTO")}</StateBadge>
-                      <Link href={`/patient-engagement/webchat?view=knowledge&conversationId=${selectedConversation.id}`} className="grid h-10 w-10 place-items-center rounded-full border border-neutral-200 text-sm font-semibold text-neutral-700">K</Link>
-                      <Link href="/patient-engagement/settings" className="grid h-10 w-10 place-items-center rounded-full border border-neutral-200 text-sm font-semibold text-neutral-700">S</Link>
+                      <Link href={`/patient-engagement/webchat?view=knowledge&conversationId=${selectedConversation.id}`} className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-sm font-semibold text-neutral-700">K</Link>
+                      <Link href="/patient-engagement/settings" className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-sm font-semibold text-neutral-700">S</Link>
                     </div>
                   </header>
 
                   <div className="flex min-h-0 flex-1">
                     <section className="flex min-w-0 flex-1 flex-col">
-                      <div className="flex-1 overflow-y-auto bg-white px-6 py-5">
+                      <div className="flex-1 overflow-y-auto bg-white px-8 py-6">
                         <div className="mx-auto mb-6 w-fit rounded-full bg-neutral-100 px-4 py-2 text-xs font-semibold text-neutral-500">Today</div>
                         <div className="space-y-5">
                           {messages.length ? messages.map((message) => (
@@ -355,25 +368,28 @@ export default async function PatientEngagementWebchatPage({
                         </div>
                       </div>
 
-                      <footer className="border-t border-neutral-200 bg-white px-6 py-5">
-                        <div className="space-y-4">
+                      <footer className="border-t border-neutral-200 bg-white px-7 py-5">
+                        <div className="space-y-3">
                           <TeamCollaborationPanel conversation={selectedConversation} team={teamPresence} />
                           <form action={staffEntryAction} className="flex items-end gap-3">
                             <input type="hidden" name="conversationId" value={selectedConversation.id} />
                             <input type="hidden" name="entryType" value="STAFF_REPLY" />
                             <input type="hidden" name="status" value="OPEN" />
                             <SpeechComposer name="body" required placeholder="Reply to the website visitor" />
-                            <button className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow-sm">Send</button>
+                            <button className="grid h-14 shrink-0 place-items-center rounded-2xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm">Send</button>
                           </form>
-                          <form action={staffEntryAction} className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                          <details className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
+                            <summary className="cursor-pointer text-sm font-semibold text-neutral-700">Add internal note</summary>
+                            <form action={staffEntryAction} className="mt-3">
                             <input type="hidden" name="conversationId" value={selectedConversation.id} />
                             <input type="hidden" name="entryType" value="STAFF_NOTE" />
                             <input type="hidden" name="status" value="OPEN" />
                             <div className="flex items-end gap-3">
                               <Textarea name="body" label="Internal team note" rows={2} />
-                              <button className="rounded-xl bg-amber-900 px-4 py-3 text-sm font-semibold text-white">Add note</button>
+                              <button className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Save</button>
                             </div>
-                          </form>
+                            </form>
+                          </details>
                         </div>
                       </footer>
                     </section>
@@ -381,6 +397,7 @@ export default async function PatientEngagementWebchatPage({
                 </>
               ) : <div className="p-6"><Empty title="No conversation selected" body="Select a chat from the inbox." /></div>}
             </main>
+            {selectedConversation ? <CustomerInfoPanel conversation={selectedConversation} team={teamPresence} /> : <aside className="hidden border-l border-neutral-200 bg-white xl:block" />}
 
           </div>
         </section>
@@ -559,18 +576,15 @@ function TeamCollaborationPanel({ conversation, team }: { conversation: WebChatR
   const ownerOptions = ["front_desk", "treatment_coordinator", "practice_manager", "billing_team", "provider"];
   const assigned = team.find((member) => member.id === conversation.assignedStaffId);
   return (
-    <details className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4" open>
-      <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-neutral-950">Transfer, assign, or schedule</p>
-          <p className="mt-1 text-xs leading-5 text-neutral-600">
-            Owner: {clean(conversation.ownerRoleKey)}{assigned ? ` · ${assigned.displayName}` : ""}{conversation.staffOwnerDueAt ? ` · due ${relativeTime(conversation.staffOwnerDueAt)}` : ""}
-          </p>
-        </div>
-        <StateBadge tone={conversation.assignedStaffId ? "green" : "amber"}>{conversation.assignedStaffId ? "Assigned" : "Unassigned"}</StateBadge>
+    <details className="rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+        <span className="text-sm font-semibold text-neutral-950">Assign, transfer, or schedule</span>
+        <span className="text-xs font-semibold text-neutral-500">
+          {assigned ? assigned.displayName : clean(conversation.ownerRoleKey)}
+        </span>
       </summary>
 
-      <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
         {team.length ? team.slice(0, 8).map((member) => (
           <div key={member.id} className={`flex min-w-[180px] items-center gap-3 rounded-xl border px-3 py-2 ${member.id === conversation.assignedStaffId ? "border-blue-200 bg-blue-50" : "border-neutral-200 bg-white"}`}>
             <PresenceDot status={member.presenceStatus} />
@@ -584,7 +598,7 @@ function TeamCollaborationPanel({ conversation, team }: { conversation: WebChatR
         )}
       </div>
 
-      <div className="mt-4 grid gap-3 xl:grid-cols-3">
+      <div className="mt-3 grid gap-3 xl:grid-cols-3">
         <form action={transferConversationAction} className="space-y-3 rounded-xl border border-neutral-200 bg-white p-3">
           <input type="hidden" name="conversationId" value={conversation.id} />
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
@@ -630,6 +644,70 @@ function TeamCollaborationPanel({ conversation, team }: { conversation: WebChatR
 function PresenceDot({ status }: { status: WebchatTeamMember["presenceStatus"] }) {
   const color = status === "ONLINE" ? "bg-emerald-500" : status === "RECENT" ? "bg-amber-400" : "bg-neutral-300";
   return <span className={`h-3 w-3 shrink-0 rounded-full ${color}`} />;
+}
+
+function CustomerInfoPanel({ conversation, team }: { conversation: WebChatRow; team: WebchatTeamMember[] }) {
+  const assigned = team.find((member) => member.id === conversation.assignedStaffId);
+  return (
+    <aside className="hidden border-l border-neutral-200 bg-white xl:block">
+      <div className="border-b border-neutral-200 px-5 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex gap-5 text-sm font-semibold">
+            <span className="border-b-2 border-emerald-600 pb-3 text-emerald-700">Info</span>
+            <Link href={`/patient-engagement/webchat?view=knowledge&conversationId=${conversation.id}`} className="pb-3 text-neutral-500 hover:text-neutral-950">Knowledge</Link>
+            <Link href="/patient-engagement/settings" className="pb-3 text-neutral-500 hover:text-neutral-950">Settings</Link>
+          </div>
+        </div>
+      </div>
+      <div className="max-h-[720px] overflow-y-auto">
+        <section className="border-b border-neutral-200 p-5">
+          <p className="text-xs font-semibold text-neutral-500">About visitor</p>
+          <div className="mt-4 flex items-center gap-3">
+            <Avatar label={personLabel(conversation)} tone="dark" />
+            <div className="min-w-0">
+              <p className="truncate text-base font-semibold text-neutral-950">{personLabel(conversation)}</p>
+              <p className="text-sm text-neutral-500">{conversation.sourceChannel === "SMS" ? "Text message" : "Website chat"}</p>
+            </div>
+          </div>
+          <InfoLine label="Email" value={conversation.visitorEmail || "Not captured"} />
+          <InfoLine label="Phone" value={conversation.visitorPhone || "Not captured"} />
+          <InfoLine label="Source page" value={conversation.sourcePage || conversation.landingPageSlug || "Website"} />
+          <InfoLine label="Campaign" value={conversation.campaignSource || "Direct"} />
+        </section>
+
+        <section className="border-b border-neutral-200 p-5">
+          <p className="text-xs font-semibold text-neutral-500">Assignment</p>
+          <InfoLine label="Owner" value={clean(conversation.ownerRoleKey)} />
+          <InfoLine label="Assignee" value={assigned?.displayName || "Unassigned"} />
+          <InfoLine label="Due" value={conversation.staffOwnerDueAt ? relativeTime(conversation.staffOwnerDueAt) : "No due time"} />
+        </section>
+
+        <section className="border-b border-neutral-200 p-5">
+          <p className="text-xs font-semibold text-neutral-500">Conversation</p>
+          <InfoLine label="Stage" value={clean(conversation.qualificationStage)} />
+          <InfoLine label="Intent" value={clean(conversation.nlpIntent || "unknown")} />
+          <InfoLine label="Lead score" value={String(conversation.leadScore)} />
+          <InfoLine label="Scheduling" value={clean(conversation.schedulingOutcome || "none")} />
+        </section>
+
+        <section className="p-5">
+          <p className="text-xs font-semibold text-neutral-500">Next step</p>
+          <p className="mt-3 rounded-2xl bg-neutral-50 p-4 text-sm leading-6 text-neutral-700">
+            {conversation.nextBestAction || conversation.blockedReason || "Continue the conversation, assign ownership, or create a scheduling handoff from the chat composer."}
+          </p>
+        </section>
+      </div>
+    </aside>
+  );
+}
+
+function InfoLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mt-4">
+      <p className="text-xs font-medium text-neutral-500">{label}</p>
+      <p className="mt-1 break-words text-sm font-semibold text-neutral-950">{value}</p>
+    </div>
+  );
 }
 
 function StaffSelect({ name, label, team, defaultValue }: { name: string; label: string; team: WebchatTeamMember[]; defaultValue?: string }) {
@@ -788,8 +866,8 @@ function MessageBubble({ message, visitorLabel }: { message: WebChatMessageRow; 
   );
 }
 
-function Avatar({ label, tone = "dark", size = "md" }: { label: string; tone?: "dark" | "blue" | "green" | "rose"; size?: "md" | "lg" | "xl" }) {
-  const sizeClass = size === "xl" ? "h-20 w-20 text-xl" : size === "lg" ? "h-12 w-12 text-base" : "h-12 w-12 text-sm";
+function Avatar({ label, tone = "dark", size = "md" }: { label: string; tone?: "dark" | "blue" | "green" | "rose"; size?: "sm" | "md" | "lg" | "xl" }) {
+  const sizeClass = size === "xl" ? "h-20 w-20 text-xl" : size === "lg" ? "h-12 w-12 text-base" : size === "sm" ? "h-10 w-10 text-xs" : "h-12 w-12 text-sm";
   const toneClass = {
     dark: "bg-neutral-950 text-white",
     blue: "bg-blue-600 text-white",
