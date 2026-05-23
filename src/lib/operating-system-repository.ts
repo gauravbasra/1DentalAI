@@ -615,7 +615,7 @@ export async function updateRevenueFindingStatus(id: string, status: string, act
 }
 
 export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
-  const [conversations, messages, routes, tasks, analytics, numbers, extensions, devices, providers, activeCalls, controls, voicemails, channelSettings, knowledgeSources, webChats, webChatMessages, leadForms, formPackets, schedulingRules, metrics, patients] = await Promise.all([
+  const [conversations, messages, routes, tasks, analytics, numbers, extensions, devices, providers, activeCalls, controls, voicemails, screenPops, transcriptEvents, aiAssistEvents, aiReceptionPolicies, channelSettings, knowledgeSources, webChats, webChatMessages, leadForms, formPackets, schedulingRules, metrics, patients] = await Promise.all([
     query(
       `select c.*, p."firstName", p."lastName", p."chartNumber", p."phone", p."email",
         a."appointmentType", a."startsAt",
@@ -831,6 +831,33 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
        order by case vm."status" when 'TRIAGE_REQUIRED' then 0 when 'NEW' then 1 else 2 end, vm."dueAt" asc nulls last`,
       [tenantId],
     ),
+    query(
+      `select s.*, ac."callState", ac."providerCallId", c."callerName", c."practiceNumber", c."startedAt"
+       from "PhoneScreenPopSnapshot" s
+       left join "PhoneActiveCall" ac on ac."id" = s."activeCallId"
+       left join "PhoneConversation" c on c."id" = s."conversationId"
+       where s."tenantId" = $1
+       order by s."createdAt" desc
+       limit 20`,
+      [tenantId],
+    ),
+    query(
+      `select te.*
+       from "PhoneCallTranscriptEvent" te
+       where te."tenantId" = $1
+       order by te."createdAt" desc
+       limit 80`,
+      [tenantId],
+    ),
+    query(
+      `select ae.*
+       from "PhoneCallAiAssistEvent" ae
+       where ae."tenantId" = $1
+       order by case ae."severity" when 'CRITICAL' then 0 when 'WARNING' then 1 else 2 end, ae."createdAt" desc
+       limit 80`,
+      [tenantId],
+    ),
+    query(`select * from "PhoneAiReceptionPolicy" where "tenantId" = $1 order by "locationId" nulls first, "name"`, [tenantId]),
     query(`select * from "PatientEngagementChannelSetting" where "tenantId" = $1 order by "channel"`, [tenantId]),
     query(`select * from "PatientEngagementKnowledgeSource" where "tenantId" = $1 order by case "status" when 'NEEDS_REVIEW' then 0 else 1 end, "sourceModule", "title"`, [tenantId]),
     query(
@@ -927,6 +954,10 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
     activeCalls: activeCalls.rows,
     controls: controls.rows,
     voicemails: voicemails.rows,
+    screenPops: screenPops.rows,
+    transcriptEvents: transcriptEvents.rows,
+    aiAssistEvents: aiAssistEvents.rows,
+    aiReceptionPolicies: aiReceptionPolicies.rows,
     channelSettings: channelSettings.rows,
     knowledgeSources: knowledgeSources.rows,
     webChats: webChats.rows,

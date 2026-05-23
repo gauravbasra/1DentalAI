@@ -1906,6 +1906,91 @@ model PhoneActiveCall {
   @@index([currentExtensionId])
 }
 
+model PhoneScreenPopSnapshot {
+  id                 String   @id
+  tenantId           String
+  conversationId     String   @unique
+  activeCallId       String?
+  patientId          String?
+  callerNumber       String?
+  matchStatus        String   @default("UNMATCHED")
+  matchConfidence    Int      @default(0)
+  matchedBy          String?
+  candidatePatients  Json     @default("[]")
+  snapshotJson       Json     @default("{}")
+  actionLinks        Json     @default("{}")
+  recommendedActions Json     @default("[]")
+  privacyFlags       Json     @default("[]")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantId, matchStatus, createdAt])
+  @@index([patientId, createdAt])
+  @@index([activeCallId])
+}
+
+model PhoneCallTranscriptEvent {
+  id              String   @id
+  tenantId        String
+  conversationId  String
+  activeCallId    String?
+  provider        String   @default("TWILIO")
+  providerEventId String?
+  sequence        Int      @default(0)
+  speaker         String   @default("UNKNOWN")
+  languageCode    String   @default("en-US")
+  transcriptText  String
+  translationText String?
+  confidence      Float?
+  isFinal         Boolean  @default(true)
+  eventType       String   @default("TRANSCRIPTION_CONTENT")
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
+  @@index([conversationId, sequence, createdAt])
+  @@index([tenantId, createdAt])
+}
+
+model PhoneCallAiAssistEvent {
+  id                      String   @id
+  tenantId                String
+  conversationId          String
+  activeCallId            String?
+  eventType               String
+  severity                String   @default("INFO")
+  title                   String
+  body                    String
+  serviceTags             String[] @default([])
+  revenueOpportunityCents Int      @default(0)
+  requiresHuman           Boolean  @default(false)
+  status                  String   @default("OPEN")
+  metadata                Json?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([conversationId, status, createdAt])
+  @@index([tenantId, eventType, status])
+}
+
+model PhoneAiReceptionPolicy {
+  id            String   @id
+  tenantId      String
+  locationId    String?
+  name          String
+  status        String   @default("ACTIVE")
+  ringThreshold Int      @default(4)
+  mode          String   @default("ASSIST_WHEN_BUSY")
+  pricingPolicy String   @default("NO_PUBLIC_PRICING_HUMAN_ONLY")
+  bookingPolicy String   @default("DIRECT_BOOKING_WITH_SCHEDULING_GATES")
+  billingPolicy String   @default("EXPLAIN_BALANCE_ROUTE_SENSITIVE_TO_BILLING")
+  handoffPolicy Json     @default("{}")
+  voiceSettings Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId, status])
+}
+
 model PhoneCallControlAction {
   id             String   @id @default(cuid())
   tenantId       String
