@@ -369,12 +369,20 @@ async function getAnyOpenAiVaultSecret(tenantId = defaultTenantId) {
          v."providerKey" ilike '%openai%'
          or v."providerKey" ilike '%open_ai%'
          or v."providerKey" ilike '%open ai%'
+         or v."credentialLabel" ilike '%openai%'
+         or v."credentialLabel" ilike '%open_ai%'
+         or v."credentialLabel" ilike '%open ai%'
        )
        and (
          v."credentialLabel" ilike '%api%key%'
          or v."credentialLabel" ilike '%secret%'
          or v."credentialLabel" ilike '%token%'
          or v."credentialType" ilike '%api%key%'
+         or v."credentialType" ilike '%secret%'
+         or v."credentialType" ilike '%token%'
+         or v."providerKey" ilike '%openai%'
+         or v."providerKey" ilike '%open_ai%'
+         or v."providerKey" ilike '%open ai%'
        )
      order by
        case when v."status" = 'VALIDATED' then 0 else 1 end,
