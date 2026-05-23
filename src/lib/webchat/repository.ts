@@ -1721,7 +1721,7 @@ function schedulingIntakeQuestion(intake: SchedulingIntake) {
     }
     return {
       askFor,
-      body: `Got it: ${intake.procedure?.label ?? "that visit"}. Are you a new patient, an existing patient, or booking for someone else?`,
+      body: `Absolutely, I can help with ${intake.procedure?.label.toLowerCase() ?? "that visit"}. Are you a new patient, an existing patient, or booking for someone else?`,
     };
   }
   if (askFor === "urgencyStatus") {
