@@ -2,7 +2,14 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { StateBadge } from "@/components/products/product-app-shell";
 import { clean, money } from "@/components/products/patient-engagement-shell";
-import { createPhoneOutboundMessage, getPhoneOperatingCenter, updatePhoneConversationStatus } from "@/lib/operating-system-repository";
+import {
+  createPhoneCallControlAction,
+  createPhoneOutboundMessage,
+  getPhoneOperatingCenter,
+  sendApprovedPhoneOutboundMessage,
+  updatePhoneConversationStatus,
+  updatePhoneOutboundMessageApproval,
+} from "@/lib/operating-system-repository";
 import { ThemeModeControl } from "./theme-mode-control";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +39,32 @@ async function updateCallWorkAction(formData: FormData) {
     String(formData.get("status") ?? "OPEN"),
     String(formData.get("followUpStatus") ?? "READY_FOR_APPROVAL"),
   );
+  revalidatePath("/patient-engagement");
+}
+
+async function callControlAction(formData: FormData) {
+  "use server";
+  await createPhoneCallControlAction({
+    activeCallId: String(formData.get("activeCallId") ?? "") || undefined,
+    conversationId: String(formData.get("conversationId") ?? "") || undefined,
+    actionType: String(formData.get("actionType") ?? ""),
+    requestedByRole: String(formData.get("requestedByRole") ?? "front_desk"),
+    targetExtensionId: String(formData.get("targetExtensionId") ?? "") || undefined,
+    targetNumber: String(formData.get("targetNumber") ?? "") || undefined,
+    targetParkSlot: String(formData.get("targetParkSlot") ?? "") || undefined,
+  });
+  revalidatePath("/patient-engagement");
+}
+
+async function approveOutboundMessageAction(formData: FormData) {
+  "use server";
+  await updatePhoneOutboundMessageApproval(String(formData.get("messageId") ?? ""), "APPROVED_STAGED", "front_desk");
+  revalidatePath("/patient-engagement");
+}
+
+async function sendOutboundMessageAction(formData: FormData) {
+  "use server";
+  await sendApprovedPhoneOutboundMessage(String(formData.get("messageId") ?? ""), "front_desk");
   revalidatePath("/patient-engagement");
 }
 
@@ -74,6 +107,23 @@ export default async function PatientEngagementHome({
   const callAi = aiAssistEvents.filter((event) => String(event.conversationId) === String(selectedConversation?.id)).slice(0, 6);
   const patientMessages = messages.filter((message) => message.patientId && message.patientId === selectedConversation?.patientId).slice(0, 8);
   const patientTasks = tasks.filter((task) => task.patientId && task.patientId === selectedConversation?.patientId).slice(0, 6);
+  const routes = center.routes as Record<string, unknown>[];
+  const analytics = center.analytics as Record<string, unknown>[];
+  const numbers = center.numbers as Record<string, unknown>[];
+  const extensions = center.extensions as Record<string, unknown>[];
+  const devices = center.devices as Record<string, unknown>[];
+  const providers = center.providers as Record<string, unknown>[];
+  const activeCalls = center.activeCalls as Record<string, unknown>[];
+  const controls = center.controls as Record<string, unknown>[];
+  const voicemails = center.voicemails as Record<string, unknown>[];
+  const aiReceptionPolicies = center.aiReceptionPolicies as Record<string, unknown>[];
+  const channelSettings = center.channelSettings as Record<string, unknown>[];
+  const knowledgeSources = center.knowledgeSources as Record<string, unknown>[];
+  const webChats = center.webChats as Record<string, unknown>[];
+  const webChatMessages = center.webChatMessages as Record<string, unknown>[];
+  const leadForms = center.leadForms as Record<string, unknown>[];
+  const formPackets = center.formPackets as Record<string, unknown>[];
+  const schedulingRules = center.schedulingRules as Record<string, unknown>[];
 
   return (
     <main className="pe-shell min-h-screen bg-[#f4f6f7] text-neutral-950">
@@ -160,6 +210,25 @@ export default async function PatientEngagementHome({
         callAi={callAi}
         callTranscript={callTranscript}
         metrics={metrics}
+        messages={messages}
+        allTasks={tasks}
+        routes={routes}
+        analytics={analytics}
+        numbers={numbers}
+        extensions={extensions}
+        devices={devices}
+        providers={providers}
+        activeCalls={activeCalls}
+        controls={controls}
+        voicemails={voicemails}
+        aiReceptionPolicies={aiReceptionPolicies}
+        channelSettings={channelSettings}
+        knowledgeSources={knowledgeSources}
+        webChats={webChats}
+        webChatMessages={webChatMessages}
+        leadForms={leadForms}
+        formPackets={formPackets}
+        schedulingRules={schedulingRules}
       />
     </main>
   );
@@ -305,7 +374,7 @@ function ThreadToolbar({ conversation }: { conversation: ConversationRow | null;
         <span># {conversation?.practiceNumber || "Main Line"}</span>
       </div>
       <div className="flex gap-2">
-        <form action="/api/phone/call-control" method="post">
+        <form action={callControlAction}>
           <input type="hidden" name="conversationId" value={conversation?.id ?? ""} />
           <input type="hidden" name="actionType" value="OUTBOUND_DIAL" />
           <input type="hidden" name="targetNumber" value={conversation?.callerNumber ?? ""} />
@@ -427,6 +496,25 @@ function FlowOverlay({
   callAi,
   callTranscript,
   metrics,
+  messages,
+  allTasks,
+  routes,
+  analytics,
+  numbers,
+  extensions,
+  devices,
+  providers,
+  activeCalls,
+  controls,
+  voicemails,
+  aiReceptionPolicies,
+  channelSettings,
+  knowledgeSources,
+  webChats,
+  webChatMessages,
+  leadForms,
+  formPackets,
+  schedulingRules,
 }: {
   panel?: string;
   selectedConversation: ConversationRow | null;
@@ -441,6 +529,25 @@ function FlowOverlay({
   callAi: Record<string, unknown>[];
   callTranscript: Record<string, unknown>[];
   metrics: Record<string, string>;
+  messages: MessageRow[];
+  allTasks: TaskRow[];
+  routes: Record<string, unknown>[];
+  analytics: Record<string, unknown>[];
+  numbers: Record<string, unknown>[];
+  extensions: Record<string, unknown>[];
+  devices: Record<string, unknown>[];
+  providers: Record<string, unknown>[];
+  activeCalls: Record<string, unknown>[];
+  controls: Record<string, unknown>[];
+  voicemails: Record<string, unknown>[];
+  aiReceptionPolicies: Record<string, unknown>[];
+  channelSettings: Record<string, unknown>[];
+  knowledgeSources: Record<string, unknown>[];
+  webChats: Record<string, unknown>[];
+  webChatMessages: Record<string, unknown>[];
+  leadForms: Record<string, unknown>[];
+  formPackets: Record<string, unknown>[];
+  schedulingRules: Record<string, unknown>[];
 }) {
   if (!panel) return null;
   const closeHref = selectedConversation ? `/patient-engagement?conversationId=${selectedConversation.id}` : "/patient-engagement";
@@ -484,16 +591,16 @@ function FlowOverlay({
           {panel === "payment" ? <PaymentPanel conversation={selectedConversation} patient={patient} /> : null}
           {panel === "insurance" ? <InsurancePanel patient={patient} insurancePlans={insurancePlans} benefits={benefits} /> : null}
           {panel === "forms" ? <FormsPanel conversation={selectedConversation} patient={patient} forms={forms} /> : null}
-          {panel === "phone" ? <PhonePanel conversation={selectedConversation} metrics={metrics} /> : null}
-          {panel === "sms" ? <SmsPanel conversation={selectedConversation} patient={patient} /> : null}
-          {panel === "webchat" ? <WebchatPanel metrics={metrics} /> : null}
-          {panel === "automessages" ? <AutoMessagesPanel /> : null}
+          {panel === "phone" ? <PhonePanel conversation={selectedConversation} metrics={metrics} activeCalls={activeCalls} controls={controls} voicemails={voicemails} numbers={numbers} extensions={extensions} devices={devices} providers={providers} routes={routes} tasks={allTasks} /> : null}
+          {panel === "sms" ? <SmsPanel conversation={selectedConversation} patient={patient} messages={messages} /> : null}
+          {panel === "webchat" ? <WebchatPanel metrics={metrics} webChats={webChats} webChatMessages={webChatMessages} knowledgeSources={knowledgeSources} leadForms={leadForms} schedulingRules={schedulingRules} channelSettings={channelSettings} /> : null}
+          {panel === "automessages" ? <AutoMessagesPanel messages={messages} channelSettings={channelSettings} formPackets={formPackets} schedulingRules={schedulingRules} /> : null}
           {panel === "fax" ? <ModuleFlowPanel title="Fax center" body="Inbound and outbound fax work stays in this console with document attachment, patient matching, and delivery status." rows={["Inbound fax matching", "Outbound attachment queue", "Failed delivery review", "Patient document filing"]} /> : null}
-          {panel === "schedule" ? <SchedulePanel nextAppointments={nextAppointments} /> : null}
+          {panel === "schedule" ? <SchedulePanel nextAppointments={nextAppointments} schedulingRules={schedulingRules} leadForms={leadForms} /> : null}
           {panel === "reviews" ? <ModuleFlowPanel title="Review recovery" body="Review requests, private surveys, response approval, and service recovery belong in this same patient engagement workspace." rows={["Visit-completed eligibility", "Recovery hold review", "AI response approval", "Public review connector status"]} /> : null}
-          {panel === "analytics" ? <AnalyticsPanel metrics={metrics} /> : null}
+          {panel === "analytics" ? <AnalyticsPanel metrics={metrics} analytics={analytics} tasks={allTasks} controls={controls} messages={messages} /> : null}
           {panel === "marketing" ? <ModuleFlowPanel title="Marketing handoff" body="Campaigns should start from PMS audiences and write back outcomes to conversations, appointments, production, and collections." rows={["Unscheduled treatment audience", "Recall and reactivation queue", "Landing page conversion", "Attribution to booked production"]} /> : null}
-          {panel === "settings" ? <SettingsPanel /> : null}
+          {panel === "settings" ? <SettingsPanel providers={providers} numbers={numbers} extensions={extensions} devices={devices} channelSettings={channelSettings} aiReceptionPolicies={aiReceptionPolicies} knowledgeSources={knowledgeSources} /> : null}
           {!["filters", "patient", "call", "payment", "insurance", "forms", "phone", "sms", "webchat", "automessages", "fax", "schedule", "reviews", "analytics", "marketing", "settings"].includes(panel) ? (
             <EmptyBlock title="Tool not found" body="Choose a conversation action from the toolbar." />
           ) : null}
@@ -503,16 +610,41 @@ function FlowOverlay({
   );
 }
 
-function PhonePanel({ conversation, metrics }: { conversation: ConversationRow | null; metrics: Record<string, string> }) {
+function PhonePanel({
+  conversation,
+  metrics,
+  activeCalls,
+  controls,
+  voicemails,
+  numbers,
+  extensions,
+  devices,
+  providers,
+  routes,
+  tasks,
+}: {
+  conversation: ConversationRow | null;
+  metrics: Record<string, string>;
+  activeCalls: Record<string, unknown>[];
+  controls: Record<string, unknown>[];
+  voicemails: Record<string, unknown>[];
+  numbers: Record<string, unknown>[];
+  extensions: Record<string, unknown>[];
+  devices: Record<string, unknown>[];
+  providers: Record<string, unknown>[];
+  routes: Record<string, unknown>[];
+  tasks: TaskRow[];
+}) {
+  const selectedActiveCall = activeCalls.find((call) => String(call.conversationId) === conversation?.id) ?? activeCalls[0];
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-neutral-200 bg-white p-6">
         <div className="flex items-center justify-between gap-4">
           <div>
             <h3 className="text-3xl font-semibold">Soft phone</h3>
-            <p className="mt-2 text-sm text-neutral-500">Call controls stay attached to the selected patient and conversation.</p>
+            <p className="mt-2 text-sm text-neutral-500">Live call controls are written to PhoneCallControlAction and executed through Twilio only when the call leg and connector are ready.</p>
           </div>
-          <form action="/api/phone/call-control" method="post">
+          <form action={callControlAction}>
             <input type="hidden" name="conversationId" value={conversation?.id ?? ""} />
             <input type="hidden" name="actionType" value="OUTBOUND_DIAL" />
             <input type="hidden" name="targetNumber" value={conversation?.callerNumber ?? ""} />
@@ -520,8 +652,22 @@ function PhonePanel({ conversation, metrics }: { conversation: ConversationRow |
           </form>
         </div>
         <div className="mt-6 grid gap-3 sm:grid-cols-4">
-          {["Hold", "Transfer", "Park", "Voicemail"].map((action) => (
-            <button key={action} className="rounded-xl border border-neutral-200 bg-white px-4 py-4 text-sm font-semibold shadow-sm">{action}</button>
+          {[
+            ["ANSWER", "Answer"],
+            ["HOLD", "Hold"],
+            ["RESUME", "Resume"],
+            ["CALL_PARK", "Park"],
+            ["SEND_TO_VOICEMAIL", "Voicemail"],
+            ["END_CALL", "End"],
+            ["AI_VOICE_TAKEOVER", "AI takeover"],
+          ].map(([action, label]) => (
+            <form key={action} action={callControlAction}>
+              <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
+              <input type="hidden" name="conversationId" value={conversation?.id ?? String(selectedActiveCall?.conversationId ?? "")} />
+              <input type="hidden" name="actionType" value={action} />
+              {action === "CALL_PARK" ? <input type="hidden" name="targetParkSlot" value="front-desk-1" /> : null}
+              <button className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-4 text-sm font-semibold shadow-sm hover:bg-neutral-50">{label}</button>
+            </form>
           ))}
         </div>
       </section>
@@ -530,12 +676,42 @@ function PhonePanel({ conversation, metrics }: { conversation: ConversationRow |
         <MetricTile label="Missed calls" value={metrics.missedCalls ?? "0"} />
         <MetricTile label="Voicemails" value={metrics.newVoicemails ?? "0"} />
       </section>
-      <ModuleFlowPanel title="Live call workflow" body="A live call should open a patient screen pop, record transcript events, attach AI assist notes, and keep control actions auditable." rows={["Caller ID patient match", "Screen pop snapshot", "Live transcript and translation", "Call disposition and task creation"]} />
+      <ActionCard title="Live calls" empty="No active calls are currently registered. Incoming Twilio webhooks populate this queue.">
+        {activeCalls.slice(0, 6).map((call) => (
+          <RecordLine key={String(call.id)} title={`${String(call.fromNumber)} → ${String(call.toNumber)}`} meta={`${clean(call.callState)} · ${String(call.extensionName ?? "no extension")} · ${formatDate(call.startedAt)}`} />
+        ))}
+      </ActionCard>
+      <ActionCard title="Recent call-control actions" empty="No call controls have been requested yet.">
+        {controls.slice(0, 8).map((control) => (
+          <div key={String(control.id)} className="rounded-xl bg-neutral-50 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">{clean(control.actionType)}</p>
+                <p className="mt-1 text-xs text-neutral-500">{String(control.resultSummary ?? "No provider result recorded.")}</p>
+              </div>
+              <SmallTag tone={statusTone(control.providerStatus)}>{clean(control.providerStatus)}</SmallTag>
+            </div>
+            {control.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{String(control.blockedReason)}</p> : null}
+          </div>
+        ))}
+      </ActionCard>
+      <ActionCard title="Numbers, routes, and devices" empty="No phone setup records found.">
+        {numbers.slice(0, 5).map((number) => <RecordLine key={String(number.id)} title={`${String(number.label)} · ${String(number.phoneNumber)}`} meta={`voice ${clean(number.voiceStatus)} · sms ${clean(number.smsStatus)} · E911 ${clean(number.e911Status)}`} />)}
+        {routes.slice(0, 4).map((route) => <RecordLine key={String(route.id)} title={`Route: ${String(route.name)}`} meta={`${clean(route.triggerType)} → ${clean(route.destinationType)} · ${clean(route.status)}`} />)}
+        {extensions.slice(0, 4).map((extension) => <RecordLine key={String(extension.id)} title={`Ext ${String(extension.extensionNumber)} · ${String(extension.displayName)}`} meta={`${clean(extension.ownerRoleKey)} · voicemail ${String(extension.voicemailEnabled)}`} />)}
+        {devices.slice(0, 4).map((device) => <RecordLine key={String(device.id)} title={`${String(device.label)} · ${String(device.deviceType)}`} meta={`${clean(device.provisioningStatus)} · ${clean(device.registrationStatus)} · ${String(device.deskLocation ?? "no desk")}`} />)}
+        {providers.slice(0, 4).map((provider) => <RecordLine key={String(provider.id)} title={`${String(provider.name)} · ${String(provider.providerType)}`} meta={`credentials ${clean(provider.credentialStatus)} · webhook ${clean(provider.webhookStatus)} · ${String(provider.nextAction ?? "")}`} />)}
+      </ActionCard>
+      <ActionCard title="Voicemail and phone tasks" empty="No voicemail or phone work items.">
+        {voicemails.slice(0, 5).map((vm) => <RecordLine key={String(vm.id)} title={`${String(vm.callerName ?? vm.callerNumber ?? "Voicemail")} · ${String(vm.extensionName ?? "queue")}`} meta={`${clean(vm.status)} · ${String(vm.transcription ?? "no transcript yet")}`} />)}
+        {tasks.slice(0, 5).map((task) => <RecordLine key={task.id} title={task.nextAction || task.taskType} meta={`${clean(task.priority)} · ${clean(task.status)} · ${clean(task.ownerRoleKey)}`} />)}
+      </ActionCard>
     </div>
   );
 }
 
-function SmsPanel({ conversation, patient }: { conversation: ConversationRow | null; patient: PatientContext }) {
+function SmsPanel({ conversation, patient, messages }: { conversation: ConversationRow | null; patient: PatientContext; messages: MessageRow[] }) {
+  const conversationMessages = messages.filter((message) => message.conversationId === conversation?.id || message.patientId === patient.id).slice(0, 12);
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-neutral-200 bg-white p-6">
@@ -553,12 +729,56 @@ function SmsPanel({ conversation, patient }: { conversation: ConversationRow | n
           </div>
         </form>
       </section>
-      <ModuleFlowPanel title="Message rules" body="Every outbound text checks consent, quiet hours, template policy, connector status, and approval before delivery." rows={["Consent and STOP handling", "A2P/campaign readiness", "Quiet hours", "Delivery status webhooks"]} />
+      <ActionCard title="Outbound SMS queue" empty="No staged texts for this patient. Use the composer above to create one.">
+        {conversationMessages.map((message) => (
+          <div key={message.id} className="rounded-xl border border-neutral-200 bg-white p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">{clean(message.messageType)}</p>
+                <p className="mt-2 text-sm leading-6 text-neutral-700">{message.body}</p>
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <SmallTag tone={statusTone(message.approvalStatus)}>{clean(message.approvalStatus)}</SmallTag>
+                <SmallTag tone={statusTone(message.deliveryStatus)}>{clean(message.deliveryStatus)}</SmallTag>
+              </div>
+            </div>
+            {message.blockedReason ? <p className="mt-3 text-xs leading-5 text-red-700">{message.blockedReason}</p> : null}
+            {message.providerError ? <p className="mt-2 text-xs leading-5 text-red-700">{message.providerError}</p> : null}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <form action={approveOutboundMessageAction}>
+                <input type="hidden" name="messageId" value={message.id} />
+                <button className="rounded-lg border border-neutral-200 px-3 py-2 text-xs font-semibold">Approve</button>
+              </form>
+              <form action={sendOutboundMessageAction}>
+                <input type="hidden" name="messageId" value={message.id} />
+                <button className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">Send through connector</button>
+              </form>
+            </div>
+          </div>
+        ))}
+      </ActionCard>
     </div>
   );
 }
 
-function WebchatPanel({ metrics }: { metrics: Record<string, string> }) {
+function WebchatPanel({
+  metrics,
+  webChats,
+  webChatMessages,
+  knowledgeSources,
+  leadForms,
+  schedulingRules,
+  channelSettings,
+}: {
+  metrics: Record<string, string>;
+  webChats: Record<string, unknown>[];
+  webChatMessages: Record<string, unknown>[];
+  knowledgeSources: Record<string, unknown>[];
+  leadForms: Record<string, unknown>[];
+  schedulingRules: Record<string, unknown>[];
+  channelSettings: Record<string, unknown>[];
+}) {
+  const widgetSetting = channelSettings.find((setting) => String(setting.channel).toUpperCase().includes("WEB"));
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-neutral-200 bg-white p-6">
@@ -570,12 +790,45 @@ function WebchatPanel({ metrics }: { metrics: Record<string, string> }) {
           <MetricTile label="Scheduling blocked" value={metrics.schedulingBlocked ?? "0"} />
         </div>
       </section>
-      <ModuleFlowPanel title="Webchat workflow" body="The widget is not just a tile: it needs install script, visitor session, real-time transcript, staff handoff, knowledge retrieval, and appointment handoff." rows={["Widget install and theme", "Visitor identity capture", "AI answer with approved KB", "Warm transfer to staff", "Scheduling handoff"]} />
+      <ActionCard title="Open website conversations" empty="No webchat conversations found. The widget creates rows here as visitors message the site.">
+        {webChats.slice(0, 8).map((chat) => (
+          <div key={String(chat.id)} className="rounded-xl bg-neutral-50 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold">{String(chat.visitorName ?? chat.visitorPhone ?? chat.visitorEmail ?? "Website visitor")}</p>
+                <p className="mt-1 text-xs text-neutral-500">{String(chat.sourcePage ?? "website")} · {clean(chat.nlpIntent)} · lead score {String(chat.leadScore ?? 0)}</p>
+              </div>
+              <SmallTag tone={statusTone(chat.status)}>{clean(chat.status)}</SmallTag>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-neutral-700">{String(chat.lastMessageBody ?? chat.transcriptSummary ?? chat.nextBestAction ?? "No message body yet.")}</p>
+            {chat.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{String(chat.blockedReason)}</p> : null}
+          </div>
+        ))}
+      </ActionCard>
+      <ActionCard title="Recent webchat transcript" empty="No webchat messages yet.">
+        {webChatMessages.slice(0, 10).map((message) => (
+          <RecordLine key={String(message.id)} title={`${clean(message.senderType)} · ${String(message.senderName ?? "visitor")}`} meta={`${String(message.body)} · ${formatDate(message.createdAt)}`} />
+        ))}
+      </ActionCard>
+      <ActionCard title="Knowledge, forms, and scheduling" empty="No setup records found.">
+        {knowledgeSources.slice(0, 5).map((source) => <RecordLine key={String(source.id)} title={`KB: ${String(source.title)}`} meta={`${clean(source.status)} · ${String(source.contentSummary ?? "")}`} />)}
+        {leadForms.slice(0, 5).map((form) => <RecordLine key={String(form.id)} title={`Lead form: ${String(form.name)}`} meta={`${clean(form.serviceLine)} · ${clean(form.status)} · ${clean(form.connectorStatus)}`} />)}
+        {schedulingRules.slice(0, 5).map((rule) => <RecordLine key={String(rule.id)} title={`Scheduling: ${String(rule.name)}`} meta={`${clean(rule.status)} · ${String(rule.bookingWindowDays ?? 0)} days · PMS ${clean(rule.pmsWritebackStatus)}`} />)}
+      </ActionCard>
+      <section className="rounded-2xl border border-neutral-200 bg-white p-6">
+        <h3 className="text-xl font-semibold">Widget install</h3>
+        <p className="mt-2 text-sm text-neutral-500">This is the deployable script. Conversations created by it are stored in PatientWebChatConversation and PatientWebChatMessage.</p>
+        <pre className="mt-4 overflow-x-auto rounded-xl bg-neutral-950 p-4 text-xs leading-6 text-white">{`<script async src="https://app.1dentalai.com/api/webchat/widget.js" data-tenant="default" data-channel="${String(widgetSetting?.channel ?? "WEB_CHAT")}"></script>`}</pre>
+      </section>
     </div>
   );
 }
 
-function AutoMessagesPanel() {
+function AutoMessagesPanel({ messages, channelSettings, formPackets, schedulingRules }: { messages: MessageRow[]; channelSettings: Record<string, unknown>[]; formPackets: Record<string, unknown>[]; schedulingRules: Record<string, unknown>[] }) {
+  const counts = messages.reduce<Record<string, number>>((acc, message) => {
+    acc[message.messageType] = (acc[message.messageType] ?? 0) + 1;
+    return acc;
+  }, {});
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-neutral-200 bg-white p-6">
@@ -584,23 +837,28 @@ function AutoMessagesPanel() {
             <h3 className="text-3xl font-semibold">Auto-messages</h3>
             <p className="mt-2 text-sm text-neutral-500">Automation rules should expand inline and show active volume, schedule timing, method, location, and connector status.</p>
           </div>
-          <button className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">New rule</button>
+          <Link href={panelHref("settings")} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">Settings</Link>
         </div>
       </section>
-      {["Appointment confirmation", "Appointment reminder", "Missed call", "Payment reminder", "Birthday message", "Review request"].map((name, index) => (
+      {Object.entries(counts).map(([name, count]) => (
         <div key={name} className="flex items-center justify-between rounded-2xl border border-neutral-200 bg-white p-5">
           <div>
-            <p className="text-lg font-semibold">{name}</p>
-            <p className="mt-1 text-sm text-neutral-500">{index + 1} active · text message · all locations</p>
+            <p className="text-lg font-semibold">{clean(name)}</p>
+            <p className="mt-1 text-sm text-neutral-500">{count} queued/staged · text message · connector gated</p>
           </div>
           <span className="text-2xl">⌄</span>
         </div>
       ))}
+      <ActionCard title="Automation inputs" empty="No automation configuration found.">
+        {channelSettings.map((setting) => <RecordLine key={String(setting.id)} title={`${String(setting.displayName)} · ${String(setting.channel)}`} meta={`${clean(setting.status)} · connector ${clean(setting.connectorStatus)} · ${String(setting.nextAction ?? "")}`} />)}
+        {formPackets.slice(0, 4).map((packet) => <RecordLine key={String(packet.id)} title={`Form packet · ${clean(packet.packetType)}`} meta={`${clean(packet.status)} · ${clean(packet.pmsWritebackStatus)} · due ${formatDate(packet.dueAt)}`} />)}
+        {schedulingRules.slice(0, 4).map((rule) => <RecordLine key={String(rule.id)} title={`Schedule rule · ${String(rule.name)}`} meta={`${clean(rule.status)} · human approval ${String(rule.requireHumanApproval)}`} />)}
+      </ActionCard>
     </div>
   );
 }
 
-function SchedulePanel({ nextAppointments }: { nextAppointments: Record<string, unknown>[] }) {
+function SchedulePanel({ nextAppointments, schedulingRules, leadForms }: { nextAppointments: Record<string, unknown>[]; schedulingRules: Record<string, unknown>[]; leadForms: Record<string, unknown>[] }) {
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-neutral-200 bg-white p-6">
@@ -610,12 +868,15 @@ function SchedulePanel({ nextAppointments }: { nextAppointments: Record<string, 
       <ActionCard title="Current appointments" empty="No appointment context loaded.">
         {nextAppointments.map((row, index) => <RecordLine key={index} title={String(row.appointmentType ?? row.name ?? "Appointment")} meta={`${formatDate(row.startsAt)} · ${clean(row.status)}`} />)}
       </ActionCard>
-      <ModuleFlowPanel title="Scheduling flow" body="The assistant asks qualifying questions, checks available slots, blocks a slot, writes to PMS, and sends confirmation only after connector policy allows it." rows={["Procedure intent", "Provider/chair availability", "Insurance or form requirement", "Hold slot", "Confirm and notify"]} />
+      <ActionCard title="Booking rules and qualifying forms" empty="No scheduling rules configured.">
+        {schedulingRules.map((rule) => <RecordLine key={String(rule.id)} title={String(rule.name)} meta={`${clean(rule.sourceChannel)} · ${clean(rule.status)} · writeback ${clean(rule.pmsWritebackStatus)}`} />)}
+        {leadForms.map((form) => <RecordLine key={String(form.id)} title={String(form.name)} meta={`${clean(form.serviceLine)} · ${clean(form.status)} · ${clean(form.connectorStatus)}`} />)}
+      </ActionCard>
     </div>
   );
 }
 
-function AnalyticsPanel({ metrics }: { metrics: Record<string, string> }) {
+function AnalyticsPanel({ metrics, analytics, tasks, controls, messages }: { metrics: Record<string, string>; analytics: Record<string, unknown>[]; tasks: TaskRow[]; controls: Record<string, unknown>[]; messages: MessageRow[] }) {
   return (
     <div className="space-y-5">
       <section className="grid gap-4 sm:grid-cols-3">
@@ -623,12 +884,19 @@ function AnalyticsPanel({ metrics }: { metrics: Record<string, string> }) {
         <MetricTile label="Needs review" value={metrics.needsReview ?? "0"} />
         <MetricTile label="Revenue opportunity" value={money(Number(metrics.opportunityCents ?? 0))} />
       </section>
-      <ModuleFlowPanel title="Operating analytics" body="Analytics should answer what work is stuck, which channels produce revenue, and where staff follow-up is needed." rows={["Missed-call recovery", "Booking opportunity", "Payment request conversion", "Review recovery", "Staff response time"]} />
+      <ActionCard title="Call intelligence rows" empty="No call analytics rows found.">
+        {analytics.slice(0, 8).map((row) => <RecordLine key={String(row.id)} title={`${String(row.firstName ?? "")} ${String(row.lastName ?? row.callerName ?? "Caller")}`} meta={`booking ${String(row.bookingIntentScore ?? 0)} · recovery ${String(row.serviceRecoveryScore ?? 0)} · opportunity ${money(Number(row.revenueOpportunityCents ?? 0))}`} />)}
+      </ActionCard>
+      <ActionCard title="Blocked work" empty="No blocked work in current queues.">
+        {tasks.slice(0, 5).map((task) => <RecordLine key={task.id} title={task.nextAction || task.taskType} meta={`${clean(task.priority)} · ${clean(task.status)} · ${clean(task.ownerRoleKey)}`} />)}
+        {controls.filter((row) => String(row.providerStatus).includes("BLOCKED")).slice(0, 5).map((row) => <RecordLine key={String(row.id)} title={clean(row.actionType)} meta={String(row.blockedReason ?? row.resultSummary ?? "")} />)}
+        {messages.filter((row) => row.approvalStatus === "BLOCKED" || String(row.deliveryStatus).includes("BLOCKED")).slice(0, 5).map((row) => <RecordLine key={row.id} title={clean(row.messageType)} meta={row.blockedReason || row.providerError || row.deliveryStatus} />)}
+      </ActionCard>
     </div>
   );
 }
 
-function SettingsPanel() {
+function SettingsPanel({ providers, numbers, extensions, devices, channelSettings, aiReceptionPolicies, knowledgeSources }: { providers: Record<string, unknown>[]; numbers: Record<string, unknown>[]; extensions: Record<string, unknown>[]; devices: Record<string, unknown>[]; channelSettings: Record<string, unknown>[]; aiReceptionPolicies: Record<string, unknown>[]; knowledgeSources: Record<string, unknown>[] }) {
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-neutral-200 bg-white p-6">
@@ -638,7 +906,19 @@ function SettingsPanel() {
           <ThemeModeControl />
         </div>
       </section>
-      <ModuleFlowPanel title="Settings areas" body="Settings also need to stay in this design language instead of jumping into the previous surface." rows={["Provider credentials", "Phone numbers and E911", "SMS compliance", "Widget theme", "AI runtime and knowledge", "Staff routing"]} />
+      <ActionCard title="Provider credentials and webhooks" empty="No provider connections found.">
+        {providers.map((provider) => <RecordLine key={String(provider.id)} title={`${String(provider.name)} · ${String(provider.providerType)}`} meta={`credentials ${clean(provider.credentialStatus)} · webhook ${clean(provider.webhookStatus)} · E911 ${clean(provider.e911Status)} · ${String(provider.nextAction ?? "")}`} />)}
+      </ActionCard>
+      <ActionCard title="Numbers, extensions, devices" empty="No phone inventory found.">
+        {numbers.map((number) => <RecordLine key={String(number.id)} title={`${String(number.label)} · ${String(number.phoneNumber)}`} meta={`${clean(number.status)} · voice ${clean(number.voiceStatus)} · sms ${clean(number.smsStatus)} · E911 ${clean(number.e911Status)}`} />)}
+        {extensions.map((extension) => <RecordLine key={String(extension.id)} title={`Extension ${String(extension.extensionNumber)} · ${String(extension.displayName)}`} meta={`${clean(extension.ownerRoleKey)} · ${clean(extension.status)}`} />)}
+        {devices.map((device) => <RecordLine key={String(device.id)} title={`${String(device.label)} · ${String(device.deviceType)}`} meta={`${clean(device.provisioningStatus)} · ${clean(device.registrationStatus)} · ${String(device.macAddress ?? "no MAC")}`} />)}
+      </ActionCard>
+      <ActionCard title="AI, webchat, and knowledge settings" empty="No AI/channel settings found.">
+        {channelSettings.map((setting) => <RecordLine key={String(setting.id)} title={`${String(setting.displayName)} · ${String(setting.channel)}`} meta={`${clean(setting.status)} · NLP ${clean(setting.nlpMode)} · KB ${clean(setting.knowledgeBaseStatus)} · connector ${clean(setting.connectorStatus)}`} />)}
+        {aiReceptionPolicies.map((policy) => <RecordLine key={String(policy.id)} title={`${String(policy.name)} · ring ${String(policy.ringThreshold)}`} meta={`${clean(policy.status)} · ${clean(policy.mode)} · ${clean(policy.pricingPolicy)}`} />)}
+        {knowledgeSources.map((source) => <RecordLine key={String(source.id)} title={`${String(source.title)} · ${String(source.sourceModule)}`} meta={`${clean(source.status)} · ${String(source.nextAction ?? "")}`} />)}
+      </ActionCard>
     </div>
   );
 }
@@ -1109,6 +1389,15 @@ function SmallTag({ children, tone = "neutral" }: { children: React.ReactNode; t
   return <span className={`rounded-md px-2 py-1 text-xs font-semibold ${toneClass}`}>{children}</span>;
 }
 
+function statusTone(value: unknown): "neutral" | "amber" | "red" | "blue" | "green" {
+  const status = String(value ?? "").toUpperCase();
+  if (status.includes("ACTIVE") || status.includes("READY") || status.includes("VERIFIED") || status.includes("APPROVED") || status.includes("SENT") || status.includes("ACCEPTED") || status.includes("COMPLETED")) return "green";
+  if (status.includes("BLOCK") || status.includes("ERROR") || status.includes("FAILED") || status.includes("MISSING")) return "red";
+  if (status.includes("REVIEW") || status.includes("DRAFT") || status.includes("REQUIRED") || status.includes("SETUP") || status.includes("UNKNOWN")) return "amber";
+  if (status.includes("OPEN") || status.includes("NEW")) return "blue";
+  return "neutral";
+}
+
 function buildPatientContext(conversation: ConversationRow | null, screenPop: ScreenPopRow | undefined, snapshot: Record<string, unknown>): PatientContext {
   const snapshotPatient = objectValue(snapshot.patient);
   const firstName = String(conversation?.firstName ?? snapshotPatient.firstName ?? "");
@@ -1216,11 +1505,14 @@ type ConversationRow = {
 
 type MessageRow = {
   id: string;
+  conversationId: string | null;
   patientId: string | null;
   body: string;
   messageType: string;
   approvalStatus: string;
   deliveryStatus: string;
+  blockedReason?: string | null;
+  providerError?: string | null;
 };
 
 type TaskRow = {
@@ -1228,6 +1520,7 @@ type TaskRow = {
   patientId: string | null;
   taskType: string;
   priority: string;
+  status: string;
   ownerRoleKey: string;
   nextAction: string | null;
 };

@@ -20,7 +20,9 @@ export async function POST(request: Request) {
     targetParkSlot: typeof body.targetParkSlot === "string" ? body.targetParkSlot : undefined,
   });
   if (!contentType.includes("application/json")) {
-    const redirectUrl = new URL("/patient-engagement/phone", "https://app.1dentalai.com");
+    const redirectUrl = new URL("/patient-engagement", "https://app.1dentalai.com");
+    if (typeof body.conversationId === "string" && body.conversationId) redirectUrl.searchParams.set("conversationId", body.conversationId);
+    redirectUrl.searchParams.set("panel", "phone");
     redirectUrl.searchParams.set("control", actionType);
     return NextResponse.redirect(redirectUrl, { status: 303 });
   }
