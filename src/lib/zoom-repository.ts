@@ -119,7 +119,7 @@ function appointmentTopic(row: { appointmentType: string; providerName: string |
   return `1DentalAI virtual visit: ${row.appointmentType}${row.providerName ? ` with ${row.providerName}` : ""}`;
 }
 
-export async function createZoomMeetingForAppointment(input: { appointmentId: string; actorRole?: string; agenda?: string }) {
+export async function createZoomMeetingForAppointment(input: { appointmentId: string; tenantId?: string; actorRole?: string; agenda?: string }) {
   const appointment = (await query<{
     id: string;
     tenantId: string;
@@ -139,8 +139,8 @@ export async function createZoomMeetingForAppointment(input: { appointmentId: st
      from "PmsAppointment" a
      left join "PmsPatient" p on p."id" = a."patientId"
      left join "PmsProvider" pr on pr."id" = a."providerId"
-     where a."id" = $1`,
-    [input.appointmentId],
+     where a."id" = $1 and ($2::text is null or a."tenantId" = $2)`,
+    [input.appointmentId, input.tenantId ?? null],
   )).rows[0];
   if (!appointment) throw new Error("Appointment not found.");
   if (["CANCELED", "BROKEN", "NO_SHOW", "COMPLETED"].includes(appointment.status)) throw new Error(`Cannot create Zoom meeting for ${appointment.status.toLowerCase()} appointment.`);
