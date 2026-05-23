@@ -358,7 +358,7 @@ export default async function PatientEngagementWebchatPage({
                       )}
                     </div>
                   </div>
-                  <footer className="border-t border-neutral-200 bg-white px-7 py-5">
+                  <footer className="max-h-[48vh] overflow-y-auto border-t border-neutral-200 bg-white px-7 py-5">
                     <div className="space-y-3">
                       <TeamCollaborationPanel conversation={selectedConversation} team={teamPresence} />
                       <form action={staffEntryAction} className="flex items-end gap-3">
@@ -585,66 +585,88 @@ function TeamCollaborationPanel({ conversation, team }: { conversation: WebChatR
   const ownerOptions = ["front_desk", "treatment_coordinator", "practice_manager", "billing_team", "provider"];
   const assigned = team.find((member) => member.id === conversation.assignedStaffId);
   return (
-    <details className="rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-        <span className="text-sm font-semibold text-neutral-950">Assign, transfer, or schedule</span>
-        <span className="text-xs font-semibold text-neutral-500">
-          {assigned ? assigned.displayName : clean(conversation.ownerRoleKey)}
+    <details className="group rounded-2xl border border-neutral-200 bg-white shadow-sm">
+      <summary className="sticky top-0 z-10 flex cursor-pointer list-none items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3">
+        <span>
+          <span className="block text-sm font-semibold text-neutral-950">Assign, transfer, task, or appointment</span>
+          <span className="mt-1 hidden text-xs font-semibold text-emerald-700 group-open:block">Back to chat</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="hidden max-w-[180px] truncate text-xs font-semibold text-neutral-500 sm:inline">
+            {assigned ? assigned.displayName : clean(conversation.ownerRoleKey)}
+          </span>
+          <span className="grid h-8 w-8 place-items-center rounded-xl border border-neutral-200 text-sm text-neutral-600 group-open:rotate-180">
+            ˅
+          </span>
         </span>
       </summary>
 
-      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-        {team.length ? team.slice(0, 8).map((member) => (
-          <div key={member.id} className={`flex min-w-[180px] items-center gap-3 rounded-xl border px-3 py-2 ${member.id === conversation.assignedStaffId ? "border-blue-200 bg-blue-50" : "border-neutral-200 bg-white"}`}>
-            <PresenceDot status={member.presenceStatus} />
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-neutral-950">{member.displayName}</p>
-              <p className="truncate text-xs text-neutral-500">{clean(member.roleKey)} · {member.openChats} chats · {member.openTasks} tasks</p>
+      <div className="max-h-[34vh] overflow-y-auto border-t border-neutral-100 px-4 pb-4 pt-3">
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          {team.length ? team.slice(0, 8).map((member) => (
+            <div key={member.id} className={`flex min-w-[170px] items-center gap-3 rounded-2xl border px-3 py-2 ${member.id === conversation.assignedStaffId ? "border-emerald-200 bg-emerald-50" : "border-neutral-200 bg-neutral-50"}`}>
+              <PresenceDot status={member.presenceStatus} />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-neutral-950">{member.displayName}</p>
+                <p className="truncate text-xs text-neutral-500">{clean(member.roleKey)} · {member.openChats} chats</p>
+              </div>
             </div>
-          </div>
-        )) : (
-          <Empty title="No active team users" body="Invite users or have staff sign in so ownership, workload, and presence can be tracked." />
-        )}
-      </div>
+          )) : (
+            <Empty title="No active team users" body="Invite users or have staff sign in so ownership, workload, and presence can be tracked." />
+          )}
+        </div>
 
-      <div className="mt-3 grid gap-3 xl:grid-cols-3">
-        <form action={transferConversationAction} className="space-y-3 rounded-xl border border-neutral-200 bg-white p-3">
-          <input type="hidden" name="conversationId" value={conversation.id} />
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            <Select name="ownerRoleKey" label="Transfer to team" options={ownerOptions} defaultValue={conversation.ownerRoleKey || "front_desk"} />
-            <StaffSelect name="assignedStaffId" label="Staff member" team={team} defaultValue={conversation.assignedStaffId ?? ""} />
-            <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue={conversation.leadScore >= 80 ? "HIGH" : "NORMAL"} />
-            <Select name="dueMinutes" label="Due in" options={["10", "30", "60", "240", "1440"]} defaultValue="30" />
-          </div>
-          <Input name="note" label="Transfer note" placeholder="Why this chat is moving teams" />
-          <input type="hidden" name="createTask" value="true" />
-          <button className="w-full rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Transfer</button>
-        </form>
+        <div className="grid gap-3 2xl:grid-cols-2">
+          <form action={transferConversationAction} className="space-y-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+            <input type="hidden" name="conversationId" value={conversation.id} />
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-neutral-950">Transfer ownership</h3>
+              <span className="text-xs font-semibold text-neutral-500">Creates a tracked task</span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Select name="ownerRoleKey" label="Team" options={ownerOptions} defaultValue={conversation.ownerRoleKey || "front_desk"} />
+              <StaffSelect name="assignedStaffId" label="Staff member" team={team} defaultValue={conversation.assignedStaffId ?? ""} />
+              <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue={conversation.leadScore >= 80 ? "HIGH" : "NORMAL"} />
+              <Select name="dueMinutes" label="Due in" options={["10", "30", "60", "240", "1440"]} defaultValue="30" />
+            </div>
+            <Input name="note" label="Transfer note" placeholder="Why this chat is moving teams" />
+            <input type="hidden" name="createTask" value="true" />
+            <button className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Transfer chat</button>
+          </form>
 
-        <form action={teamTaskAction} className="space-y-3 rounded-xl border border-neutral-200 bg-white p-3">
-          <input type="hidden" name="conversationId" value={conversation.id} />
-          <Input name="title" label="Task title" placeholder="Call visitor about appointment options" />
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            <Select name="taskType" label="Task type" options={["WEBCHAT_FOLLOW_UP", "CALL_VISITOR", "SCHEDULE_APPOINTMENT", "VERIFY_INSURANCE", "SERVICE_RECOVERY"]} />
-            <Select name="ownerRoleKey" label="Owner" options={ownerOptions} defaultValue={conversation.ownerRoleKey || "front_desk"} />
-            <StaffSelect name="assignedStaffId" label="Staff" team={team} defaultValue={conversation.assignedStaffId ?? ""} />
-            <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue="NORMAL" />
-          </div>
-          <Input name="note" label="Task note" placeholder="What needs to happen next" />
-          <input type="hidden" name="dueMinutes" value="30" />
-          <button className="w-full rounded-xl border border-neutral-300 bg-white px-4 py-3 text-sm font-semibold text-neutral-950">Create task</button>
-        </form>
+          <form action={appointmentHandoffAction} className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <input type="hidden" name="conversationId" value={conversation.id} />
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-neutral-950">Appointment handoff</h3>
+              <span className="text-xs font-semibold text-emerald-700">PMS scheduling route</span>
+            </div>
+            <Input name="requestedWindow" label="Requested window" placeholder="Tomorrow morning" />
+            <div className="grid gap-3 md:grid-cols-2">
+              <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue="HIGH" />
+              <Select name="ownerRoleKey" label="Owner" options={["front_desk", "treatment_coordinator", "practice_manager"]} defaultValue="front_desk" />
+            </div>
+            <Input name="note" label="Scheduling note" placeholder="Verify insurance first" />
+            <button className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white">Create scheduling handoff</button>
+          </form>
 
-        <form action={appointmentHandoffAction} className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
-          <input type="hidden" name="conversationId" value={conversation.id} />
-          <Input name="requestedWindow" label="Appointment window" placeholder="Tomorrow morning" />
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue="HIGH" />
-            <Select name="ownerRoleKey" label="Owner" options={["front_desk", "treatment_coordinator", "practice_manager"]} defaultValue="front_desk" />
-          </div>
-          <Input name="note" label="Scheduling note" placeholder="Verify insurance first" />
-          <button className="w-full rounded-xl bg-blue-700 px-4 py-3 text-sm font-semibold text-white">Schedule handoff</button>
-        </form>
+          <form action={teamTaskAction} className="space-y-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 2xl:col-span-2">
+            <input type="hidden" name="conversationId" value={conversation.id} />
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-neutral-950">Create team task</h3>
+              <span className="text-xs font-semibold text-neutral-500">Call, insurance, recovery, or follow-up</span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <Input name="title" label="Task title" placeholder="Call visitor about appointment options" />
+              <Select name="taskType" label="Task type" options={["WEBCHAT_FOLLOW_UP", "CALL_VISITOR", "SCHEDULE_APPOINTMENT", "VERIFY_INSURANCE", "SERVICE_RECOVERY"]} />
+              <Select name="ownerRoleKey" label="Owner" options={ownerOptions} defaultValue={conversation.ownerRoleKey || "front_desk"} />
+              <StaffSelect name="assignedStaffId" label="Staff" team={team} defaultValue={conversation.assignedStaffId ?? ""} />
+              <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue="NORMAL" />
+              <Input name="note" label="Task note" placeholder="What needs to happen next" />
+            </div>
+            <input type="hidden" name="dueMinutes" value="30" />
+            <button className="rounded-xl border border-neutral-300 bg-white px-4 py-3 text-sm font-semibold text-neutral-950">Create task</button>
+          </form>
+        </div>
       </div>
     </details>
   );
