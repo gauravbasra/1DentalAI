@@ -342,8 +342,8 @@ export default async function PatientEngagementWebchatPage({
                     </div>
                   </header>
 
-                  <div className="grid min-h-0 flex-1 xl:grid-cols-[minmax(0,1fr)_400px]">
-                    <section className="flex min-w-0 flex-col">
+                  <div className="flex min-h-0 flex-1">
+                    <section className="flex min-w-0 flex-1 flex-col">
                       <div className="flex-1 overflow-y-auto bg-white px-6 py-5">
                         <div className="mx-auto mb-6 w-fit rounded-full bg-neutral-100 px-4 py-2 text-xs font-semibold text-neutral-500">Today</div>
                         <div className="space-y-5">
@@ -357,28 +357,26 @@ export default async function PatientEngagementWebchatPage({
 
                       <footer className="border-t border-neutral-200 bg-white px-6 py-5">
                         <div className="space-y-4">
-                        <form action={staffEntryAction} className="flex items-end gap-3">
-                          <input type="hidden" name="conversationId" value={selectedConversation.id} />
-                          <input type="hidden" name="entryType" value="STAFF_REPLY" />
-                          <input type="hidden" name="status" value="OPEN" />
-                          <SpeechComposer name="body" required placeholder="Reply to the website visitor" />
-                          <button className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow-sm">Send</button>
-                        </form>
-                        <form action={staffEntryAction} className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                          <input type="hidden" name="conversationId" value={selectedConversation.id} />
-                          <input type="hidden" name="entryType" value="STAFF_NOTE" />
-                          <input type="hidden" name="status" value="OPEN" />
-                          <div className="flex items-end gap-3">
-                            <Textarea name="body" label="Internal team note" rows={2} />
-                            <button className="rounded-xl bg-amber-900 px-4 py-3 text-sm font-semibold text-white">Add note</button>
-                          </div>
-                        </form>
+                          <TeamCollaborationPanel conversation={selectedConversation} team={teamPresence} />
+                          <form action={staffEntryAction} className="flex items-end gap-3">
+                            <input type="hidden" name="conversationId" value={selectedConversation.id} />
+                            <input type="hidden" name="entryType" value="STAFF_REPLY" />
+                            <input type="hidden" name="status" value="OPEN" />
+                            <SpeechComposer name="body" required placeholder="Reply to the website visitor" />
+                            <button className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-blue-600 text-sm font-semibold text-white shadow-sm">Send</button>
+                          </form>
+                          <form action={staffEntryAction} className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                            <input type="hidden" name="conversationId" value={selectedConversation.id} />
+                            <input type="hidden" name="entryType" value="STAFF_NOTE" />
+                            <input type="hidden" name="status" value="OPEN" />
+                            <div className="flex items-end gap-3">
+                              <Textarea name="body" label="Internal team note" rows={2} />
+                              <button className="rounded-xl bg-amber-900 px-4 py-3 text-sm font-semibold text-white">Add note</button>
+                            </div>
+                          </form>
                         </div>
                       </footer>
                     </section>
-                    <aside className="min-h-0 overflow-y-auto border-l border-neutral-200 bg-neutral-50 p-4">
-                      <TeamCollaborationPanel conversation={selectedConversation} team={teamPresence} />
-                    </aside>
                   </div>
                 </>
               ) : <div className="p-6"><Empty title="No conversation selected" body="Select a chat from the inbox." /></div>}
@@ -561,72 +559,71 @@ function TeamCollaborationPanel({ conversation, team }: { conversation: WebChatR
   const ownerOptions = ["front_desk", "treatment_coordinator", "practice_manager", "billing_team", "provider"];
   const assigned = team.find((member) => member.id === conversation.assignedStaffId);
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
-      <div className="flex items-start justify-between gap-3">
+    <details className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4" open>
+      <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-neutral-950">Team handoff</p>
+          <p className="text-sm font-semibold text-neutral-950">Transfer, assign, or schedule</p>
           <p className="mt-1 text-xs leading-5 text-neutral-600">
             Owner: {clean(conversation.ownerRoleKey)}{assigned ? ` · ${assigned.displayName}` : ""}{conversation.staffOwnerDueAt ? ` · due ${relativeTime(conversation.staffOwnerDueAt)}` : ""}
           </p>
         </div>
         <StateBadge tone={conversation.assignedStaffId ? "green" : "amber"}>{conversation.assignedStaffId ? "Assigned" : "Unassigned"}</StateBadge>
-      </div>
+      </summary>
 
-      <div className="mt-4 grid gap-2">
-        {team.length ? team.slice(0, 6).map((member) => (
-          <div key={member.id} className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 ${member.id === conversation.assignedStaffId ? "border-blue-200 bg-blue-50" : "border-neutral-200 bg-white"}`}>
-            <div className="flex min-w-0 items-center gap-3">
-              <PresenceDot status={member.presenceStatus} />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-neutral-950">{member.displayName}</p>
-                <p className="truncate text-xs text-neutral-500">{clean(member.roleKey)} · {member.openChats} chats · {member.openTasks} tasks</p>
-              </div>
+      <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+        {team.length ? team.slice(0, 8).map((member) => (
+          <div key={member.id} className={`flex min-w-[180px] items-center gap-3 rounded-xl border px-3 py-2 ${member.id === conversation.assignedStaffId ? "border-blue-200 bg-blue-50" : "border-neutral-200 bg-white"}`}>
+            <PresenceDot status={member.presenceStatus} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-neutral-950">{member.displayName}</p>
+              <p className="truncate text-xs text-neutral-500">{clean(member.roleKey)} · {member.openChats} chats · {member.openTasks} tasks</p>
             </div>
-            <span className="text-xs font-semibold text-neutral-500">{clean(member.presenceStatus)}</span>
           </div>
         )) : (
           <Empty title="No active team users" body="Invite users or have staff sign in so ownership, workload, and presence can be tracked." />
         )}
       </div>
 
-      <form action={transferConversationAction} className="mt-4 space-y-3 rounded-xl border border-neutral-200 bg-white p-3">
-        <input type="hidden" name="conversationId" value={conversation.id} />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Select name="ownerRoleKey" label="Transfer to team" options={ownerOptions} defaultValue={conversation.ownerRoleKey || "front_desk"} />
-          <StaffSelect name="assignedStaffId" label="Staff member" team={team} defaultValue={conversation.assignedStaffId ?? ""} />
-          <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue={conversation.leadScore >= 80 ? "HIGH" : "NORMAL"} />
-          <Select name="dueMinutes" label="Due in" options={["10", "30", "60", "240", "1440"]} defaultValue="30" />
-        </div>
-        <Textarea name="note" label="Transfer note" rows={2} />
-        <input type="hidden" name="createTask" value="true" />
-        <button className="w-full rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Transfer and create task</button>
-      </form>
+      <div className="mt-4 grid gap-3 xl:grid-cols-3">
+        <form action={transferConversationAction} className="space-y-3 rounded-xl border border-neutral-200 bg-white p-3">
+          <input type="hidden" name="conversationId" value={conversation.id} />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            <Select name="ownerRoleKey" label="Transfer to team" options={ownerOptions} defaultValue={conversation.ownerRoleKey || "front_desk"} />
+            <StaffSelect name="assignedStaffId" label="Staff member" team={team} defaultValue={conversation.assignedStaffId ?? ""} />
+            <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue={conversation.leadScore >= 80 ? "HIGH" : "NORMAL"} />
+            <Select name="dueMinutes" label="Due in" options={["10", "30", "60", "240", "1440"]} defaultValue="30" />
+          </div>
+          <Input name="note" label="Transfer note" placeholder="Why this chat is moving teams" />
+          <input type="hidden" name="createTask" value="true" />
+          <button className="w-full rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Transfer</button>
+        </form>
 
-      <form action={teamTaskAction} className="mt-3 space-y-3 rounded-xl border border-neutral-200 bg-white p-3">
-        <input type="hidden" name="conversationId" value={conversation.id} />
-        <Input name="title" label="Task title" placeholder="Call visitor about appointment options" />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Select name="taskType" label="Task type" options={["WEBCHAT_FOLLOW_UP", "CALL_VISITOR", "SCHEDULE_APPOINTMENT", "VERIFY_INSURANCE", "SERVICE_RECOVERY"]} />
-          <Select name="ownerRoleKey" label="Owner" options={ownerOptions} defaultValue={conversation.ownerRoleKey || "front_desk"} />
-          <StaffSelect name="assignedStaffId" label="Staff" team={team} defaultValue={conversation.assignedStaffId ?? ""} />
-          <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue="NORMAL" />
-        </div>
-        <Textarea name="note" label="Task note" rows={2} />
-        <input type="hidden" name="dueMinutes" value="30" />
-        <button className="w-full rounded-xl border border-neutral-300 bg-white px-4 py-3 text-sm font-semibold text-neutral-950">Create internal task</button>
-      </form>
+        <form action={teamTaskAction} className="space-y-3 rounded-xl border border-neutral-200 bg-white p-3">
+          <input type="hidden" name="conversationId" value={conversation.id} />
+          <Input name="title" label="Task title" placeholder="Call visitor about appointment options" />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            <Select name="taskType" label="Task type" options={["WEBCHAT_FOLLOW_UP", "CALL_VISITOR", "SCHEDULE_APPOINTMENT", "VERIFY_INSURANCE", "SERVICE_RECOVERY"]} />
+            <Select name="ownerRoleKey" label="Owner" options={ownerOptions} defaultValue={conversation.ownerRoleKey || "front_desk"} />
+            <StaffSelect name="assignedStaffId" label="Staff" team={team} defaultValue={conversation.assignedStaffId ?? ""} />
+            <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue="NORMAL" />
+          </div>
+          <Input name="note" label="Task note" placeholder="What needs to happen next" />
+          <input type="hidden" name="dueMinutes" value="30" />
+          <button className="w-full rounded-xl border border-neutral-300 bg-white px-4 py-3 text-sm font-semibold text-neutral-950">Create task</button>
+        </form>
 
-      <form action={appointmentHandoffAction} className="mt-3 space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
-        <input type="hidden" name="conversationId" value={conversation.id} />
-        <Input name="requestedWindow" label="Appointment window" placeholder="Tomorrow morning" />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue="HIGH" />
-          <Select name="ownerRoleKey" label="Owner" options={["front_desk", "treatment_coordinator", "practice_manager"]} defaultValue="front_desk" />
-        </div>
-        <Input name="note" label="Scheduling note" placeholder="Verify insurance first" />
-        <button className="w-full rounded-xl bg-blue-700 px-4 py-3 text-sm font-semibold text-white">Create scheduling handoff</button>
-      </form>
-    </div>
+        <form action={appointmentHandoffAction} className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+          <input type="hidden" name="conversationId" value={conversation.id} />
+          <Input name="requestedWindow" label="Appointment window" placeholder="Tomorrow morning" />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            <Select name="priority" label="Priority" options={["HIGH", "NORMAL", "LOW"]} defaultValue="HIGH" />
+            <Select name="ownerRoleKey" label="Owner" options={["front_desk", "treatment_coordinator", "practice_manager"]} defaultValue="front_desk" />
+          </div>
+          <Input name="note" label="Scheduling note" placeholder="Verify insurance first" />
+          <button className="w-full rounded-xl bg-blue-700 px-4 py-3 text-sm font-semibold text-white">Schedule handoff</button>
+        </form>
+      </div>
+    </details>
   );
 }
 
