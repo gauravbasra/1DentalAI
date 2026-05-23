@@ -377,13 +377,14 @@ export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
   }
   const envKey = process.env.OPENAI_API_KEY || "";
   const envAllowed = envKey && process.env.OPENAI_BAA_ENABLED === "true" && process.env.OPENAI_PHI_ALLOWED === "true";
-  const vaultAllowed = Boolean(
-    secret?.value &&
+  const vaultApproved = Boolean(
     install?.credentialStatus === "VALIDATED" &&
     install.approvalStatus === "APPROVED" &&
-    install.healthStatus === "PASS" &&
-    process.env.OPENAI_BAA_ENABLED === "true" &&
-    process.env.OPENAI_PHI_ALLOWED === "true",
+    install.healthStatus === "PASS",
+  );
+  const vaultAllowed = Boolean(
+    secret?.value &&
+    vaultApproved,
   );
   return {
     apiKey: vaultAllowed ? secret!.value : envAllowed ? envKey : null,
@@ -394,7 +395,11 @@ export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
       ? `OpenAI credential is stored but cannot be used: ${secretError}`
       : vaultAllowed || envAllowed
       ? null
-      : "OpenAI is blocked until API key is stored, credential is validated, tenant approval and health checks pass, and OPENAI_BAA_ENABLED/OPENAI_PHI_ALLOWED are true.",
+      : secret?.value
+      ? `OpenAI credential is stored but blocked until credential status is VALIDATED, approval status is APPROVED, and health status is PASS. Current credential=${install?.credentialStatus ?? "MISSING"}, approval=${install?.approvalStatus ?? "MISSING"}, health=${install?.healthStatus ?? "MISSING"}.`
+      : envKey
+      ? "OpenAI environment key is present but blocked until OPENAI_BAA_ENABLED and OPENAI_PHI_ALLOWED are true. Store the key in the encrypted connector vault to use tenant approval and health status instead."
+      : "OpenAI is blocked until an API key is stored in the encrypted connector vault or deployment environment.",
     installationId: install?.id ?? null,
     credentialStatus: install?.credentialStatus ?? "MISSING",
     approvalStatus: install?.approvalStatus ?? "MISSING",

@@ -20,6 +20,9 @@ export async function GET() {
     model: transcriptionModel(settings.voiceSettings.transcriptionModel),
     source: openAi.source,
     blockedReason: openAi.apiKey ? null : openAi.blockedReason,
+    credentialStatus: openAi.credentialStatus,
+    approvalStatus: openAi.approvalStatus,
+    healthStatus: openAi.healthStatus,
   });
 }
 
