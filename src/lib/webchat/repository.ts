@@ -106,11 +106,11 @@ export function analyzeMessage(message: string): WebchatAnalysis {
   if (/(reschedule|move my appointment|change appointment|cancel)/.test(text)) {
     return { intent: "RESCHEDULE_APPOINTMENT", sentiment: "NEEDS_HELP", confidence: 84, actionType: "RESCHEDULE_APPOINTMENT", actionStatus: "IDENTITY_CHECK_REQUIRED" };
   }
+  if (/(price|cost|insurance|financing|payment|covered|take delta|accept delta|delta dental|aetna|cigna|metlife|guardian|united healthcare|uhc|humana|principal|anthem|blue cross|bcbs)/.test(text)) {
+    return { intent: "INSURANCE_OR_PRICE", sentiment: "SHOPPING", confidence: 76, actionType: "RCM_OR_TREATMENT_COORDINATOR_HANDOFF", actionStatus: "NEEDS_STAFF_REVIEW" };
+  }
   if (/(book|appointment|schedule|available|availability|consult|opening|slot|cleaning|exam|whitening|implant|crown|filling|root canal|tooth pain|toothache)/.test(text)) {
     return { intent: "SCHEDULE_APPOINTMENT", sentiment: "HIGH_INTENT", confidence: 82, actionType: "DIRECT_PMS_SCHEDULING", actionStatus: "SCHEDULING_IN_PROGRESS" };
-  }
-  if (/(price|cost|insurance|financing|payment|covered)/.test(text)) {
-    return { intent: "INSURANCE_OR_PRICE", sentiment: "SHOPPING", confidence: 76, actionType: "RCM_OR_TREATMENT_COORDINATOR_HANDOFF", actionStatus: "NEEDS_STAFF_REVIEW" };
   }
   if (/(pain|swelling|broken|emergency|bleeding|trauma)/.test(text)) {
     return { intent: "EMERGENCY_TRIAGE", sentiment: "URGENT", confidence: 88, actionType: "EMERGENCY_HANDOFF", actionStatus: "STAFF_REVIEW_REQUIRED" };
@@ -1713,6 +1713,12 @@ function schedulingIntakeQuestion(intake: SchedulingIntake) {
     };
   }
   if (askFor === "patientStatus") {
+    if (intake.procedure?.slug === "emergency-exam") {
+      return {
+        askFor,
+        body: "I’m sorry you’re dealing with that. I’ll help look for the right urgent visit. Are you a new patient, an existing patient, or booking for someone else?",
+      };
+    }
     return {
       askFor,
       body: `Got it: ${intake.procedure?.label ?? "that visit"}. Are you a new patient, an existing patient, or booking for someone else?`,
