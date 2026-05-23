@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { StateBadge } from "@/components/products/product-app-shell";
 import { clean, money } from "@/components/products/patient-engagement-shell";
 import { createPhoneOutboundMessage, getPhoneOperatingCenter, updatePhoneConversationStatus } from "@/lib/operating-system-repository";
+import { ThemeModeControl } from "./theme-mode-control";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +76,7 @@ export default async function PatientEngagementHome({
   const patientTasks = tasks.filter((task) => task.patientId && task.patientId === selectedConversation?.patientId).slice(0, 6);
 
   return (
-    <main className="min-h-screen bg-[#f4f6f7] text-neutral-950">
+    <main className="pe-shell min-h-screen bg-[#f4f6f7] text-neutral-950">
       <div className="flex min-h-screen">
         <GlobalRail />
         <ProductRail active={params.queue ?? "messages"} metrics={metrics} />
@@ -87,7 +88,7 @@ export default async function PatientEngagementHome({
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">⌕</span>
               <input className="h-12 w-full rounded-xl border border-neutral-200 bg-white pl-10 pr-4 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Search patients, calls, messages, payments, insurance, forms" />
             </div>
-            <Link href="/patient-engagement/settings" className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-700">Settings</Link>
+            <Link href={panelHref("settings", selectedConversation?.id)} className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-700">Settings</Link>
             <Link href="/logout" className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Sign out</Link>
           </header>
 
@@ -168,15 +169,15 @@ function GlobalRail() {
   const items = [
     ["Home", "⌂", "/patient-engagement"],
     ["Messages", "▣", "/patient-engagement"],
-    ["Calls", "☎", "/patient-engagement/phone"],
-    ["Schedule", "◷", "/app/pms/schedule"],
-    ["Payments", "$", "/patient-engagement?queue=payments"],
-    ["Forms", "▤", "/patient-engagement/forms"],
-    ["Fax", "▧", "/patient-engagement?queue=fax"],
-    ["Patients", "♙", "/app/pms/patients"],
-    ["Reviews", "☆", "/reputation-management"],
-    ["Analytics", "▥", "/app/overview"],
-    ["Marketing", "☷", "/digital-marketing"],
+    ["Calls", "☎", panelHref("phone")],
+    ["Schedule", "◷", panelHref("schedule")],
+    ["Payments", "$", panelHref("payment")],
+    ["Forms", "▤", panelHref("forms")],
+    ["Fax", "▧", panelHref("fax")],
+    ["Patients", "♙", panelHref("patient")],
+    ["Reviews", "☆", panelHref("reviews")],
+    ["Analytics", "▥", panelHref("analytics")],
+    ["Marketing", "☷", panelHref("marketing")],
   ];
   return (
     <aside className="hidden w-[92px] shrink-0 border-r border-neutral-200 bg-[#e9eef2] py-4 xl:block">
@@ -217,11 +218,11 @@ function ProductRail({ active, metrics }: { active: string; metrics: Record<stri
       <div className="border-t border-neutral-200 px-4 py-5">
         <p className="px-4 text-xs font-bold uppercase tracking-[0.16em] text-neutral-400">Connect</p>
         {[
-          ["Text messages", "/patient-engagement/settings"],
-          ["Web chat", "/patient-engagement/webchat"],
-          ["Auto-messages", "/patient-engagement/settings#auto-messages"],
-          ["Payment requests", "/patient-engagement?queue=payments"],
-          ["Insurance verification", "/app/pms/insurance"],
+          ["Text messages", panelHref("sms")],
+          ["Web chat", panelHref("webchat")],
+          ["Auto-messages", panelHref("automessages")],
+          ["Payment requests", panelHref("payment")],
+          ["Insurance verification", panelHref("insurance")],
         ].map(([label, href]) => (
           <Link key={label} href={href} className="mt-1 block rounded-xl px-4 py-2.5 text-sm font-semibold text-neutral-600 hover:bg-neutral-50 hover:text-neutral-950">{label}</Link>
         ))}
@@ -241,7 +242,7 @@ function InboxHeader({ metrics, selectedConversationId }: { metrics: Record<stri
         <div className="flex gap-2">
           <button className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-neutral-600">✓</button>
           <Link href={panelHref("filters", selectedConversationId)} className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-neutral-600">☰</Link>
-          <Link href="/patient-engagement/settings" className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-neutral-600">✎</Link>
+          <Link href={panelHref("settings", selectedConversationId)} className="grid h-10 w-10 place-items-center rounded-xl border border-neutral-200 text-neutral-600">✎</Link>
         </div>
       </div>
       <div className="mt-5 flex flex-wrap gap-2">
@@ -450,6 +451,16 @@ function FlowOverlay({
     payment: "Payment request",
     insurance: "Insurance details",
     forms: "Forms and documents",
+    phone: "Phone console",
+    sms: "Text messaging",
+    webchat: "Web chat",
+    automessages: "Auto-messages",
+    fax: "Fax center",
+    schedule: "Schedule handoff",
+    reviews: "Reviews",
+    analytics: "Analytics",
+    marketing: "Marketing",
+    settings: "Settings",
   }[panel] ?? "Conversation tools";
 
   return (
@@ -473,11 +484,187 @@ function FlowOverlay({
           {panel === "payment" ? <PaymentPanel conversation={selectedConversation} patient={patient} /> : null}
           {panel === "insurance" ? <InsurancePanel patient={patient} insurancePlans={insurancePlans} benefits={benefits} /> : null}
           {panel === "forms" ? <FormsPanel conversation={selectedConversation} patient={patient} forms={forms} /> : null}
-          {!["filters", "patient", "call", "payment", "insurance", "forms"].includes(panel) ? (
+          {panel === "phone" ? <PhonePanel conversation={selectedConversation} metrics={metrics} /> : null}
+          {panel === "sms" ? <SmsPanel conversation={selectedConversation} patient={patient} /> : null}
+          {panel === "webchat" ? <WebchatPanel metrics={metrics} /> : null}
+          {panel === "automessages" ? <AutoMessagesPanel /> : null}
+          {panel === "fax" ? <ModuleFlowPanel title="Fax center" body="Inbound and outbound fax work stays in this console with document attachment, patient matching, and delivery status." rows={["Inbound fax matching", "Outbound attachment queue", "Failed delivery review", "Patient document filing"]} /> : null}
+          {panel === "schedule" ? <SchedulePanel nextAppointments={nextAppointments} /> : null}
+          {panel === "reviews" ? <ModuleFlowPanel title="Review recovery" body="Review requests, private surveys, response approval, and service recovery belong in this same patient engagement workspace." rows={["Visit-completed eligibility", "Recovery hold review", "AI response approval", "Public review connector status"]} /> : null}
+          {panel === "analytics" ? <AnalyticsPanel metrics={metrics} /> : null}
+          {panel === "marketing" ? <ModuleFlowPanel title="Marketing handoff" body="Campaigns should start from PMS audiences and write back outcomes to conversations, appointments, production, and collections." rows={["Unscheduled treatment audience", "Recall and reactivation queue", "Landing page conversion", "Attribution to booked production"]} /> : null}
+          {panel === "settings" ? <SettingsPanel /> : null}
+          {!["filters", "patient", "call", "payment", "insurance", "forms", "phone", "sms", "webchat", "automessages", "fax", "schedule", "reviews", "analytics", "marketing", "settings"].includes(panel) ? (
             <EmptyBlock title="Tool not found" body="Choose a conversation action from the toolbar." />
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+function PhonePanel({ conversation, metrics }: { conversation: ConversationRow | null; metrics: Record<string, string> }) {
+  return (
+    <div className="space-y-5">
+      <section className="rounded-2xl border border-neutral-200 bg-white p-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h3 className="text-3xl font-semibold">Soft phone</h3>
+            <p className="mt-2 text-sm text-neutral-500">Call controls stay attached to the selected patient and conversation.</p>
+          </div>
+          <form action="/api/phone/call-control" method="post">
+            <input type="hidden" name="conversationId" value={conversation?.id ?? ""} />
+            <input type="hidden" name="actionType" value="OUTBOUND_DIAL" />
+            <input type="hidden" name="targetNumber" value={conversation?.callerNumber ?? ""} />
+            <button className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">Call patient</button>
+          </form>
+        </div>
+        <div className="mt-6 grid gap-3 sm:grid-cols-4">
+          {["Hold", "Transfer", "Park", "Voicemail"].map((action) => (
+            <button key={action} className="rounded-xl border border-neutral-200 bg-white px-4 py-4 text-sm font-semibold shadow-sm">{action}</button>
+          ))}
+        </div>
+      </section>
+      <section className="grid gap-4 sm:grid-cols-3">
+        <MetricTile label="Open calls" value={metrics.openCalls ?? "0"} />
+        <MetricTile label="Missed calls" value={metrics.missedCalls ?? "0"} />
+        <MetricTile label="Voicemails" value={metrics.newVoicemails ?? "0"} />
+      </section>
+      <ModuleFlowPanel title="Live call workflow" body="A live call should open a patient screen pop, record transcript events, attach AI assist notes, and keep control actions auditable." rows={["Caller ID patient match", "Screen pop snapshot", "Live transcript and translation", "Call disposition and task creation"]} />
+    </div>
+  );
+}
+
+function SmsPanel({ conversation, patient }: { conversation: ConversationRow | null; patient: PatientContext }) {
+  return (
+    <div className="space-y-5">
+      <section className="rounded-2xl border border-neutral-200 bg-white p-6">
+        <h3 className="text-3xl font-semibold">Text messaging</h3>
+        <p className="mt-2 text-sm text-neutral-500">SMS stays consent-gated and connector-gated. Staged messages do not pretend to be sent.</p>
+        <form action={stagePatientMessageAction} className="mt-5">
+          <input type="hidden" name="conversationId" value={conversation?.id ?? ""} />
+          <input type="hidden" name="patientId" value={patient.id ?? ""} />
+          <input type="hidden" name="recipientNumber" value={patient.phone ?? conversation?.callerNumber ?? ""} />
+          <input type="hidden" name="consentStatus" value={patient.smsConsent} />
+          <input type="hidden" name="messageType" value="MANUAL_PATIENT_REPLY" />
+          <textarea name="body" required rows={6} className="w-full rounded-2xl border border-neutral-200 p-4 text-sm leading-6 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Write a patient-safe message" />
+          <div className="mt-4 flex justify-end">
+            <button className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">Stage SMS</button>
+          </div>
+        </form>
+      </section>
+      <ModuleFlowPanel title="Message rules" body="Every outbound text checks consent, quiet hours, template policy, connector status, and approval before delivery." rows={["Consent and STOP handling", "A2P/campaign readiness", "Quiet hours", "Delivery status webhooks"]} />
+    </div>
+  );
+}
+
+function WebchatPanel({ metrics }: { metrics: Record<string, string> }) {
+  return (
+    <div className="space-y-5">
+      <section className="rounded-2xl border border-neutral-200 bg-white p-6">
+        <h3 className="text-3xl font-semibold">Web chat</h3>
+        <p className="mt-2 text-sm text-neutral-500">Website conversations, AI routing, lead capture, appointment handoff, and staff takeover remain inside this console.</p>
+        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+          <MetricTile label="Open webchats" value={metrics.openWebChats ?? "0"} />
+          <MetricTile label="KB review" value={metrics.kbNeedsReview ?? "0"} />
+          <MetricTile label="Scheduling blocked" value={metrics.schedulingBlocked ?? "0"} />
+        </div>
+      </section>
+      <ModuleFlowPanel title="Webchat workflow" body="The widget is not just a tile: it needs install script, visitor session, real-time transcript, staff handoff, knowledge retrieval, and appointment handoff." rows={["Widget install and theme", "Visitor identity capture", "AI answer with approved KB", "Warm transfer to staff", "Scheduling handoff"]} />
+    </div>
+  );
+}
+
+function AutoMessagesPanel() {
+  return (
+    <div className="space-y-5">
+      <section className="rounded-2xl border border-neutral-200 bg-white p-6">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-3xl font-semibold">Auto-messages</h3>
+            <p className="mt-2 text-sm text-neutral-500">Automation rules should expand inline and show active volume, schedule timing, method, location, and connector status.</p>
+          </div>
+          <button className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">New rule</button>
+        </div>
+      </section>
+      {["Appointment confirmation", "Appointment reminder", "Missed call", "Payment reminder", "Birthday message", "Review request"].map((name, index) => (
+        <div key={name} className="flex items-center justify-between rounded-2xl border border-neutral-200 bg-white p-5">
+          <div>
+            <p className="text-lg font-semibold">{name}</p>
+            <p className="mt-1 text-sm text-neutral-500">{index + 1} active · text message · all locations</p>
+          </div>
+          <span className="text-2xl">⌄</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SchedulePanel({ nextAppointments }: { nextAppointments: Record<string, unknown>[] }) {
+  return (
+    <div className="space-y-5">
+      <section className="rounded-2xl border border-neutral-200 bg-white p-6">
+        <h3 className="text-3xl font-semibold">Schedule handoff</h3>
+        <p className="mt-2 text-sm text-neutral-500">Booking and rescheduling flows stay in the engagement console, with PMS writeback gating and no double booking.</p>
+      </section>
+      <ActionCard title="Current appointments" empty="No appointment context loaded.">
+        {nextAppointments.map((row, index) => <RecordLine key={index} title={String(row.appointmentType ?? row.name ?? "Appointment")} meta={`${formatDate(row.startsAt)} · ${clean(row.status)}`} />)}
+      </ActionCard>
+      <ModuleFlowPanel title="Scheduling flow" body="The assistant asks qualifying questions, checks available slots, blocks a slot, writes to PMS, and sends confirmation only after connector policy allows it." rows={["Procedure intent", "Provider/chair availability", "Insurance or form requirement", "Hold slot", "Confirm and notify"]} />
+    </div>
+  );
+}
+
+function AnalyticsPanel({ metrics }: { metrics: Record<string, string> }) {
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-4 sm:grid-cols-3">
+        <MetricTile label="Open calls" value={metrics.openCalls ?? "0"} />
+        <MetricTile label="Needs review" value={metrics.needsReview ?? "0"} />
+        <MetricTile label="Revenue opportunity" value={money(Number(metrics.opportunityCents ?? 0))} />
+      </section>
+      <ModuleFlowPanel title="Operating analytics" body="Analytics should answer what work is stuck, which channels produce revenue, and where staff follow-up is needed." rows={["Missed-call recovery", "Booking opportunity", "Payment request conversion", "Review recovery", "Staff response time"]} />
+    </div>
+  );
+}
+
+function SettingsPanel() {
+  return (
+    <div className="space-y-5">
+      <section className="rounded-2xl border border-neutral-200 bg-white p-6">
+        <h3 className="text-3xl font-semibold">Appearance</h3>
+        <p className="mt-2 text-sm text-neutral-500">Choose how this operating console renders on this device.</p>
+        <div className="mt-5">
+          <ThemeModeControl />
+        </div>
+      </section>
+      <ModuleFlowPanel title="Settings areas" body="Settings also need to stay in this design language instead of jumping into the previous surface." rows={["Provider credentials", "Phone numbers and E911", "SMS compliance", "Widget theme", "AI runtime and knowledge", "Staff routing"]} />
+    </div>
+  );
+}
+
+function ModuleFlowPanel({ title, body, rows }: { title: string; body: string; rows: string[] }) {
+  return (
+    <section className="rounded-2xl border border-neutral-200 bg-white p-6">
+      <h3 className="text-2xl font-semibold">{title}</h3>
+      <p className="mt-2 text-sm leading-6 text-neutral-500">{body}</p>
+      <div className="mt-5 overflow-hidden rounded-2xl border border-neutral-200">
+        {rows.map((row) => (
+          <div key={row} className="flex items-center justify-between border-b border-neutral-100 px-4 py-4 last:border-b-0">
+            <span className="font-semibold">{row}</span>
+            <span className="text-neutral-400">›</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MetricTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-white p-5">
+      <p className="text-sm font-semibold text-neutral-500">{label}</p>
+      <p className="mt-2 text-3xl font-semibold">{value}</p>
     </div>
   );
 }
@@ -530,10 +717,10 @@ function PatientPanel({ patient, family, nextAppointments, procedures }: { patie
             <h3 className="mt-1 text-4xl font-semibold">{patient.name}</h3>
             <p className="mt-2 text-sm text-neutral-500">{patient.sex || "Unknown"} · {patient.age || "age unknown"} yrs · {patient.status}</p>
             <div className="mt-5 flex flex-wrap gap-2">
-              <Link href={patient.pmsHref} className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Open PMS record</Link>
-              <Link href={panelHref("payment")} className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold">Payments</Link>
-              <Link href={panelHref("insurance")} className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold">Insurance</Link>
-              <Link href={panelHref("forms")} className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold">Forms</Link>
+          <Link href={patient.pmsHref} className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Open PMS record</Link>
+          <Link href={panelHref("payment", patient.conversationId)} className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold">Payments</Link>
+          <Link href={panelHref("insurance", patient.conversationId)} className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold">Insurance</Link>
+          <Link href={panelHref("forms", patient.conversationId)} className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold">Forms</Link>
             </div>
           </div>
         </div>
@@ -947,6 +1134,7 @@ function buildPatientContext(conversation: ConversationRow | null, screenPop: Sc
     familyCount: family.length,
     openBalanceCents: Number(conversation?.openBalanceCents ?? objectValue(snapshot.financial).openBalanceCents ?? 0),
     smsConsent: String(sms?.consentStatus ?? "UNKNOWN"),
+    conversationId: conversation?.id ?? "",
     pmsHref: conversation?.patientId || screenPop?.patientId ? `/app/pms/patients/${conversation?.patientId ?? screenPop?.patientId}` : "/app/pms/patients",
   };
 }
@@ -1067,5 +1255,6 @@ type PatientContext = {
   familyCount: number;
   openBalanceCents: number;
   smsConsent: string;
+  conversationId: string;
   pmsHref: string;
 };
