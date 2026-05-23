@@ -8,6 +8,7 @@ export const pmsNav = [
   { href: "/app/pms/patients", label: "Patients" },
   { href: "/app/pms/forms", label: "Forms" },
   { href: "/app/pms/imaging", label: "Imaging" },
+  { href: "/app/pms/scribe", label: "Scribe" },
   { href: "/app/pms/treatment-plans", label: "Treatment" },
   { href: "/app/pms/ledger", label: "Ledger" },
   { href: "/app/pms/insurance", label: "Insurance" },
