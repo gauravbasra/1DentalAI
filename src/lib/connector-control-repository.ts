@@ -348,6 +348,55 @@ export async function getConnectorSecret(input: {
   };
 }
 
+async function getAnyOpenAiVaultSecret(tenantId = defaultTenantId) {
+  const result = await query<{
+    encryptedValue: string;
+    encryptionIv: string;
+    encryptionTag: string;
+    status: string;
+    installationStatus: string | null;
+    credentialStatus: string | null;
+    approvalStatus: string | null;
+    healthStatus: string | null;
+  }>(
+    `select v."encryptedValue", v."encryptionIv", v."encryptionTag", v."status",
+       i."status" as "installationStatus", i."credentialStatus", i."approvalStatus", i."healthStatus"
+     from "ConnectorCredentialVault" v
+     left join "ConnectorInstallation" i on i."id" = v."installationId"
+     where v."tenantId" = $1
+       and v."status" <> 'REVOKED'
+       and (
+         v."providerKey" ilike '%openai%'
+         or v."providerKey" ilike '%open_ai%'
+         or v."providerKey" ilike '%open ai%'
+       )
+       and (
+         v."credentialLabel" ilike '%api%key%'
+         or v."credentialLabel" ilike '%secret%'
+         or v."credentialLabel" ilike '%token%'
+         or v."credentialType" ilike '%api%key%'
+       )
+     order by
+       case when v."status" = 'VALIDATED' then 0 else 1 end,
+       case when i."credentialStatus" = 'VALIDATED' and i."approvalStatus" = 'APPROVED' and i."healthStatus" = 'PASS' then 0 else 1 end,
+       v."rotatedAt" desc
+     limit 1`,
+    [tenantId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  const validated = row.status === "VALIDATED" || (row.credentialStatus === "VALIDATED" && row.approvalStatus === "APPROVED" && row.healthStatus === "PASS");
+  return {
+    value: decryptConnectorSecret(row.encryptedValue, row.encryptionIv, row.encryptionTag),
+    status: row.status,
+    validated,
+    installationStatus: row.installationStatus,
+    credentialStatus: row.credentialStatus,
+    approvalStatus: row.approvalStatus,
+    healthStatus: row.healthStatus,
+  };
+}
+
 export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
   const installation = await query<{
     id: string;
@@ -372,6 +421,13 @@ export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
     try {
       secret = await getConnectorSecret({ tenantId, providerKey: "OPENAI", credentialLabel: "api_key", installationId: install.id, requireValidated: false });
       secret ??= await getConnectorSecret({ tenantId, providerKey: "OPENAI", credentialLabel: "api_key", requireValidated: false });
+      secret ??= await getAnyOpenAiVaultSecret(tenantId);
+    } catch (error) {
+      secretError = error instanceof Error ? error.message : "OpenAI credential could not be decrypted.";
+    }
+  } else {
+    try {
+      secret = await getAnyOpenAiVaultSecret(tenantId);
     } catch (error) {
       secretError = error instanceof Error ? error.message : "OpenAI credential could not be decrypted.";
     }
