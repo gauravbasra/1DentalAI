@@ -1655,7 +1655,8 @@ async function getConversationContact(tenantId: string, conversationId: string, 
 
 function inferSchedulingProcedure(body: string, serviceLine?: string) {
   const text = `${body} ${serviceLine ?? ""}`.toLowerCase();
-  if (/(emergency|pain|swelling|broken|trauma|toothache|bleeding)/.test(text)) return { slug: "emergency-exam", label: "Emergency exam" };
+  const negatedUrgency = /(no pain|no swelling|no bleeding|not urgent|routine|without pain|without swelling)/.test(text);
+  if (!negatedUrgency && /(emergency|pain|swelling|broken|trauma|toothache|bleeding)/.test(text)) return { slug: "emergency-exam", label: "Emergency exam" };
   if (/(cleaning|hygiene|recall|recare|prophy)/.test(text)) return { slug: "hygiene-recare", label: "Hygiene cleaning" };
   if (/(implant|aligner|invisalign|whitening|cosmetic|consult|crown|filling|root canal|exam|new patient|checkup)/.test(text)) return { slug: "new-patient-exam", label: text.includes("implant") ? "Implant consultation" : "New patient exam" };
   return null;
@@ -1732,8 +1733,8 @@ function inferPatientStatus(text: string, patientStatus?: string) {
 
 function inferUrgencyStatus(text: string, urgency?: string, procedureSlug?: string) {
   const combined = `${text} ${urgency ?? ""}`.toLowerCase();
+  if (/(routine|no pain|no swelling|no bleeding|not urgent|regular visit|without pain|without swelling)/.test(combined)) return "ROUTINE";
   if (/(facial swelling|trouble breathing|uncontrolled bleeding|trauma|injury|severe pain|urgent|emergency|toothache|broken tooth|infection|bleeding|swelling|urgent)/.test(combined)) return "URGENT_SYMPTOMS";
-  if (/(routine|no pain|not urgent|regular|cleaning|checkup|check-up|recall|hygiene|routine)/.test(combined)) return "ROUTINE";
   if (procedureSlug === "emergency-exam") return "URGENT_SYMPTOMS";
   return null;
 }
