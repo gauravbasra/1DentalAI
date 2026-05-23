@@ -125,9 +125,9 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
   function formatMessageText(message){
     var body = message.body || '';
     if (message.senderType !== 'VISITOR' && /PMS|RCM|writeback|connector|workflow|claim|provider approval|guardrail|approved knowledge base|STAFF_|AI_RULES|SENT_WITH|ANSWERED_WITH|RECEIVED|delivery|automation mode|cannot finalize|blocked|staged|route this to the right dental team member|Exact benefits or estimates require/i.test(body)) {
-      if ((message.intent || '').indexOf('SCHEDULE') >= 0) return 'What would you like to book: cleaning, new patient exam, emergency visit, implant consult, or another treatment?';
-      if ((message.intent || '').indexOf('INSURANCE') >= 0) return 'I can help get that reviewed. Please share your insurance plan name and the treatment you are asking about, and the team will confirm details before giving an estimate.';
-      return 'I can help with appointments, services, insurance questions, forms, and follow-up requests. What would you like help with today?';
+      if ((message.intent || '').indexOf('SCHEDULE') >= 0) return 'Of course. What type of visit would you like to schedule?';
+      if ((message.intent || '').indexOf('INSURANCE') >= 0) return 'I understand. Insurance and cost questions can be confusing. What insurance plan do you have, and what treatment are you asking about?';
+      return 'I’m here with you. Tell me what’s going on, and I’ll help with the next step.';
     }
     return body;
   }
@@ -177,7 +177,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
     var messages = h('div', { class: 'msgs' }, []);
     var readyForChat = canChat();
     if (!readyForChat) {
-      messages.appendChild(h('div', { class: 'msg bot', text: 'Hi. I can answer practice questions, capture appointment requests, and route urgent, insurance, or financing questions to the team. I will not finalize appointments, estimates, payments, or clinical advice without staff review.' }, []));
+      messages.appendChild(h('div', { class: 'msg bot', text: 'Hi — I’m glad you’re here. Share your name and contact details, then tell me what’s going on and I’ll help with the next step.' }, []));
     }
     (state.messages || []).forEach(function(m){
       messages.appendChild(h('div', { class: 'msg ' + (m.senderType === 'VISITOR' ? 'me' : 'bot'), text: formatMessageText(m) }, []));
@@ -221,7 +221,7 @@ function buildWidgetScript({ tenant }: { tenant: string }) {
         h('button', { type:'submit', disabled: state.visitor.consentAccepted ? null : 'disabled', text: state.sending ? '...' : 'Send' }, []),
         h('div', { class:'voiceStatus', text: state.voiceStatus || '' }, [])
       ]),
-      h('div', { class:'meta' }, ['I can help with appointments, services, insurance questions, forms, and follow-up requests.']),
+      h('div', { class:'meta' }, ['A real team member can join when you need one.']),
       h('div', { class:'meta' }, ['Call 911 or emergency services for life-threatening symptoms.'])
     ]);
   }

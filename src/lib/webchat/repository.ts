@@ -1056,8 +1056,8 @@ export function defaultWebchatAiRuntimeSettings(): WebchatAiRuntimeSettings {
       recordingPolicy: "consent_required",
     },
     promptPolicy: {
-      systemPrompt: "You are the patient-facing AI assistant for a dental practice. Speak like a calm, helpful front desk team member. Use only the approved knowledge base and scheduling tools. Do not diagnose, prescribe, promise insurance coverage, mention internal systems, or invent facts. If approved knowledge is missing, ask a clarifying question or offer staff handoff.",
-      chatPrompt: "For website chat, answer briefly, collect the minimum details needed, and route booking requests through the scheduling engine.",
+      systemPrompt: "You are the patient-facing front desk assistant for a dental practice. Sound warm, patient, and human. Start with empathy, acknowledge what the visitor said, and ask one clear next question. Use contractions naturally. Do not list capabilities, mention internal systems, diagnose, prescribe, promise insurance coverage, or invent facts. If approved knowledge is missing, offer to get the team involved without exposing policy language.",
+      chatPrompt: "For website chat, keep replies conversational and helpful. Use short natural sentences, but do not sound robotic. Match the visitor's emotion: be reassuring for pain or anxiety, cheerful for routine booking, and careful for insurance or clinical questions. Collect only the next needed detail, one question at a time.",
       voicePrompt: "For voice, use short natural sentences, confirm names and phone numbers carefully, and offer live staff handoff when the caller asks for a person or when policy requires review.",
       handoffPrompt: "Escalate to staff for emergencies, low confidence, billing disputes, clinical advice, insurance guarantees, angry sentiment, same-day reschedules, or missing approved knowledge.",
     },
@@ -1212,6 +1212,19 @@ async function buildAiAutoReply(input: {
   leadCapture: LeadCapture;
   qualification: { leadScore: number; qualificationStage: string; nextBestAction: string };
 }): Promise<WebchatAiDecision> {
+  if (isSimpleGreeting(input.body)) {
+    return {
+      body: warmGreeting(input.leadCapture),
+      automationMode: "AI_AUTO",
+      handoffReason: null,
+      actionStatus: "AI_GREETING_RESPONDED",
+      deliveryStatus: "SENT",
+      provider: "WEB_CHAT",
+      providerStatus: "DELIVERED_TO_WIDGET",
+      model: "conversation_greeting",
+    };
+  }
+
   const schedulingReply = await buildSchedulingReply(input);
   if (schedulingReply) return schedulingReply;
 
@@ -1914,23 +1927,34 @@ function sanitizePatientReply(reply: string, analysis: WebchatAnalysis) {
   return text;
 }
 
+function isSimpleGreeting(body: string) {
+  const text = body.trim().toLowerCase().replace(/[!.?,\s]+$/g, "");
+  return /^(hi|hello|hey|good morning|good afternoon|good evening|hiya|howdy)$/.test(text);
+}
+
+function warmGreeting(leadCapture?: LeadCapture) {
+  const name = leadCapture?.visitorName?.trim();
+  const hello = name ? `Hi ${name.split(/\s+/)[0]} — I’m glad you reached out.` : "Hi — I’m glad you reached out.";
+  return `${hello} How can I help you today?`;
+}
+
 function patientSafeFallback(analysis: WebchatAnalysis) {
   if (analysis.intent === "SCHEDULE_APPOINTMENT") {
-    return "What would you like to book: cleaning, new patient exam, emergency visit, implant consult, or another treatment?";
+    return "Of course. What type of visit would you like to schedule?";
   }
   if (analysis.intent === "RESCHEDULE_APPOINTMENT") {
-    return "I can help start that request. Please share the appointment you want to move and your preferred time window. The team will verify your details before changing anything.";
+    return "I can help with that. Which appointment are you trying to move, and what day or time would work better?";
   }
   if (analysis.intent === "INSURANCE_OR_PRICE") {
-    return "I can help get that reviewed. Please share your insurance plan name and the treatment you are asking about, and the team will confirm details before giving an estimate.";
+    return "I understand. Insurance and cost questions can be confusing. What insurance plan do you have, and what treatment are you asking about?";
   }
   if (analysis.intent === "EMERGENCY_TRIAGE") {
-    return "I’m going to flag this as urgent for the practice team. If you have severe swelling, uncontrolled bleeding, trauma, or trouble breathing, call emergency services now. Please share what happened and the best number to reach you.";
+    return "I’m sorry you’re dealing with that. If you have trouble breathing, uncontrolled bleeding, facial swelling, or trauma, please call emergency services now. What symptoms are you having, and what is the best number to reach you?";
   }
   if (analysis.intent === "LIVE_PERSON_REQUEST") {
-    return "Absolutely. I’m bringing this to the front desk so a live person can help you from here.";
+    return "Absolutely. I’ll bring a real team member into this conversation.";
   }
-  return "I can help with appointments, services, insurance questions, forms, and follow-up requests. What would you like help with today?";
+  return "I’m here with you. Tell me what’s going on, and I’ll help with the next step.";
 }
 
 export async function ingestSmsIntoAiConversation(input: { tenantId?: string; from: string; to: string; body: string; providerMessageId?: string }) {
@@ -2020,20 +2044,20 @@ async function retrieveKnowledge(message: string, tenantId: string) {
 
 function buildReply(analysis: WebchatAnalysis, knowledge: Array<{ content: string; heading: string | null; pageTitle: string }>) {
   const knowledgeExcerpt = summarizeKnowledge(knowledge[0]);
-  const context = knowledgeExcerpt || "I can help with appointments, services, insurance questions, forms, and follow-up requests.";
+  const context = knowledgeExcerpt || "I’m here with you. Tell me what’s going on, and I’ll help with the next step.";
   if (analysis.intent === "SCHEDULE_APPOINTMENT") {
-    return { body: "What would you like to book: cleaning, new patient exam, emergency visit, implant consult, or another treatment?" };
+    return { body: "Of course. What type of visit would you like to schedule?" };
   }
   if (analysis.intent === "RESCHEDULE_APPOINTMENT") {
-    return { body: "I can help start that request. Please share the appointment you want to move and your preferred time window. The team will verify your details before changing anything." };
+    return { body: "I can help with that. Which appointment are you trying to move, and what day or time would work better?" };
   }
   if (analysis.intent === "EMERGENCY_TRIAGE") {
-    return { body: "I’m going to flag this as urgent for the practice team. If you have severe swelling, uncontrolled bleeding, trauma, or trouble breathing, call emergency services now. Please share what happened and the best number to reach you." };
+    return { body: "I’m sorry you’re dealing with that. If you have trouble breathing, uncontrolled bleeding, facial swelling, or trauma, please call emergency services now. What symptoms are you having, and what is the best number to reach you?" };
   }
   if (analysis.intent === "INSURANCE_OR_PRICE") {
-    return { body: `I can pass this to the team for review. ${context}\n\nFor insurance or financing, please share your plan name and the treatment you are asking about. The team will confirm details before giving any estimate.` };
+    return { body: `I understand. Insurance and cost questions can be confusing. ${context}\n\nWhat insurance plan do you have, and what treatment are you asking about?` };
   }
-  return { body: `${context}\n\nWhat would you like help with today?` };
+  return { body: context };
 }
 
 function summarizeKnowledge(row?: { content: string; heading: string | null; pageTitle: string }) {
