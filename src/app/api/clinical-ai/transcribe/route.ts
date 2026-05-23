@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getOpenAiWebchatConfig } from "@/lib/connector-control-repository";
+import { getOpenAiVaultDiagnostics, getOpenAiWebchatConfig } from "@/lib/connector-control-repository";
 import { defaultTenantId } from "@/lib/pms-repository";
 import { getWebchatAiRuntimeSettings } from "@/lib/webchat/repository";
 
@@ -10,9 +10,10 @@ const prompt = [
 ].join(" ");
 
 export async function GET() {
-  const [openAi, settings] = await Promise.all([
+  const [openAi, settings, vaultDiagnostics] = await Promise.all([
     getOpenAiWebchatConfig(defaultTenantId),
     getWebchatAiRuntimeSettings(defaultTenantId),
+    getOpenAiVaultDiagnostics(defaultTenantId),
   ]);
 
   return NextResponse.json({
@@ -23,6 +24,7 @@ export async function GET() {
     credentialStatus: openAi.credentialStatus,
     approvalStatus: openAi.approvalStatus,
     healthStatus: openAi.healthStatus,
+    vaultDiagnostics,
   });
 }
 

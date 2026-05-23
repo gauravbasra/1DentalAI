@@ -405,6 +405,138 @@ async function getAnyOpenAiVaultSecret(tenantId = defaultTenantId) {
   };
 }
 
+export async function getOpenAiVaultDiagnostics(tenantId = defaultTenantId) {
+  const result = await query<{
+    totalVaultRows: string;
+    exactOpenAiRows: string;
+    openAiLikeRows: string;
+    activeOpenAiLikeRows: string;
+    validatedOpenAiLikeRows: string;
+    linkedOpenAiLikeRows: string;
+    latestOpenAiLikeStatus: string | null;
+    latestOpenAiLikeCredentialStatus: string | null;
+    latestOpenAiLikeApprovalStatus: string | null;
+    latestOpenAiLikeHealthStatus: string | null;
+  }>(
+    `select
+       count(*)::text as "totalVaultRows",
+       count(*) filter (
+         where v."providerKey" = 'OPENAI'
+           and v."credentialLabel" = 'api_key'
+           and v."status" <> 'REVOKED'
+       )::text as "exactOpenAiRows",
+       count(*) filter (
+         where v."status" <> 'REVOKED'
+           and (
+             v."providerKey" ilike '%openai%'
+             or v."providerKey" ilike '%open_ai%'
+             or v."providerKey" ilike '%open ai%'
+             or v."credentialLabel" ilike '%openai%'
+             or v."credentialLabel" ilike '%open_ai%'
+             or v."credentialLabel" ilike '%open ai%'
+           )
+       )::text as "openAiLikeRows",
+       count(*) filter (
+         where v."status" <> 'REVOKED'
+           and v."encryptedValue" is not null
+           and v."encryptionIv" is not null
+           and v."encryptionTag" is not null
+           and (
+             v."providerKey" ilike '%openai%'
+             or v."providerKey" ilike '%open_ai%'
+             or v."providerKey" ilike '%open ai%'
+             or v."credentialLabel" ilike '%openai%'
+             or v."credentialLabel" ilike '%open_ai%'
+             or v."credentialLabel" ilike '%open ai%'
+           )
+       )::text as "activeOpenAiLikeRows",
+       count(*) filter (
+         where v."status" = 'VALIDATED'
+           and (
+             v."providerKey" ilike '%openai%'
+             or v."providerKey" ilike '%open_ai%'
+             or v."providerKey" ilike '%open ai%'
+             or v."credentialLabel" ilike '%openai%'
+             or v."credentialLabel" ilike '%open_ai%'
+             or v."credentialLabel" ilike '%open ai%'
+           )
+       )::text as "validatedOpenAiLikeRows",
+       count(*) filter (
+         where v."installationId" is not null
+           and v."status" <> 'REVOKED'
+           and (
+             v."providerKey" ilike '%openai%'
+             or v."providerKey" ilike '%open_ai%'
+             or v."providerKey" ilike '%open ai%'
+             or v."credentialLabel" ilike '%openai%'
+             or v."credentialLabel" ilike '%open_ai%'
+             or v."credentialLabel" ilike '%open ai%'
+           )
+       )::text as "linkedOpenAiLikeRows",
+       (array_agg(v."status" order by v."rotatedAt" desc) filter (
+         where v."status" <> 'REVOKED'
+           and (
+             v."providerKey" ilike '%openai%'
+             or v."providerKey" ilike '%open_ai%'
+             or v."providerKey" ilike '%open ai%'
+             or v."credentialLabel" ilike '%openai%'
+             or v."credentialLabel" ilike '%open_ai%'
+             or v."credentialLabel" ilike '%open ai%'
+           )
+       ))[1] as "latestOpenAiLikeStatus",
+       (array_agg(i."credentialStatus" order by v."rotatedAt" desc) filter (
+         where v."status" <> 'REVOKED'
+           and (
+             v."providerKey" ilike '%openai%'
+             or v."providerKey" ilike '%open_ai%'
+             or v."providerKey" ilike '%open ai%'
+             or v."credentialLabel" ilike '%openai%'
+             or v."credentialLabel" ilike '%open_ai%'
+             or v."credentialLabel" ilike '%open ai%'
+           )
+       ))[1] as "latestOpenAiLikeCredentialStatus",
+       (array_agg(i."approvalStatus" order by v."rotatedAt" desc) filter (
+         where v."status" <> 'REVOKED'
+           and (
+             v."providerKey" ilike '%openai%'
+             or v."providerKey" ilike '%open_ai%'
+             or v."providerKey" ilike '%open ai%'
+             or v."credentialLabel" ilike '%openai%'
+             or v."credentialLabel" ilike '%open_ai%'
+             or v."credentialLabel" ilike '%open ai%'
+           )
+       ))[1] as "latestOpenAiLikeApprovalStatus",
+       (array_agg(i."healthStatus" order by v."rotatedAt" desc) filter (
+         where v."status" <> 'REVOKED'
+           and (
+             v."providerKey" ilike '%openai%'
+             or v."providerKey" ilike '%open_ai%'
+             or v."providerKey" ilike '%open ai%'
+             or v."credentialLabel" ilike '%openai%'
+             or v."credentialLabel" ilike '%open_ai%'
+             or v."credentialLabel" ilike '%open ai%'
+           )
+       ))[1] as "latestOpenAiLikeHealthStatus"
+     from "ConnectorCredentialVault" v
+     left join "ConnectorInstallation" i on i."id" = v."installationId"
+     where v."tenantId" = $1`,
+    [tenantId],
+  );
+  const row = result.rows[0];
+  return {
+    totalVaultRows: Number(row?.totalVaultRows ?? 0),
+    exactOpenAiRows: Number(row?.exactOpenAiRows ?? 0),
+    openAiLikeRows: Number(row?.openAiLikeRows ?? 0),
+    activeOpenAiLikeRows: Number(row?.activeOpenAiLikeRows ?? 0),
+    validatedOpenAiLikeRows: Number(row?.validatedOpenAiLikeRows ?? 0),
+    linkedOpenAiLikeRows: Number(row?.linkedOpenAiLikeRows ?? 0),
+    latestOpenAiLikeStatus: row?.latestOpenAiLikeStatus ?? "MISSING",
+    latestOpenAiLikeCredentialStatus: row?.latestOpenAiLikeCredentialStatus ?? "MISSING",
+    latestOpenAiLikeApprovalStatus: row?.latestOpenAiLikeApprovalStatus ?? "MISSING",
+    latestOpenAiLikeHealthStatus: row?.latestOpenAiLikeHealthStatus ?? "MISSING",
+  };
+}
+
 export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
   const installation = await query<{
     id: string;
