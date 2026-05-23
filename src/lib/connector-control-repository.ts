@@ -371,6 +371,7 @@ export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
   if (install) {
     try {
       secret = await getConnectorSecret({ tenantId, providerKey: "OPENAI", credentialLabel: "api_key", installationId: install.id, requireValidated: false });
+      secret ??= await getConnectorSecret({ tenantId, providerKey: "OPENAI", credentialLabel: "api_key", requireValidated: false });
     } catch (error) {
       secretError = error instanceof Error ? error.message : "OpenAI credential could not be decrypted.";
     }
@@ -449,6 +450,7 @@ export async function getOpenAiModelCatalog(tenantId = defaultTenantId): Promise
   const install = installation.rows[0];
   const secret = install
     ? await getConnectorSecret({ tenantId, providerKey: "OPENAI", credentialLabel: "api_key", installationId: install.id, requireValidated: false })
+      ?? await getConnectorSecret({ tenantId, providerKey: "OPENAI", credentialLabel: "api_key", requireValidated: false })
     : null;
   const apiKey = secret?.value || process.env.OPENAI_API_KEY || "";
   const source = secret?.value ? "credential_vault" : process.env.OPENAI_API_KEY ? "environment" : "fallback";
@@ -494,6 +496,11 @@ export async function validateOpenAiCredential(input: { tenantId?: string; actor
     providerKey: "OPENAI",
     credentialLabel: "api_key",
     installationId: install.id,
+    requireValidated: false,
+  }) ?? await getConnectorSecret({
+    tenantId,
+    providerKey: "OPENAI",
+    credentialLabel: "api_key",
     requireValidated: false,
   });
   if (!secret?.value) throw new Error("OpenAI API key is not stored in the credential vault.");
