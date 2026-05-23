@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     : Object.fromEntries((await request.formData()).entries());
   const actionType = typeof body.actionType === "string" ? body.actionType : "";
   if (!actionType) return NextResponse.json({ error: "actionType is required." }, { status: 400 });
-  await createPhoneCallControlAction({
+  const result = await createPhoneCallControlAction({
     activeCallId: typeof body.activeCallId === "string" ? body.activeCallId : undefined,
     conversationId: typeof body.conversationId === "string" ? body.conversationId : undefined,
     actionType,
@@ -25,8 +25,11 @@ export async function POST(request: Request) {
     return NextResponse.redirect(redirectUrl, { status: 303 });
   }
   return NextResponse.json({
-    status: "RECORDED",
+    status: result.providerStatus,
     actionType,
-    semantics: "Call-control request recorded and audited. Carrier success is not claimed unless provider execution returns success.",
+    result,
+    semantics: result.providerStatus === "PROVIDER_ACCEPTED"
+      ? "Twilio accepted the live call-control request."
+      : "Call-control request recorded and audited. Carrier success is not claimed unless provider execution returns success.",
   });
 }

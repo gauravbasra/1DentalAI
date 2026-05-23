@@ -1,7 +1,7 @@
 import { newId, query } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
 import { ingestSmsIntoAiConversation } from "@/lib/webchat/repository";
-import { getConnectorSecret } from "@/lib/connector-control-repository";
+import { createTwilioCall, getTwilioCredentials, getTwilioSecret } from "@/lib/twilio-provider";
 import { createHmac, timingSafeEqual } from "crypto";
 
 type TwilioPayload = Record<string, string>;
@@ -32,13 +32,28 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
   const route = await getInboundVoiceRoute(defaultTenantId, input.payload.To);
   const transcription = `<Start><Transcription name="onedentalai-live-${xmlEscape(input.conversationId)}" statusCallbackUrl="${xmlEscape(transcriptionUrl)}" track="both_tracks" languageCode="en-US" /></Start>`;
   if (route?.destinationType === "PHONE_NUMBER" && route.destination) {
+    const conferenceName = conferenceNameForConversation(input.conversationId);
+    const agentBridge = await createTwilioCall({
+      from: input.payload.To || route.callerId || "",
+      to: route.destination,
+      statusCallback: statusUrl,
+      twiml: `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="true">${xmlEscape(conferenceName)}</Conference></Dial></Response>`,
+    });
+    await query(
+      `update "PhoneActiveCall"
+       set "providerConferenceName" = $3,
+         "bridgeCallSid" = coalesce($4, "bridgeCallSid"),
+         "callControlMode" = 'TWILIO_CONFERENCE',
+         "updatedAt" = current_timestamp
+       where "tenantId" = $1 and "conversationId" = $2`,
+      [defaultTenantId, input.conversationId, conferenceName, agentBridge.sid || null],
+    );
     return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   ${transcription}
-  <Dial timeout="20" callerId="${xmlEscape(input.payload.To || route.callerId || "")}" action="${xmlEscape(statusUrl)}" method="POST" record="record-from-answer-dual" recordingStatusCallback="${xmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST">
-    <Number>${xmlEscape(route.destination)}</Number>
+  <Dial action="${xmlEscape(statusUrl)}" method="POST" record="record-from-answer-dual" recordingStatusCallback="${xmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST">
+    <Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="false" waitUrl="http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical">${xmlEscape(conferenceName)}</Conference>
   </Dial>
-  <Say voice="alice">We could not reach the front desk. Please leave a message after the tone and a team member will follow up. If this is a medical emergency, please hang up and call 911.</Say>
   <Record maxLength="180" playBeep="true" recordingStatusCallback="${xmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST" transcribe="true" transcribeCallback="${xmlEscape(transcriptionUrl)}" />
 </Response>`;
   }
@@ -46,6 +61,10 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
     return voicemailTwiML(recordingUrl, transcriptionUrl, transcription, "Thank you for calling. Please leave a message after the tone and a team member will follow up.");
   }
   return voicemailTwiML(recordingUrl, transcriptionUrl, transcription, "Thank you for calling. Your call reached 1DentalAI, but live routing is not configured yet. Please leave a message after the tone and a team member will follow up.");
+}
+
+function conferenceNameForConversation(conversationId: string) {
+  return `onedentalai-${conversationId}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
 }
 
 function voicemailTwiML(recordingUrl: string, transcriptionUrl: string, transcription: string, greeting: string) {
@@ -143,10 +162,10 @@ export async function ingestIncomingVoice(payload: TwilioPayload, tenantId = def
   const activeCallId = newId("pcall");
   await query(
     `insert into "PhoneActiveCall"
-       ("id", "tenantId", "conversationId", "phoneNumberId", "fromNumber", "toNumber", "direction", "callState", "providerCallId", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, 'INBOUND', 'RINGING', $7, current_timestamp)
+       ("id", "tenantId", "conversationId", "phoneNumberId", "fromNumber", "toNumber", "direction", "callState", "providerCallId", "providerConferenceName", "callControlMode", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'INBOUND', 'RINGING', $7, $8, 'TWILIO_CONFERENCE', current_timestamp)
      on conflict do nothing`,
-    [activeCallId, tenantId, conversationId, phoneNumberId, payload.From || "unknown", payload.To || "unknown", payload.CallSid || null],
+    [activeCallId, tenantId, conversationId, phoneNumberId, payload.From || "unknown", payload.To || "unknown", payload.CallSid || null, conferenceNameForConversation(conversationId)],
   );
   await createOrRefreshPhoneScreenPopSnapshot({
     tenantId,
@@ -866,22 +885,6 @@ async function getActiveSmsFromNumber(tenantId: string) {
     [tenantId],
   );
   return result.rows[0]?.phoneNumber ?? null;
-}
-
-async function getTwilioCredentials(tenantId: string) {
-  return {
-    accountSid: process.env.TWILIO_ACCOUNT_SID || await getTwilioSecret("account_sid", tenantId),
-    authToken: process.env.TWILIO_AUTH_TOKEN || await getTwilioSecret("auth_token", tenantId),
-  };
-}
-
-async function getTwilioSecret(label: string, tenantId = defaultTenantId) {
-  try {
-    const secret = await getConnectorSecret({ tenantId, providerKey: "TWILIO", credentialLabel: label, requireValidated: false });
-    return secret?.value || null;
-  } catch {
-    return null;
-  }
 }
 
 async function sendTwilioSms(input: { accountSid: string; authToken: string; from: string; to: string; body: string; statusCallback: string }) {

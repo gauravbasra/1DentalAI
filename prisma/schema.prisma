@@ -1898,12 +1898,17 @@ model PhoneActiveCall {
   startedAt       DateTime @default(now())
   endedAt         DateTime?
   providerCallId  String?
+  providerConferenceId String?
+  providerConferenceName String?
+  bridgeCallSid   String?
+  callControlMode String   @default("DIRECT_CALL")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([tenantId, callState, startedAt])
   @@index([conversationId])
   @@index([currentExtensionId])
+  @@index([tenantId, providerConferenceName])
 }
 
 model PhoneScreenPopSnapshot {
@@ -2004,6 +2009,9 @@ model PhoneCallControlAction {
   providerStatus String @default("CONNECTOR_REQUIRED")
   blockedReason  String?
   resultSummary  String?
+  providerRequest Json?
+  providerResponse Json?
+  executedAt     DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

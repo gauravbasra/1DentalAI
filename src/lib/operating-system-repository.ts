@@ -1,5 +1,6 @@
 import { newId, query } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
+import { createTwilioCall, findTwilioConferenceSid, getTwilioCredentials, updateTwilioCall, updateTwilioConferenceParticipant, twilioXmlEscape } from "@/lib/twilio-provider";
 
 async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string | null, outcome = "ALLOWED", metadata?: unknown) {
   await query(
@@ -1563,58 +1564,173 @@ export async function createPhoneCallControlAction(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("pctrl");
-  const readiness = await query<{ missing: string[]; activeCallProviderId: string | null }>(
+  const readiness = await query<{ missing: string[]; activeCallProviderId: string | null; providerConferenceId: string | null; providerConferenceName: string | null; bridgeCallSid: string | null; callControlMode: string | null; fromNumber: string | null; toNumber: string | null }>(
     `select array_remove(array[
-       case when not exists (select 1 from "PhoneProviderConnection" where "tenantId" = $1 and "status" = 'ACTIVE') then 'active carrier/provider connection' end,
-       case when not exists (
-         select 1 from "PhoneProviderConnection"
-         where "tenantId" = $1
-           and "status" = 'ACTIVE'
-           and "credentialStatus" = 'VALIDATED'
-           and "webhookStatus" = 'VERIFIED'
-           and (upper("providerType") like '%FREESWITCH%' or upper("providerType") like '%PBX%' or upper("providerType") like '%MEDIA_CONTROL%' or upper("name") like '%FREESWITCH%' or upper("name") like '%SIGNALWIRE%')
-       ) then 'deployed FreeSWITCH/PBX media layer with verified Event Socket or webhook bridge' end,
-       case when not exists (select 1 from "PhoneProviderConnection" where "tenantId" = $1 and "credentialStatus" = 'VALIDATED') then 'validated SIP/WebRTC credentials' end,
-       case when not exists (select 1 from "PhoneProviderConnection" where "tenantId" = $1 and "webhookStatus" = 'VERIFIED') then 'verified call-control webhooks' end,
        case when not exists (select 1 from "PhoneNumber" where "tenantId" = $1 and "voiceStatus" = 'ACTIVE' and "status" = 'ACTIVE') then 'active voice number' end
      ], null) as missing,
-     (select "providerCallId" from "PhoneActiveCall" where "tenantId" = $1 and "id" = $2) as "activeCallProviderId"`,
+     ac."providerCallId" as "activeCallProviderId",
+     ac."providerConferenceId",
+     ac."providerConferenceName",
+     ac."bridgeCallSid",
+     ac."callControlMode",
+     ac."fromNumber",
+     ac."toNumber"
+     from "PhoneActiveCall" ac
+     where ac."tenantId" = $1 and ac."id" = $2
+     union all
+     select array['active call leg']::text[] as missing, null, null, null, null, null, null, null
+     where not exists (select 1 from "PhoneActiveCall" where "tenantId" = $1 and "id" = $2)
+     limit 1`,
     [tenantId, input.activeCallId || null],
   );
   const actionType = input.actionType || "OUTBOUND_DIAL";
+  const activeCall = readiness.rows[0];
+  const twilioCredentials = await getTwilioCredentials(tenantId);
   const missing = [
+    !twilioCredentials.accountSid || !twilioCredentials.authToken ? "Twilio Account SID/Auth Token in credential vault or environment" : null,
     ...(readiness.rows[0]?.missing ?? []),
     ...missingCallControlRequirements(actionType, {
       activeCallId: input.activeCallId,
-      providerCallId: readiness.rows[0]?.activeCallProviderId,
+      providerCallId: activeCall?.activeCallProviderId,
+      providerConferenceName: activeCall?.providerConferenceName,
       targetExtensionId: input.targetExtensionId,
       targetNumber: input.targetNumber,
       targetParkSlot: input.targetParkSlot,
     }),
   ];
-  const providerStatus = missing.length ? "BLOCKED_CONNECTOR_REQUIRED" : "READY_FOR_CONNECTOR";
-  const blockedReason = missing.length
+  let providerStatus = missing.length ? "BLOCKED_CONNECTOR_REQUIRED" : "READY_FOR_PROVIDER";
+  let blockedReason = missing.length
     ? `Live call control is blocked until ${missing.join(", ")} are configured. Internal work item was recorded; no fake call action was sent.`
-    : "Ready for provider connector execution. The action was queued internally only; no fake call state transition or direct carrier API call was sent.";
+    : null;
+  let resultSummary = missing.length ? `${actionType} blocked before provider call.` : `${actionType} ready for Twilio execution.`;
+  let providerRequest: Record<string, unknown> | null = null;
+  let providerResponse: Record<string, unknown> | null = null;
+  let executedAt: Date | null = null;
+
+  if (!missing.length && activeCall?.activeCallProviderId) {
+    const execution = await executeTwilioCallControl({
+      tenantId,
+      actionType,
+      activeCallProviderId: activeCall.activeCallProviderId,
+      providerConferenceId: activeCall.providerConferenceId,
+      providerConferenceName: activeCall.providerConferenceName,
+      targetNumber: input.targetNumber,
+      targetParkSlot: input.targetParkSlot,
+      fromNumber: activeCall.toNumber || activeCall.fromNumber || "",
+      conversationId: input.conversationId || "",
+    });
+    providerStatus = execution.providerStatus;
+    blockedReason = execution.ok ? null : execution.error ?? "Twilio provider execution failed.";
+    resultSummary = execution.summary;
+    providerRequest = execution.providerRequest;
+    providerResponse = execution.providerResponse;
+    executedAt = execution.ok ? new Date() : null;
+  }
   await query(
     `insert into "PhoneCallControlAction"
-       ("id", "tenantId", "activeCallId", "conversationId", "actionType", "requestedByRole", "targetExtensionId", "targetNumber", "targetParkSlot", "providerStatus", "blockedReason", "resultSummary", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, current_timestamp)`,
-    [id, tenantId, input.activeCallId || null, input.conversationId || null, actionType, input.requestedByRole || "front_desk", input.targetExtensionId || null, input.targetNumber || null, input.targetParkSlot || null, providerStatus, blockedReason, `${actionType} staged for connector-gated provider execution.`],
+       ("id", "tenantId", "activeCallId", "conversationId", "actionType", "requestedByRole", "targetExtensionId", "targetNumber", "targetParkSlot", "providerStatus", "blockedReason", "resultSummary", "providerRequest", "providerResponse", "executedAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15, current_timestamp)`,
+    [id, tenantId, input.activeCallId || null, input.conversationId || null, actionType, input.requestedByRole || "front_desk", input.targetExtensionId || null, input.targetNumber || null, input.targetParkSlot || null, providerStatus, blockedReason, resultSummary, providerRequest ? JSON.stringify(providerRequest) : null, providerResponse ? JSON.stringify(providerResponse) : null, executedAt],
   );
-  await addAudit(tenantId, input.requestedByRole || "front_desk", "PHONE_CALL_CONTROL_STAGED", "PhoneCallControlAction", id, missing.length ? "BLOCKED" : "ALLOWED", { actionType, providerStatus, missingReadiness: missing, externalExecutionBlocked: true });
+  await addAudit(tenantId, input.requestedByRole || "front_desk", "PHONE_CALL_CONTROL_EXECUTION", "PhoneCallControlAction", id, providerStatus === "PROVIDER_ACCEPTED" ? "ALLOWED" : "BLOCKED", { actionType, providerStatus, missingReadiness: missing, providerRequest, providerResponse });
+  return { id, providerStatus, blockedReason, resultSummary };
 }
 
-function missingCallControlRequirements(actionType: string, input: { activeCallId?: string; providerCallId?: string | null; targetExtensionId?: string; targetNumber?: string; targetParkSlot?: string }) {
-  const needsActiveCall = new Set(["ANSWER", "HOLD", "RESUME", "WARM_TRANSFER", "BLIND_TRANSFER", "CALL_PARK", "SEND_TO_VOICEMAIL", "END_CALL"]);
+function missingCallControlRequirements(actionType: string, input: { activeCallId?: string; providerCallId?: string | null; providerConferenceName?: string | null; targetExtensionId?: string; targetNumber?: string; targetParkSlot?: string }) {
+  const needsActiveCall = new Set(["ANSWER", "HOLD", "RESUME", "WARM_TRANSFER", "BLIND_TRANSFER", "CALL_PARK", "SEND_TO_VOICEMAIL", "END_CALL", "AI_VOICE_TAKEOVER"]);
   const missing = [
     needsActiveCall.has(actionType) && !input.activeCallId ? "active call leg" : null,
     needsActiveCall.has(actionType) && input.activeCallId && !input.providerCallId ? "provider call identifier from webhook" : null,
-    ["WARM_TRANSFER", "BLIND_TRANSFER", "SEND_TO_VOICEMAIL"].includes(actionType) && !input.targetExtensionId ? "target extension" : null,
+    ["HOLD", "RESUME", "WARM_TRANSFER", "CALL_PARK", "PICKUP_PARK"].includes(actionType) && !input.providerConferenceName ? "Twilio conference call-control mode" : null,
+    ["WARM_TRANSFER", "BLIND_TRANSFER"].includes(actionType) && !input.targetNumber && !input.targetExtensionId ? "target phone number or extension" : null,
     actionType === "OUTBOUND_DIAL" && !input.targetNumber ? "target phone number" : null,
     ["CALL_PARK", "PICKUP_PARK"].includes(actionType) && !input.targetParkSlot ? "park slot" : null,
-  ].filter(Boolean);
+  ].filter(Boolean) as string[];
   return missing as string[];
+}
+
+async function executeTwilioCallControl(input: {
+  tenantId: string;
+  actionType: string;
+  activeCallProviderId: string;
+  providerConferenceId?: string | null;
+  providerConferenceName?: string | null;
+  targetNumber?: string;
+  targetParkSlot?: string;
+  fromNumber: string;
+  conversationId: string;
+}) {
+  const origin = process.env.ONE_DENTAL_PUBLIC_APP_URL || "https://app.1dentalai.com";
+  const providerRequest: Record<string, unknown> = { provider: "TWILIO", actionType: input.actionType, callSid: input.activeCallProviderId };
+  const conferenceSid = input.providerConferenceId || (input.providerConferenceName ? await findTwilioConferenceSid({ tenantId: input.tenantId, friendlyName: input.providerConferenceName }) : null);
+  if (conferenceSid && input.providerConferenceName) {
+    await query(
+      `update "PhoneActiveCall" set "providerConferenceId" = $3, "updatedAt" = current_timestamp where "tenantId" = $1 and "conversationId" = $2`,
+      [input.tenantId, input.conversationId || null, conferenceSid],
+    );
+  }
+  let result;
+  if (input.actionType === "END_CALL") {
+    providerRequest.operation = "Calls.update(Status=completed)";
+    result = await updateTwilioCall({ tenantId: input.tenantId, callSid: input.activeCallProviderId, status: "completed" });
+  } else if (input.actionType === "SEND_TO_VOICEMAIL") {
+    providerRequest.operation = "Calls.update(Twiml=Record)";
+    result = await updateTwilioCall({
+      tenantId: input.tenantId,
+      callSid: input.activeCallProviderId,
+      twiml: `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">Please leave a message after the tone and a team member will follow up.</Say><Record maxLength="180" playBeep="true" recordingStatusCallback="${twilioXmlEscape(origin)}/api/twilio/voice/recording" recordingStatusCallbackMethod="POST" transcribe="true" transcribeCallback="${twilioXmlEscape(origin)}/api/twilio/voice/transcription" /></Response>`,
+    });
+  } else if (input.actionType === "HOLD" || input.actionType === "CALL_PARK") {
+    if (!conferenceSid) return blockedTwilioExecution("Twilio conference is not active yet; cannot hold or park this call.", providerRequest);
+    providerRequest.operation = "ConferenceParticipant.update(Hold=true)";
+    result = await updateTwilioConferenceParticipant({
+      tenantId: input.tenantId,
+      conferenceSid,
+      callSid: input.activeCallProviderId,
+      hold: true,
+      holdUrl: "http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical",
+    });
+  } else if (input.actionType === "RESUME" || input.actionType === "PICKUP_PARK") {
+    if (!conferenceSid) return blockedTwilioExecution("Twilio conference is not active yet; cannot resume this call.", providerRequest);
+    providerRequest.operation = "ConferenceParticipant.update(Hold=false)";
+    result = await updateTwilioConferenceParticipant({ tenantId: input.tenantId, conferenceSid, callSid: input.activeCallProviderId, hold: false });
+  } else if (input.actionType === "WARM_TRANSFER" || input.actionType === "BLIND_TRANSFER") {
+    if (!conferenceSid || !input.providerConferenceName) return blockedTwilioExecution("Twilio conference is not active yet; cannot transfer this call.", providerRequest);
+    if (!input.targetNumber) return blockedTwilioExecution("Target phone number is required for Twilio transfer execution.", providerRequest);
+    providerRequest.operation = "Calls.create(target joins conference)";
+    providerRequest.targetNumber = input.targetNumber;
+    result = await createTwilioCall({
+      tenantId: input.tenantId,
+      from: input.fromNumber,
+      to: input.targetNumber,
+      statusCallback: `${origin}/api/twilio/voice/status`,
+      twiml: `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="${input.actionType === "BLIND_TRANSFER" ? "true" : "false"}">${twilioXmlEscape(input.providerConferenceName)}</Conference></Dial></Response>`,
+    });
+  } else if (input.actionType === "AI_VOICE_TAKEOVER") {
+    providerRequest.operation = "Conference AI takeover requested";
+    return blockedTwilioExecution("AI voice takeover needs the realtime voice agent media bridge before it can join a live call.", providerRequest);
+  } else {
+    return blockedTwilioExecution(`${input.actionType} is not mapped to a Twilio provider operation yet.`, providerRequest);
+  }
+  return {
+    ok: result.ok,
+    providerStatus: result.providerStatus,
+    error: result.error,
+    summary: result.ok ? `${input.actionType} accepted by Twilio. Provider status ${result.status}.` : `${input.actionType} was rejected by Twilio: ${result.error}`,
+    providerRequest,
+    providerResponse: result.data ?? { sid: result.sid, status: result.status, error: result.error },
+  };
+}
+
+function blockedTwilioExecution(reason: string, providerRequest: Record<string, unknown>) {
+  return {
+    ok: false,
+    providerStatus: "BLOCKED_CONNECTOR_REQUIRED",
+    error: reason,
+    summary: reason,
+    providerRequest,
+    providerResponse: { blockedReason: reason },
+  };
 }
 
 export async function updatePhoneDeviceStatus(id: string, provisioningStatus: string, registrationStatus: string, macAddress?: string, sipUsername?: string, assignedTo?: string, deskLocation?: string) {
