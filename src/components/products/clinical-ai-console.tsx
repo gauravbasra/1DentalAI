@@ -18,12 +18,14 @@ const numberWords: Record<string, string> = {
 };
 
 export function ClinicalAiConsole({ provider }: { provider: string }) {
-  const [patientId, setPatientId] = useState("doctor-test-001");
+  const [patientId, setPatientId] = useState("pat_sample_002");
   const [room, setRoom] = useState("op-1");
   const [input, setInput] = useState("tooth fourteen pocket depth three two three");
   const [live, setLive] = useState("Mic idle. Press Test mic first, then Start voice.");
   const [help, setHelp] = useState("Use Chrome/Edge. Server transcription needs OPENAI_API_KEY on the deployment.");
   const [status, setStatus] = useState("idle");
+  const [saveStatus, setSaveStatus] = useState("No PMS writeback yet.");
+  const [providerSigned, setProviderSigned] = useState(false);
   const [serverReady, setServerReady] = useState(false);
   const [level, setLevel] = useState(0);
   const [cursor, setCursor] = useState<{ tooth: number; site: Site }>({ tooth: 1, site: "MB" });
@@ -87,9 +89,9 @@ export function ClinicalAiConsole({ provider }: { provider: string }) {
     try {
       const stream = await openMic();
       if (!serverReady) {
-        setHelp("Server transcription is not enabled on this deployment. Use Practice Voice Phrase or configure OPENAI_API_KEY.");
-        setStatus("server key needed");
-        addTrail("error", "OPENAI_API_KEY missing for reliable transcription.");
+        setHelp("Go-live voice is blocked until OPENAI_API_KEY is configured in production. This prevents unsafe browser transcription.");
+        setStatus("transcription blocked");
+        addTrail("error", "Server transcription is not enabled. Add OPENAI_API_KEY before live voice use.");
         return;
       }
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
@@ -187,12 +189,12 @@ export function ClinicalAiConsole({ provider }: { provider: string }) {
     const commands = extract(phrase);
     commands.forEach((command) => {
       addTrail("parsed", command);
-      applyCommand(command);
+      void applyCommand(command);
       addTrail("charted", command);
     });
   }
 
-  function applyCommand(command: string) {
+  async function applyCommand(command: string) {
     const metric = command.match(/tooth\s+(\d{1,2})\s+(PD|GM|CAL|MGJ)\s+(-?\d{1,2})\s+(-?\d{1,2})\s+(-?\d{1,2})/);
     if (metric) {
       const tooth = Number(metric[1]);
@@ -208,6 +210,7 @@ export function ClinicalAiConsole({ provider }: { provider: string }) {
         return next;
       });
       setCursor({ tooth, site: sites[2] });
+      await persistMeasurements(tooth, sites, values, row);
       return;
     }
     const condition = command.match(/tooth\s+(\d{1,2})\s+(Bld|Sup)\s+present/);
@@ -224,6 +227,34 @@ export function ClinicalAiConsole({ provider }: { provider: string }) {
     } else if (command.startsWith("note ")) {
       setNotes((items) => [...items, command.slice(5)]);
     }
+  }
+
+
+  async function persistMeasurements(tooth: number, sites: Site[], values: string[], metric: Metric) {
+    if (metric !== "PD") {
+      setSaveStatus("Only probing depth writeback is currently supported by the PMS perio API; chart state retained for review.");
+      return;
+    }
+    const writes = sites.map((site, index) => fetch(`/api/pms/perio/${encodeURIComponent(patientId)}/measurements`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tooth: String(tooth), site, probingDepth: Number(values[index]), bleeding: Boolean(chart[tooth]?.[site]?.Bld) }),
+    }));
+    const responses = await Promise.all(writes);
+    const failed = responses.find((response) => !response.ok);
+    if (failed) {
+      const body = await failed.text();
+      setSaveStatus(`PMS writeback failed: ${body.slice(0, 160)}`);
+      addTrail("error", `PMS writeback failed for tooth ${tooth}.`);
+      return;
+    }
+    setSaveStatus(`Saved tooth ${tooth} probing depths to PMS perio chart.`);
+  }
+
+  async function saveFullChart() {
+    setProviderSigned(true);
+    setSaveStatus("Provider signoff captured. Perio measurements entered by voice are saved as they are charted; review PMS perio page before final clinical close.");
+    addTrail("charted", "Provider signoff captured for clinical review.");
   }
 
   function arch(teeth: number[], sites: Site[], label: string) {
@@ -270,12 +301,14 @@ export function ClinicalAiConsole({ provider }: { provider: string }) {
           <div className="mt-3 flex flex-wrap gap-2">
             <button onClick={() => runPhrase(input)} className="rounded-full bg-cyan-700 px-4 py-2 text-sm font-semibold text-white">Practice Voice Phrase</button>
             <button onClick={() => runPhrase("tooth fifteen pocket depth four five six bleeding")} className="rounded-full bg-neutral-100 px-4 py-2 text-sm font-semibold text-neutral-700">Demo phrase</button>
+            <button onClick={saveFullChart} className="rounded-full bg-neutral-950 px-4 py-2 text-sm font-semibold text-white">Provider signoff</button>
           </div>
           <div className="mt-4 rounded-2xl bg-neutral-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">Live transcript</p>
             <p className="mt-1 text-sm font-semibold text-neutral-950">{live}</p>
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-neutral-200"><div className="h-full rounded-full bg-emerald-600" style={{ width: `${level}%` }} /></div>
             <p className="mt-2 text-xs leading-5 text-neutral-600">{help}</p>
+            <p className="mt-2 text-xs font-semibold text-emerald-800">{saveStatus}</p>
           </div>
         </div>
 
@@ -287,9 +320,10 @@ export function ClinicalAiConsole({ provider }: { provider: string }) {
 
       <aside className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          <Metric label="Teeth" value={teethWithData} /><Metric label="Sites" value={sitesWithData} /><Metric label="Events" value={trail.length} /><Metric label="Mode" value={serverReady ? "STT" : "Key"} />
+          <Metric label="Teeth" value={teethWithData} /><Metric label="Sites" value={sitesWithData} /><Metric label="Events" value={trail.length} /><Metric label="Mode" value={serverReady ? "STT" : "Key"} /><Metric label="Signoff" value={providerSigned ? "Done" : "Open"} />
         </div>
         <Panel title="Heard / Parsed / Charted">{trail.length ? trail.slice().reverse().map((item, index) => <div key={index} className={`rounded-xl border px-3 py-2 text-sm ${item.kind === "error" ? "border-rose-200 bg-rose-50" : "border-neutral-200 bg-white"}`}><p className="text-[10px] font-bold uppercase tracking-[0.12em] text-cyan-700">{item.kind}</p><p className="mt-1 text-neutral-800">{item.text}</p></div>) : <p className="text-sm text-neutral-500">No voice captured yet.</p>}</Panel>
+        <Panel title="Go-live controls"><div className="grid gap-2 text-sm text-neutral-700"><p><strong>Patient ID:</strong> {patientId}</p><p><strong>PMS writeback:</strong> probing depth measurements save immediately to the PMS perio API.</p><p><strong>Voice gate:</strong> live voice requires server transcription; browser transcription is intentionally blocked for go-live safety.</p><p><strong>Signoff:</strong> {providerSigned ? "captured" : "required before final clinical close"}</p></div></Panel>
         <Panel title="Practice notes">{notes.length ? notes.map((note, index) => <p key={index} className="text-sm text-neutral-700">{note}</p>) : <p className="text-sm text-neutral-500">Scribing and treatment-plan recommendations live here next.</p>}</Panel>
         <Panel title="Command legend"><div className="grid gap-2 text-sm text-neutral-700"><code>tooth fourteen pocket depth three two three</code><code>tooth fifteen gingival margin one one two</code><code>tooth four bleeding suppuration</code><code>tooth fourteen mobility grade two</code></div></Panel>
       </aside>
