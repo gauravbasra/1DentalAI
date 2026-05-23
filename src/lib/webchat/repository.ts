@@ -2061,7 +2061,10 @@ function buildReply(analysis: WebchatAnalysis, knowledge: Array<{ content: strin
     return { body: "I’m sorry you’re dealing with that. If you have trouble breathing, uncontrolled bleeding, facial swelling, or trauma, please call emergency services now. What symptoms are you having, and what is the best number to reach you?" };
   }
   if (analysis.intent === "INSURANCE_OR_PRICE") {
-    return { body: `I understand. Insurance and cost questions can be confusing. ${context}\n\nWhat insurance plan do you have, and what treatment are you asking about?` };
+    const body = knowledgeExcerpt
+      ? `I understand. Insurance and cost questions can be confusing. ${knowledgeExcerpt}\n\nWhat insurance plan do you have, and what treatment are you asking about?`
+      : "I understand. Insurance and cost questions can be confusing. What insurance plan do you have, and what treatment are you asking about?";
+    return { body };
   }
   return { body: context };
 }
