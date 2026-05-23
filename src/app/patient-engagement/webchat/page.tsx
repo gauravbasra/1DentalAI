@@ -358,7 +358,7 @@ export default async function PatientEngagementWebchatPage({
                       )}
                     </div>
                   </div>
-                  <footer className="max-h-[48vh] overflow-y-auto border-t border-neutral-200 bg-white px-7 py-5">
+                  <footer className="relative border-t border-neutral-200 bg-white px-7 py-5">
                     <div className="space-y-3">
                       <TeamCollaborationPanel conversation={selectedConversation} team={teamPresence} />
                       <form action={staffEntryAction} className="flex items-end gap-3">
@@ -586,9 +586,9 @@ function TeamCollaborationPanel({ conversation, team }: { conversation: WebChatR
   const assigned = team.find((member) => member.id === conversation.assignedStaffId);
   return (
     <details className="group rounded-2xl border border-neutral-200 bg-white shadow-sm">
-      <summary className="sticky top-0 z-10 flex cursor-pointer list-none items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3">
         <span>
-          <span className="block text-sm font-semibold text-neutral-950">Assign, transfer, task, or appointment</span>
+          <span className="block text-sm font-semibold text-neutral-950">Handoff actions</span>
           <span className="mt-1 hidden text-xs font-semibold text-emerald-700 group-open:block">Back to chat</span>
         </span>
         <span className="flex shrink-0 items-center gap-2">
@@ -601,7 +601,16 @@ function TeamCollaborationPanel({ conversation, team }: { conversation: WebChatR
         </span>
       </summary>
 
-      <div className="max-h-[34vh] overflow-y-auto border-t border-neutral-100 px-4 pb-4 pt-3">
+      <div className="absolute bottom-[calc(100%-6px)] left-7 right-7 z-30 max-h-[58vh] overflow-y-auto rounded-3xl border border-neutral-200 bg-white p-4 shadow-2xl shadow-neutral-950/20">
+        <div className="mb-3 flex items-start justify-between gap-3 border-b border-neutral-100 pb-3">
+          <div>
+            <p className="text-base font-semibold text-neutral-950">Assign, transfer, task, or appointment</p>
+            <p className="mt-1 text-sm text-neutral-500">Click Back to chat in the footer to close this panel.</p>
+          </div>
+          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+            {assigned ? assigned.displayName : clean(conversation.ownerRoleKey)}
+          </span>
+        </div>
         <div className="flex gap-2 overflow-x-auto pb-2">
           {team.length ? team.slice(0, 8).map((member) => (
             <div key={member.id} className={`flex min-w-[170px] items-center gap-3 rounded-2xl border px-3 py-2 ${member.id === conversation.assignedStaffId ? "border-emerald-200 bg-emerald-50" : "border-neutral-200 bg-neutral-50"}`}>
