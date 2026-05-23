@@ -40,98 +40,125 @@ export async function FoundationShell({
   const roleParam = `role=${role.key}`;
   const modeLabel = foundationPractice.mode === "PRODUCTION_SETUP" ? "Production setup" : "Live";
   const groups = Array.from(new Set(appNav.map((item) => item.group)));
+  const activeItem = appNav.find((item) => active === item.href || (item.href !== "/app/overview" && active.startsWith(`${item.href}/`)));
 
   return (
-    <div className="app-shell min-h-screen bg-[#f6f7f8] text-neutral-950 lg:grid lg:grid-cols-[264px_minmax(0,1fr)]">
-      <aside className="sticky top-0 hidden h-screen overflow-y-auto border-r border-neutral-200 bg-white px-4 py-5 lg:block">
-        <Link href={`/app/overview?${roleParam}`} className="block text-xl font-semibold tracking-tight text-neutral-950">
-          1DentalAI
-        </Link>
-        <p className="mt-1 text-xs leading-5 text-neutral-500">{foundationPractice.label}</p>
-        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
-          {modeLabel}
-        </div>
-        <nav aria-label="Application navigation" className="mt-5 space-y-5">
-          {groups.map((group) => (
-            <div key={group}>
-              <p className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-400">{group}</p>
-              <div className="mt-2 space-y-1">
-                {appNav.filter((item) => item.group === group).map((item) => {
-                  const selected = active === item.href || (item.href !== "/app/overview" && active.startsWith(`${item.href}/`));
-                  return (
-                    <Link
-                      key={item.href}
-                      href={`${item.href}?${roleParam}`}
-                      className={`flex min-h-9 items-center rounded-md px-3 py-2 text-sm font-semibold leading-5 transition ${
-                        selected
-                          ? "bg-neutral-950 text-white"
-                          : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950"
-                      }`}
-                    >
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </nav>
-      </aside>
-
-      <div className="min-w-0">
-        <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white/95 shadow-sm backdrop-blur-xl">
-          <div className="flex min-w-0 items-center justify-between gap-3 px-4 py-3 sm:px-6">
-            <div className="min-w-0 lg:hidden">
-              <Link href={`/app/overview?${roleParam}`} className="text-base font-semibold tracking-tight text-neutral-950">
-                1DentalAI
-              </Link>
-            </div>
-            <div className="hidden min-w-0 lg:block">
-              <p className="truncate text-sm font-semibold text-neutral-950">{role.title}</p>
-              <p className="truncate text-xs text-neutral-500">{session.displayName}</p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <span className="hidden rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200 sm:inline-flex lg:hidden">
-                {modeLabel}
-              </span>
-              <Link
-                href="/contact"
-                className="inline-flex min-h-9 items-center rounded-md border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
-              >
-                Support
-              </Link>
-              <form action="/logout" method="post" className="inline-flex">
-                <button
-                  type="submit"
-                  className="inline-flex min-h-9 items-center rounded-md border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-rose-700 hover:text-rose-700"
-                >
-                  Logout
-                </button>
-              </form>
-            </div>
-          </div>
-          <nav aria-label="Application navigation" className="app-scrollbar flex snap-x gap-1 overflow-x-auto px-4 pb-2 sm:px-6 lg:hidden">
+    <div className="min-h-screen bg-[#20312b] px-4 py-5 text-neutral-950 sm:px-6 lg:px-8">
+      <div className="mx-auto flex h-[calc(100vh-40px)] min-h-[760px] max-w-[1840px] overflow-hidden rounded-[28px] border border-white/15 bg-white shadow-2xl shadow-emerald-950/40">
+        <aside className="hidden w-[76px] shrink-0 flex-col items-center border-r border-neutral-200 bg-white py-5 lg:flex">
+          <Link
+            href={`/app/overview?${roleParam}`}
+            className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-sm font-black text-emerald-800"
+            aria-label="Open 1DentalAI overview"
+          >
+            1D
+          </Link>
+          <nav className="mt-8 flex flex-1 flex-col items-center gap-3" aria-label="Application quick navigation">
             {appNav.map((item) => {
               const selected = active === item.href || (item.href !== "/app/overview" && active.startsWith(`${item.href}/`));
+              const short = item.label
+                .split(" ")
+                .map((part) => part[0])
+                .join("")
+                .slice(0, 2)
+                .toUpperCase();
               return (
                 <Link
                   key={item.href}
                   href={`${item.href}?${roleParam}`}
-                  className={`min-h-9 shrink-0 snap-start rounded-md px-3 py-2 text-xs font-semibold leading-5 transition ${
-                    selected
-                      ? "bg-neutral-950 text-white"
-                      : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950"
+                  title={item.label}
+                  className={`flex h-11 w-11 items-center justify-center rounded-2xl text-xs font-black transition ${
+                    selected ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-500 hover:bg-emerald-50 hover:text-emerald-800"
                   }`}
                 >
-                  {item.label}
+                  {short}
                 </Link>
               );
             })}
           </nav>
-        </header>
-        <main className="min-w-0 px-4 py-5 sm:px-6 xl:px-8">
-          <div className="mx-auto max-w-[1420px]">{children}</div>
-        </main>
+        </aside>
+
+        <aside className="hidden w-[330px] shrink-0 overflow-y-auto border-r border-neutral-200 bg-[#fbfcfb] xl:block">
+          <div className="border-b border-neutral-200 px-6 py-6">
+            <Link href={`/app/overview?${roleParam}`} className="text-sm font-semibold uppercase tracking-[0.2em] text-neutral-500">
+              1DentalAI
+            </Link>
+            <h1 className="mt-4 text-3xl font-semibold tracking-tight text-neutral-950">{activeItem?.label ?? "Operations"}</h1>
+            <p className="mt-2 text-sm leading-6 text-neutral-600">{role.title}</p>
+            <div className="mt-4 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
+              {modeLabel}
+            </div>
+          </div>
+          <nav aria-label="Application navigation" className="space-y-5 px-4 py-5">
+            {groups.map((group) => (
+              <div key={group}>
+                <p className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-400">{group}</p>
+                <div className="mt-2 space-y-1">
+                  {appNav.filter((item) => item.group === group).map((item) => {
+                    const selected = active === item.href || (item.href !== "/app/overview" && active.startsWith(`${item.href}/`));
+                    return (
+                      <Link
+                        key={item.href}
+                        href={`${item.href}?${roleParam}`}
+                        className={`block rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                          selected ? "bg-neutral-950 text-white" : "text-neutral-700 hover:bg-white hover:text-neutral-950 hover:shadow-sm"
+                        }`}
+                      >
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </nav>
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="border-b border-neutral-200 bg-white px-4 py-3 sm:px-6">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-neutral-950">{activeItem?.label ?? "1DentalAI"}</p>
+                <p className="truncate text-xs text-neutral-500">{session.displayName}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Link
+                  href="/contact"
+                  className="inline-flex min-h-9 items-center rounded-xl border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
+                >
+                  Support
+                </Link>
+                <form action="/logout" method="post" className="inline-flex">
+                  <button
+                    type="submit"
+                    className="inline-flex min-h-9 items-center rounded-xl bg-neutral-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-neutral-800"
+                  >
+                    Logout
+                  </button>
+                </form>
+              </div>
+            </div>
+            <nav aria-label="Application navigation" className="app-scrollbar mt-3 flex snap-x gap-2 overflow-x-auto xl:hidden">
+              {appNav.map((item) => {
+                const selected = active === item.href || (item.href !== "/app/overview" && active.startsWith(`${item.href}/`));
+                return (
+                  <Link
+                    key={item.href}
+                    href={`${item.href}?${roleParam}`}
+                    className={`shrink-0 snap-start rounded-full px-4 py-2 text-xs font-semibold leading-5 transition ${
+                      selected ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-700"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          </header>
+          <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-[#f5f7f6] px-4 py-5 sm:px-6 xl:px-8">
+            <div className="mx-auto max-w-[1420px]">{children}</div>
+          </main>
+        </div>
       </div>
     </div>
   );
@@ -145,7 +172,7 @@ export function RoleSwitcher({
   basePath: string;
 }) {
   return (
-    <div className="mb-3 flex min-w-0 items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 shadow-sm">
+    <div className="mb-3 flex min-w-0 items-center gap-2 rounded-2xl border border-neutral-200 bg-white px-3 py-2 shadow-sm">
       <p className="shrink-0 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">
         Role
       </p>
@@ -180,7 +207,7 @@ export function PageHeader({
   body: string;
 }) {
   return (
-    <div className="mb-5 min-w-0 rounded-lg border border-neutral-200 bg-white px-5 py-4 shadow-sm">
+    <div className="mb-5 min-w-0 rounded-2xl border border-neutral-200 bg-white px-5 py-4 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-700">{eyebrow}</p>
       <h1 className="mt-1 max-w-4xl text-3xl font-semibold tracking-tight text-neutral-950 text-balance">
         {title}
