@@ -12,7 +12,10 @@
     "prisma:validate": "prisma validate",
     "test:phase0": "node scripts/validate-phase0-depth.mjs",
     "test:workbenches": "node scripts/validate-phase2-workbenches.mjs",
-    "test:pms": "node scripts/validate-phase3-pms.mjs"
+    "test:pms": "node scripts/validate-phase3-pms.mjs",
+    "test:pms-production-gate": "node scripts/validate-pms-production-gate.mjs",
+    "test:payer-matrix": "node scripts/validate-payer-matrix-slice.mjs",
+    "test:scribe": "node scripts/validate-pms-scribe-go-live.mjs"
   },
   "dependencies": {
     "@prisma/client": "^7.8.0",

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { requirePmsApiSession } from "@/lib/pms-api-auth";
 import { listDocuments } from "@/lib/pms-repository";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ data: await listDocuments() });
+  const auth = await requirePmsApiSession();
+  if (auth.response) return auth.response;
+  return NextResponse.json({ data: await listDocuments(auth.session.tenantId) });
 }

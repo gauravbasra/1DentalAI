@@ -50,6 +50,11 @@ export type ScribeDraft = {
     openTaskCount: number;
     needsReview: string[];
   };
+  generation: {
+    source: "openai_structured" | "rules_fallback";
+    model: string;
+    blockedReason?: string;
+  };
 };
 
 export const scribeTemplates: ScribeTemplate[] = [
@@ -131,6 +136,74 @@ export function generateScribeDraft(input: {
       treatmentItemCount: treatmentSuggestions.length,
       openTaskCount: taskDrafts.length,
       needsReview,
+    },
+    generation: {
+      source: "rules_fallback",
+      model: "deterministic_rules_v1",
+    },
+  };
+}
+
+export function normalizeGeneratedDraft(input: {
+  parsed: Partial<ScribeDraft> | null;
+  fallback: ScribeDraft;
+  procedureCodes: ScribeProcedureCode[];
+  model: string;
+}): ScribeDraft {
+  if (!input.parsed?.noteBody || !Array.isArray(input.parsed.sections)) return input.fallback;
+  const procedureByCode = new Map(input.procedureCodes.map((code) => [code.code, code]));
+  const treatmentSuggestions = Array.isArray(input.parsed.treatmentSuggestions)
+    ? input.parsed.treatmentSuggestions
+        .filter((item) => item?.code && procedureByCode.has(item.code))
+        .map((item, index) => {
+          const code = procedureByCode.get(String(item.code))!;
+          return {
+            code: code.code,
+            procedureCodeId: code.id,
+            description: code.description,
+            tooth: String(item.tooth ?? ""),
+            surface: String(item.surface ?? ""),
+            phase: Number(item.phase || Math.max(1, Math.floor(index / 3) + 1)),
+            priority: item.priority === "HIGH" ? "HIGH" as const : "NORMAL" as const,
+            ownerRoleKey: String(item.ownerRoleKey || "treatment_coordinator"),
+            reason: String(item.reason || "AI suggested from reviewed transcript."),
+          };
+        })
+    : input.fallback.treatmentSuggestions;
+  const taskDrafts = Array.isArray(input.parsed.taskDrafts)
+    ? input.parsed.taskDrafts
+        .filter((task) => task?.title && task?.ownerRoleKey && task?.taskType)
+        .map((task) => ({
+          ownerRoleKey: String(task.ownerRoleKey),
+          title: String(task.title),
+          taskType: String(task.taskType),
+          priority: task.priority === "HIGH" ? "HIGH" as const : "NORMAL" as const,
+        }))
+    : input.fallback.taskDrafts;
+  const sections = input.parsed.sections.map((section) => ({
+    title: String(section.title ?? "Section"),
+    body: String(section.body ?? ""),
+  }));
+  const needsReview = sections.filter((section) => !section.body.trim() || /provider review needed/i.test(section.body)).map((section) => section.title);
+  return {
+    templateKey: input.fallback.templateKey,
+    noteType: input.fallback.noteType,
+    noteBody: String(input.parsed.noteBody),
+    sections,
+    treatmentPlanName: String(input.parsed.treatmentPlanName || input.fallback.treatmentPlanName),
+    treatmentPlanNote: String(input.parsed.treatmentPlanNote || input.fallback.treatmentPlanNote),
+    treatmentSuggestions,
+    taskDrafts,
+    analytics: {
+      completeness: Math.round(((sections.length - needsReview.length) / Math.max(1, sections.length)) * 100),
+      suggestedCdtCodes: treatmentSuggestions.map((item) => item.code),
+      treatmentItemCount: treatmentSuggestions.length,
+      openTaskCount: taskDrafts.length,
+      needsReview,
+    },
+    generation: {
+      source: "openai_structured",
+      model: input.model,
     },
   };
 }

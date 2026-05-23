@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const requiredFiles = [
   "src/app/app/pms/page.tsx",
@@ -110,6 +111,8 @@ if (missingFiles.length) {
   process.exit(1);
 }
 
+execFileSync(process.execPath, ["scripts/validate-pms-production-gate.mjs"], { stdio: "inherit" });
+
 const schema = fs.readFileSync("prisma/schema.prisma", "utf8");
 const missingModels = requiredSchemaModels.filter((model) => !schema.includes(`model ${model}`));
 if (missingModels.length) {
@@ -135,6 +138,7 @@ const schedulePage = fs.readFileSync("src/app/app/pms/schedule/page.tsx", "utf8"
 const appointmentPage = fs.readFileSync("src/app/app/pms/appointments/[appointmentId]/page.tsx", "utf8");
 const onlineSchedulingPage = fs.readFileSync("src/app/app/pms/online-scheduling/page.tsx", "utf8");
 const publicBookingPage = fs.readFileSync("src/app/book/[slug]/page.tsx", "utf8");
+const publicBookingClient = fs.readFileSync("src/app/book/[slug]/booking-client.tsx", "utf8");
 for (const token of ["Operatory day sheet", "Pinboard", "Recall", "Lab case", "AppointmentCategory"]) {
   if (!schedulePage.includes(token) && !schema.includes(token)) {
     console.error(`Schedule PMS depth token missing: ${token}`);
@@ -151,7 +155,7 @@ for (const token of ["PmsCheckoutSession", "getAppointmentControl", "completeApp
 }
 
 for (const token of ["PmsOnlineSchedulingLink", "PmsOnlineBooking", "PmsSchedulingInviteCampaign", "getOnlineSchedulingWorkbench", "getOnlineSchedulingAvailability", "submitOnlineBooking", "Booking links, availability, and PMS writeback", "Reserve appointment"]) {
-  const haystack = `${schema}\n${onlineSchedulingPage}\n${publicBookingPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+  const haystack = `${schema}\n${onlineSchedulingPage}\n${publicBookingPage}\n${publicBookingClient}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS online scheduling token missing: ${token}`);
     process.exit(1);
