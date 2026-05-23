@@ -91,8 +91,8 @@ export default async function PatientEngagementHome({
             <Link href="/logout" className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Sign out</Link>
           </header>
 
-          <div className="grid min-h-0 flex-1 grid-cols-[430px_minmax(0,1fr)_420px] overflow-hidden">
-            <aside className="min-h-0 border-r border-neutral-200 bg-white">
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)] 2xl:grid-cols-[430px_minmax(0,1fr)_420px]">
+            <aside className="hidden min-h-0 border-r border-neutral-200 bg-white lg:block">
               <InboxHeader metrics={metrics} />
               <div className="h-[calc(100vh-244px)] overflow-y-auto">
                 {conversations.length ? conversations.map((conversation) => (
@@ -126,7 +126,7 @@ export default async function PatientEngagementHome({
               <Composer conversation={selectedConversation} patient={patient} />
             </section>
 
-            <aside className="min-h-0 border-l border-neutral-200 bg-[#fbfcfb]">
+            <aside className="hidden min-h-0 border-l border-neutral-200 bg-[#fbfcfb] 2xl:block">
               <div className="h-[calc(100vh-80px)] overflow-y-auto">
                 <PatientIntelligence
                   patient={patient}
