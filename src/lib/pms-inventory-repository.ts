@@ -257,7 +257,7 @@ export async function createInventoryVendor(input: {
   const result = await query(
     `insert into "PmsInventoryVendor"
        ("id", "tenantId", "vendorName", "vendorType", "marketplaceStatus", "portalStatus", "portalToken", "subscriptionStatus", "subscriptionPlan", "marketplaceFeeBps", "email", "phone", "website", "paymentTerms", "complianceStatus", "verifiedAt", "updatedAt")
-     values ($1, $2, $3, $4, coalesce($5, 'PRIVATE_VENDOR'), case when coalesce($5, 'PRIVATE_VENDOR') in ('MARKETPLACE_VENDOR', 'PREFERRED_VENDOR') then 'ACTIVE' else 'INVITED' end, $6, case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then 'ACTIVE' else 'NOT_SUBSCRIBED' end, case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then 'MARKETPLACE_SELLER' else null end, case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then 250 else 0 end, $7, $8, $9, $10, 'NEEDS_REVIEW', case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then current_timestamp else null end, current_timestamp)
+     values ($1, $2, $3, $4, coalesce($5, 'PRIVATE_VENDOR'), case when coalesce($5, 'PRIVATE_VENDOR') in ('MARKETPLACE_VENDOR', 'PREFERRED_VENDOR') then 'ACTIVE' else 'INVITED' end, $6, case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then 'TRIALING' else 'NOT_SUBSCRIBED' end, case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then 'MARKETPLACE_SELLER' else null end, case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then 250 else 0 end, $7, $8, $9, $10, 'NEEDS_REVIEW', case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then current_timestamp else null end, current_timestamp)
      on conflict ("tenantId", "vendorName") do update set
        "vendorType" = excluded."vendorType",
        "marketplaceStatus" = excluded."marketplaceStatus",
@@ -605,16 +605,17 @@ export async function getInventoryVendorPortal(token: string) {
   const vendorRow = vendor.rows[0];
   if (!vendorRow) return null;
   const tenantId = String(vendorRow.tenantId);
+  const marketplaceEntitled = vendorRow.subscriptionStatus === "ACTIVE" || vendorRow.subscriptionStatus === "TRIALING";
   const [rfps, bids, awardedPurchaseOrders] = await Promise.all([
     query(
       `select r.*, coalesce(jsonb_agg(jsonb_build_object('itemName', line."itemName", 'quantity', line."quantity", 'requirements', line."requirements") order by line."createdAt") filter (where line."id" is not null), '[]'::jsonb) as "lines"
        from "PmsInventoryRfp" r
        left join "PmsInventoryRfpLine" line on line."rfpId" = r."id"
-       where r."tenantId" = $1 and r."status" in ('RELEASED', 'EVALUATING')
+       where r."tenantId" = $1 and $3::boolean = true and r."status" in ('RELEASED', 'EVALUATING')
          and (r."releaseMode" = 'MARKETPLACE' or r."releaseMode" = 'PREFERRED_VENDORS' or r."category" = $2)
        group by r."id"
        order by r."responseDueAt" asc nulls last, r."createdAt" desc`,
-      [tenantId, vendorRow.vendorType],
+      [tenantId, vendorRow.vendorType, marketplaceEntitled],
     ),
     query(
       `select b.*, r."rfpNumber", r."title", r."category"
@@ -634,7 +635,7 @@ export async function getInventoryVendorPortal(token: string) {
       [tenantId, vendorRow.id],
     ),
   ]);
-  return { vendor: vendorRow, rfps: rfps.rows, bids: bids.rows, purchaseOrders: awardedPurchaseOrders.rows };
+  return { vendor: vendorRow, marketplaceEntitled, rfps: rfps.rows, bids: bids.rows, purchaseOrders: awardedPurchaseOrders.rows };
 }
 
 export async function submitInventoryVendorBid(input: {
@@ -649,6 +650,7 @@ export async function submitInventoryVendorBid(input: {
 }) {
   const portal = await getInventoryVendorPortal(input.portalToken);
   if (!portal) throw new Error("Vendor portal is not active.");
+  if (!portal.marketplaceEntitled) throw new Error("Vendor marketplace subscription is not active.");
   const vendor = portal.vendor as Record<string, string>;
   const rfp = await query(`select * from "PmsInventoryRfp" where "tenantId" = $1 and "id" = $2 and "status" in ('RELEASED', 'EVALUATING')`, [vendor.tenantId, input.rfpId]);
   if (!rfp.rows[0]) throw new Error("RFP is not open for bidding.");

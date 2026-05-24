@@ -44,6 +44,7 @@ export default async function VendorInventoryPortal({ searchParams }: { searchPa
   }
 
   const vendor = portal.vendor as AnyRow;
+  const marketplaceEntitled = Boolean(portal.marketplaceEntitled);
   const rfps = portal.rfps as AnyRow[];
   const bids = portal.bids as AnyRow[];
   const purchaseOrders = portal.purchaseOrders as AnyRow[];
@@ -104,7 +105,11 @@ export default async function VendorInventoryPortal({ searchParams }: { searchPa
               </form>
             </article>
           ))}
-          {!rfps.length ? <div className="rounded-lg border border-neutral-200 bg-white p-8 text-neutral-600">No open tenders match this vendor portal right now.</div> : null}
+          {!rfps.length ? (
+            <div className="rounded-lg border border-neutral-200 bg-white p-8 text-neutral-600">
+              {marketplaceEntitled ? "No open tenders match this vendor portal right now." : "Marketplace bidding is locked until the vendor subscription is active or in an approved trial."}
+            </div>
+          ) : null}
         </div>
 
         <aside className="grid content-start gap-4">
