@@ -2205,11 +2205,17 @@ async function getConnectorSecretValue(tenantId: string, providerKey: string, la
 function confirmationDeliveryLine(confirmation: { sms?: Record<string, unknown>; email?: Record<string, unknown> }, label: string) {
   const smsStatus = String(confirmation.sms?.deliveryStatus ?? confirmation.sms?.smsDeliveryStatus ?? "");
   const emailStatus = String(confirmation.email?.emailDeliveryStatus ?? confirmation.email?.deliveryStatus ?? "");
+  const smsIssue = String(confirmation.sms?.blockedReason ?? confirmation.sms?.providerError ?? confirmation.sms?.reason ?? "");
+  const emailIssue = String(confirmation.email?.blockedReason ?? confirmation.email?.providerError ?? confirmation.email?.reason ?? "");
   const smsSent = smsStatus === "SENT_TO_PROVIDER" || smsStatus === "DELIVERED";
   const emailSent = emailStatus === "SENT_TO_PROVIDER" || emailStatus === "DELIVERED";
   if (smsSent && emailSent) return `I sent the ${label} by text and email.`;
   if (smsSent) return `I sent the ${label} by text.`;
   if (emailSent) return `I sent the ${label} by email.`;
+  if (smsStatus === "PROVIDER_ERROR" && smsIssue) return `The ${label} is saved, but Twilio rejected the text: ${smsIssue}`;
+  if (smsStatus === "BLOCKED" && smsIssue) return `The ${label} is saved, but text delivery is blocked: ${smsIssue}`;
+  if (emailStatus === "PROVIDER_ERROR" && emailIssue) return `The ${label} is saved, but the email provider rejected it: ${emailIssue}`;
+  if (emailStatus === "BLOCKED_CONNECTOR_REQUIRED" && emailIssue) return `The ${label} is saved, but email delivery is blocked: ${emailIssue}`;
   return `The ${label} is saved with the appointment; messaging delivery is waiting on the practice connector.`;
 }
 
