@@ -1770,7 +1770,7 @@ export async function sendApprovedPhoneOutboundMessage(id: string, actorRole = "
          "provider" = 'TWILIO',
          "providerError" = $2,
          "lastAttemptAt" = current_timestamp,
-         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioSendAttemptedAt', current_timestamp, 'twilioBlockedReason', $2, 'externalSendBlocked', true),
+         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioSendAttemptedAt', current_timestamp, 'twilioBlockedReason', $2::text, 'externalSendBlocked', true),
          "updatedAt" = current_timestamp
        where "id" = $1`,
       [id, block],
@@ -1789,7 +1789,7 @@ export async function sendApprovedPhoneOutboundMessage(id: string, actorRole = "
          "provider" = 'TWILIO',
          "providerError" = $2,
          "lastAttemptAt" = current_timestamp,
-         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioBlockedReason', $2, 'externalSendBlocked', true),
+         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioBlockedReason', $2::text, 'externalSendBlocked', true),
          "updatedAt" = current_timestamp
        where "id" = $1`,
       [id, reason],
@@ -1815,7 +1815,7 @@ export async function sendApprovedPhoneOutboundMessage(id: string, actorRole = "
          "providerError" = null,
          "lastAttemptAt" = current_timestamp,
          "sentAt" = current_timestamp,
-         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioProviderSid', $2, 'twilioProviderStatus', $3, 'externalSendBlocked', false),
+         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioProviderSid', $2::text, 'twilioProviderStatus', $3::text, 'externalSendBlocked', false),
          "updatedAt" = current_timestamp
        where "id" = $1`,
       [id, twilio.sid, twilio.status],
@@ -1829,7 +1829,7 @@ export async function sendApprovedPhoneOutboundMessage(id: string, actorRole = "
          "provider" = 'TWILIO',
          "providerError" = $2,
          "lastAttemptAt" = current_timestamp,
-         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioProviderError', $2, 'externalSendBlocked', true),
+         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('twilioProviderError', $2::text, 'externalSendBlocked', true),
          "updatedAt" = current_timestamp
        where "id" = $1`,
       [id, reason],
