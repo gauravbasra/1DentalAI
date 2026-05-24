@@ -2130,6 +2130,9 @@ export async function createSoftphoneOutboundDial(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const targetNumber = normalizePhoneNumber(input.targetNumber);
+  if (!targetNumber) {
+    throw new Error("Target phone number is required before creating a softphone call.");
+  }
   const operatorNumber = input.operatorNumber ? normalizePhoneNumber(input.operatorNumber) : null;
   const fromNumber = input.fromNumber ? normalizePhoneNumber(input.fromNumber) : await getActiveVoiceFromNumber(tenantId, input.fromNumberId);
   const mode = input.mode ?? "OPERATOR_BRIDGE";
