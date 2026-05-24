@@ -93,6 +93,8 @@ type SchedulingAskContext = {
   assistantBody: string;
 };
 
+let confirmationTablesReady: Promise<void> | null = null;
+
 export type WebchatTeamMember = {
   id: string;
   displayName: string;
@@ -1748,6 +1750,7 @@ async function createAndSendRescheduleOtp(input: {
   appointmentId?: string;
   consentAccepted: boolean;
 }) {
+  await ensureWebchatConfirmationTables();
   const phoneDigits = digits(input.phone);
   if (!phoneDigits) return { deliveryStatus: "BLOCKED", reason: "Mobile number is required for reschedule verification." };
   const code = String(randomInt(100000, 1000000));
@@ -1805,6 +1808,7 @@ async function createAndSendRescheduleOtp(input: {
 
 async function hasVerifiedRescheduleOtp(tenantId: string, conversationId: string, phoneDigits: string) {
   if (!phoneDigits) return false;
+  await ensureWebchatConfirmationTables();
   const result = await query<{ id: string }>(
     `select "id"
      from "PatientCommunicationOtp"
@@ -1823,6 +1827,7 @@ async function hasVerifiedRescheduleOtp(tenantId: string, conversationId: string
 
 async function verifyRescheduleOtp(tenantId: string, conversationId: string, phoneDigits: string, code: string) {
   if (!phoneDigits) return { verified: false, reason: "MOBILE_REQUIRED", message: "Please share the mobile number on the appointment first, then I can verify the code." };
+  await ensureWebchatConfirmationTables();
   const result = await query<{ id: string; otpHash: string; attemptCount: number; maxAttempts: number; expiresAt: string }>(
     `select "id", "otpHash", "attemptCount", "maxAttempts", "expiresAt"::text as "expiresAt"
      from "PatientCommunicationOtp"
@@ -2048,6 +2053,7 @@ async function stageAndSendAppointmentEmailConfirmation(input: {
   confirmationType: "APPOINTMENT_CONFIRMATION" | "RESCHEDULE_CONFIRMATION";
 }) {
   if (!input.email) return { emailDeliveryStatus: "NOT_ATTEMPTED", reason: "No email address provided." };
+  await ensureWebchatConfirmationTables();
   const subject = input.confirmationType === "RESCHEDULE_CONFIRMATION" ? "Your dental appointment was rescheduled" : "Your dental appointment is confirmed";
   const text = `Your ${input.serviceLabel.toLowerCase()} is confirmed for ${formatSlot(input.slot)}. Reply to the office if you need help changing it.`;
   const html = `<p>Your ${escapeHtml(input.serviceLabel.toLowerCase())} is confirmed for <strong>${escapeHtml(formatSlot(input.slot))}</strong>.</p><p>Reply to the office if you need help changing it.</p>`;
@@ -2166,6 +2172,67 @@ async function sendProviderEmail(
     return { providerMessageId: String(data?.MessageID || ""), providerStatus: String(data?.ErrorCode === 0 ? "accepted" : data?.ErrorCode || "accepted"), raw: data };
   }
   throw new Error("Unsupported email provider.");
+}
+
+async function ensureWebchatConfirmationTables() {
+  confirmationTablesReady ??= query(`
+    create table if not exists "EmailOutboundMessage" (
+      "id" text primary key,
+      "tenantId" text not null,
+      "conversationId" text,
+      "patientId" text,
+      "appointmentId" text,
+      "recipientEmail" text not null,
+      "messageType" text not null,
+      "subject" text not null,
+      "bodyText" text not null,
+      "bodyHtml" text,
+      "deliveryStatus" text not null default 'NOT_SENT',
+      "connectorStatus" text not null default 'CONNECTOR_REQUIRED',
+      "provider" text,
+      "providerMessageId" text,
+      "providerStatus" text,
+      "providerError" text,
+      "blockedReason" text,
+      "readiness" jsonb,
+      "lastAttemptAt" timestamp,
+      "sentAt" timestamp,
+      "createdAt" timestamp not null default current_timestamp,
+      "updatedAt" timestamp not null default current_timestamp
+    );
+    create index if not exists "EmailOutboundMessage_tenant_status_idx"
+      on "EmailOutboundMessage" ("tenantId", "deliveryStatus", "createdAt");
+    create index if not exists "EmailOutboundMessage_appointment_idx"
+      on "EmailOutboundMessage" ("appointmentId", "messageType");
+    create index if not exists "EmailOutboundMessage_provider_idx"
+      on "EmailOutboundMessage" ("provider", "providerMessageId");
+
+    create table if not exists "PatientCommunicationOtp" (
+      "id" text primary key,
+      "tenantId" text not null,
+      "conversationId" text,
+      "patientId" text,
+      "appointmentId" text,
+      "channel" text not null default 'SMS',
+      "destinationHash" text not null,
+      "purpose" text not null,
+      "otpHash" text not null,
+      "status" text not null default 'PENDING',
+      "attemptCount" integer not null default 0,
+      "maxAttempts" integer not null default 5,
+      "expiresAt" timestamp not null,
+      "verifiedAt" timestamp,
+      "lastSentMessageId" text,
+      "metadata" jsonb,
+      "createdAt" timestamp not null default current_timestamp,
+      "updatedAt" timestamp not null default current_timestamp
+    );
+    create index if not exists "PatientCommunicationOtp_lookup_idx"
+      on "PatientCommunicationOtp" ("tenantId", "conversationId", "purpose", "status", "expiresAt");
+    create index if not exists "PatientCommunicationOtp_destination_idx"
+      on "PatientCommunicationOtp" ("tenantId", "destinationHash", "purpose", "status");
+  `, []).then(() => undefined);
+  return confirmationTablesReady;
 }
 
 function escapeHtml(value: string) {

@@ -94,6 +94,8 @@ const requiredTables = [
   "PhoneActiveCall",
   "PhoneCallControlAction",
   "PhoneVoicemail",
+  "EmailOutboundMessage",
+  "PatientCommunicationOtp",
   "PatientEngagementChannelSetting",
   "PatientEngagementKnowledgeSource",
   "PatientWebChatConversation",
