@@ -205,6 +205,16 @@ function normalizeOpenDentalAppointment(item) {
   };
 }
 
+function normalizeCoverageSubscriber(coverage, patientId, sourceName) {
+  const memberNumber = text(coverage.member_id || coverage.subscriber_id || coverage.policy_number, "");
+  const subscriberId = text(coverage.subscriber_name || memberNumber, "");
+  if (subscriberId) {
+    return { subscriberId, memberNumber: memberNumber || null, requiresReview: false };
+  }
+  const fallback = `MISSING-${hashId(`sub_${sourceName.toLowerCase()}`, `${patientId}:${coverage.id || coverage.payer_name || "coverage"}`).slice(-12).toUpperCase()}`;
+  return { subscriberId: fallback, memberNumber: null, requiresReview: true };
+}
+
 async function upsertPatient(row, sourceName) {
   const patientId = hashId(`pat_${sourceName.toLowerCase()}`, row.sourceId);
   const familyId = hashId(`fam_${sourceName.toLowerCase()}`, row.sourceId);
@@ -278,6 +288,12 @@ async function upsertCoverage(item, sourceName, patientMap) {
   const coverage = item.coverage;
   if (!patientId || !coverage) return false;
   const payerName = text(coverage.payer_name, "Unknown payer");
+  const subscriber = normalizeCoverageSubscriber(coverage, patientId, sourceName);
+  const eligibilityStatus = coverage.active === false ? "INACTIVE" : subscriber.requiresReview ? "NEEDS_REVIEW" : "ACTIVE";
+  const verificationNote = [
+    `Imported from ${sourceName} coverage ${coverage.id || payerName}.`,
+    subscriber.requiresReview ? "Source coverage did not include subscriber/member ID; staff review required before claims or benefit reliance." : "",
+  ].filter(Boolean).join(" ");
   const planId = hashId(`plan_${sourceName.toLowerCase()}`, `${payerName}:${coverage.plan_name || ""}:${coverage.group_number || ""}`);
   const insuranceId = hashId(`pins_${sourceName.toLowerCase()}`, `${patientId}:${coverage.id || payerName}`);
   await client.query(
@@ -287,10 +303,18 @@ async function upsertCoverage(item, sourceName, patientMap) {
     [planId, tenantId, payerName, text(coverage.payer_id, payerName), text(coverage.plan_name, "NexHealth plan"), coverage.group_number || null],
   );
   await client.query(
-    `insert into "PmsPatientInsurance" ("id", "patientId", "planId", "subscriberId", "memberNumber", "relationship", "priority", "eligibilityStatus", "lastVerifiedAt", "verificationNote", "createdAt", "updatedAt")
-     values ($1, $2, $3, $4, $5, 'SELF', 1, $6, current_timestamp, $7, current_timestamp, current_timestamp)
-     on conflict ("id") do update set "planId" = excluded."planId", "eligibilityStatus" = excluded."eligibilityStatus", "lastVerifiedAt" = current_timestamp, "verificationNote" = excluded."verificationNote", "updatedAt" = current_timestamp`,
-    [insuranceId, patientId, planId, coverage.subscriber_name || coverage.member_id || null, coverage.member_id || null, coverage.active === false ? "INACTIVE" : "ACTIVE", `Imported from ${sourceName} coverage ${coverage.id || payerName}.`],
+    `insert into "PmsPatientInsurance" ("id", "tenantId", "patientId", "planId", "subscriberId", "memberNumber", "relationship", "priority", "eligibilityStatus", "lastVerifiedAt", "verificationNote", "createdAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'SELF', 1, $7, current_timestamp, $8, current_timestamp, current_timestamp)
+     on conflict ("id") do update set
+       "tenantId" = excluded."tenantId",
+       "planId" = excluded."planId",
+       "subscriberId" = excluded."subscriberId",
+       "memberNumber" = excluded."memberNumber",
+       "eligibilityStatus" = excluded."eligibilityStatus",
+       "lastVerifiedAt" = current_timestamp,
+       "verificationNote" = excluded."verificationNote",
+       "updatedAt" = current_timestamp`,
+    [insuranceId, tenantId, patientId, planId, subscriber.subscriberId, subscriber.memberNumber, eligibilityStatus, verificationNote],
   );
   return true;
 }
