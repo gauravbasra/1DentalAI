@@ -15,6 +15,7 @@ import {
   updatePhoneConversationStatus,
   updatePhoneOutboundMessageApproval,
 } from "@/lib/operating-system-repository";
+import { updateVoiceAiReceptionPolicySettings } from "@/lib/voice-ai-repository";
 import { DraggableCallPop } from "./draggable-call-pop";
 import { ThemeModeControl } from "./theme-mode-control";
 
@@ -129,6 +130,31 @@ async function provisionPhoneExtensionAction(formData: FormData) {
     extensionType: String(formData.get("extensionType") ?? "USER"),
     voicemailEnabled: String(formData.get("voicemailEnabled") ?? "true") === "true",
     directDialNumberId: String(formData.get("directDialNumberId") ?? "") || undefined,
+  });
+  revalidatePath("/patient-engagement");
+}
+
+async function updateVoiceAiSettingsAction(formData: FormData) {
+  "use server";
+  await updateVoiceAiReceptionPolicySettings({
+    policyId: String(formData.get("policyId") ?? "") || undefined,
+    actorRole: "practice_manager",
+    ringThreshold: Number(formData.get("ringThreshold") ?? 4),
+    mode: String(formData.get("mode") ?? "ASSIST_WHEN_BUSY"),
+    bookingPolicy: String(formData.get("bookingPolicy") ?? "DIRECT_BOOKING_WITH_SCHEDULING_GATES"),
+    billingPolicy: String(formData.get("billingPolicy") ?? "EXPLAIN_BALANCE_ROUTE_SENSITIVE_TO_BILLING"),
+    pricingPolicy: String(formData.get("pricingPolicy") ?? "NO_PUBLIC_PRICING_HUMAN_ONLY"),
+    voiceSettings: {
+      textModel: String(formData.get("textModel") ?? "gpt-4.1-mini"),
+      realtimeModel: String(formData.get("realtimeModel") ?? "gpt-realtime-mini"),
+      transcriptionModel: String(formData.get("transcriptionModel") ?? "gpt-4o-transcribe"),
+      voice: String(formData.get("voice") ?? "Polly.Joanna-Neural"),
+      speed: Number(formData.get("speed") ?? 1),
+      temperature: Number(formData.get("temperature") ?? 0.35),
+      maxOutputTokens: Number(formData.get("maxOutputTokens") ?? 120),
+      systemPrompt: String(formData.get("systemPrompt") ?? ""),
+      voicePrompt: String(formData.get("voicePrompt") ?? ""),
+    },
   });
   revalidatePath("/patient-engagement");
 }
@@ -1206,7 +1232,90 @@ function SettingsPanel({ providers, numbers, extensions, devices, channelSetting
         {aiReceptionPolicies.map((policy) => <RecordLine key={String(policy.id)} title={`${String(policy.name)} · ring ${String(policy.ringThreshold)}`} meta={`${clean(policy.status)} · ${clean(policy.mode)} · ${clean(policy.pricingPolicy)}`} />)}
         {knowledgeSources.map((source) => <RecordLine key={String(source.id)} title={`${String(source.title)} · ${String(source.sourceModule)}`} meta={`${clean(source.status)} · ${String(source.nextAction ?? "")}`} />)}
       </ActionCard>
+      <VoiceAiSettingsForm policy={aiReceptionPolicies[0]} />
     </div>
+  );
+}
+
+function VoiceAiSettingsForm({ policy }: { policy?: Record<string, unknown> }) {
+  const settings = objectValue(policy?.voiceSettings);
+  return (
+    <form action={updateVoiceAiSettingsAction} className="rounded-2xl border border-neutral-200 bg-white p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h3 className="text-3xl font-semibold">Voice AI receptionist</h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-500">
+            These settings are used by live Twilio AI calls. The agent keeps call memory, checks PMS appointment conflicts, and uses the approved dental knowledge base before answering dental process questions.
+          </p>
+        </div>
+        <button className="rounded-xl bg-neutral-950 px-5 py-3 text-sm font-semibold text-white">Save voice AI</button>
+      </div>
+      <input type="hidden" name="policyId" value={String(policy?.id ?? "")} />
+      <div className="mt-6 grid gap-4 lg:grid-cols-4">
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Ring threshold
+          <input name="ringThreshold" type="number" min={2} max={8} defaultValue={String(policy?.ringThreshold ?? 4)} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950" />
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Mode
+          <select name="mode" defaultValue={String(policy?.mode ?? "ASSIST_WHEN_BUSY")} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950">
+            <option value="ASSIST_WHEN_BUSY">Assist when busy</option>
+            <option value="ALWAYS_ANSWER">Always answer</option>
+            <option value="AFTER_HOURS_ONLY">After hours only</option>
+          </select>
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Text model
+          <input name="textModel" defaultValue={String(settings.textModel ?? "gpt-4.1-mini")} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950" />
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Transcription
+          <input name="transcriptionModel" defaultValue={String(settings.transcriptionModel ?? "gpt-4o-transcribe")} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950" />
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Realtime model
+          <input name="realtimeModel" defaultValue={String(settings.realtimeModel ?? "gpt-realtime-mini")} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950" />
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Voice
+          <input name="voice" defaultValue={String(settings.voice ?? "Polly.Joanna-Neural")} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950" />
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Speed
+          <input name="speed" type="number" step="0.05" min="0.6" max="1.4" defaultValue={String(settings.speed ?? 1)} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950" />
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Temperature
+          <input name="temperature" type="number" step="0.05" min="0" max="1.2" defaultValue={String(settings.temperature ?? 0.35)} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950" />
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Max tokens
+          <input name="maxOutputTokens" type="number" min="60" max="600" defaultValue={String(settings.maxOutputTokens ?? 120)} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950" />
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400 lg:col-span-3">
+          Booking policy
+          <input name="bookingPolicy" defaultValue={String(policy?.bookingPolicy ?? "DIRECT_BOOKING_WITH_SCHEDULING_GATES")} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950" />
+        </label>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Pricing policy
+          <input name="pricingPolicy" defaultValue={String(policy?.pricingPolicy ?? "NO_PUBLIC_PRICING_HUMAN_ONLY")} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950" />
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Billing policy
+          <input name="billingPolicy" defaultValue={String(policy?.billingPolicy ?? "EXPLAIN_BALANCE_ROUTE_SENSITIVE_TO_BILLING")} className="h-11 rounded-xl border border-neutral-200 px-3 text-base font-semibold normal-case tracking-normal text-neutral-950" />
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          System prompt
+          <textarea name="systemPrompt" defaultValue={String(settings.systemPrompt ?? "You are the dental practice's phone receptionist. Sound calm, warm, and human. Keep memory of the caller's name, requested service, insurance answer, and appointment time across turns.")} className="min-h-40 rounded-xl border border-neutral-200 p-3 text-sm font-medium normal-case leading-6 tracking-normal text-neutral-950" />
+        </label>
+        <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+          Voice appointment prompt
+          <textarea name="voicePrompt" defaultValue={String(settings.voicePrompt ?? "For appointment calls, collect one missing detail at a time, check the PMS schedule, book the appointment when possible, and send confirmation. Never ask again for a detail already collected.")} className="min-h-40 rounded-xl border border-neutral-200 p-3 text-sm font-medium normal-case leading-6 tracking-normal text-neutral-950" />
+        </label>
+      </div>
+    </form>
   );
 }
 
