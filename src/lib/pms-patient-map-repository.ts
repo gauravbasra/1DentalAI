@@ -613,11 +613,10 @@ async function geocodeMissingFamilyAccounts(tenantId: string) {
       left join "PmsPatientGeoCoordinate" geo on geo."tenantId" = fa."tenantId" and geo."familyAccountId" = fa."id"
       where fa."tenantId" = $1
         and exists (select 1 from "PmsPatient" p where p."tenantId" = fa."tenantId" and p."familyAccountId" = fa."id" and p."status" = 'ACTIVE')
-        and nullif(trim(concat_ws(' ', fa."addressLine1", fa."city", fa."state", fa."postalCode")), '') is not null
       order by geo."geocodedAt" asc nulls first, fa."updatedAt" desc
       limit $2
     `,
-    [tenantId, Number(process.env.PMS_PATIENT_MAP_GEOCODE_LIMIT || 25)],
+    [tenantId, Number(process.env.PMS_PATIENT_MAP_GEOCODE_LIMIT || 250)],
   );
 
   for (const family of candidates.rows) {
@@ -625,7 +624,8 @@ async function geocodeMissingFamilyAccounts(tenantId: string) {
     const addressHash = hashAddress(address);
     if (family.addressHash === addressHash && family.status === "GEOCODED") continue;
     response.attempted += 1;
-    const geocode = apiKey ? await geocodeAddress(address, apiKey) : { ok: false, failureReason: "Google Maps API key is not configured." };
+    const hasSpecificAddress = Boolean([family.addressLine1, family.city, family.state, family.postalCode].some((value) => value?.trim()));
+    const geocode = apiKey && hasSpecificAddress ? await geocodeAddress(address, apiKey) : { ok: false, failureReason: hasSpecificAddress ? "Google Maps API key is not configured." : "Family account has no usable household address." };
     const resolved = geocode.ok ? geocode : fallbackGeocodeAddress(family, address, geocode.failureReason);
     if (resolved.ok) response.updated += 1;
     else response.failed += 1;
@@ -794,16 +794,16 @@ const CITY_CENTROIDS: Record<string, { lat: number; lng: number }> = {
 function fallbackGeocodeAddress(row: Pick<FamilyAddressRow, "city" | "state" | "postalCode">, address: string, failureReason?: string): GeocodeResult {
   const zip = row.postalCode?.match(/\d{5}/)?.[0];
   const cityKey = `${row.city ?? ""},${row.state ?? ""}`.toLowerCase().replace(/\s+/g, " ").trim();
-  const base = (zip ? ZIP_CENTROIDS[zip] : null) ?? CITY_CENTROIDS[cityKey];
-  if (!base) return { ok: false, failureReason: failureReason ? `Google geocode failed and no ZIP/city fallback exists: ${failureReason}` : "No ZIP/city fallback exists." };
-  const offset = deterministicOffset(address, zip ? 0.012 : 0.03);
+  const base = (zip ? ZIP_CENTROIDS[zip] : null) ?? CITY_CENTROIDS[cityKey] ?? CITY_CENTROIDS["denver,co"];
+  const precision = zip ? "ZIP_CENTROID_FALLBACK" : CITY_CENTROIDS[cityKey] ? "CITY_CENTROID_FALLBACK" : "PRACTICE_AREA_FALLBACK";
+  const offset = deterministicOffset(address, zip ? 0.012 : precision === "CITY_CENTROID_FALLBACK" ? 0.03 : 0.055);
   return {
     ok: true,
-    formattedAddress: [row.city, row.state, zip].filter(Boolean).join(", "),
+    formattedAddress: [row.city, row.state, zip].filter(Boolean).join(", ") || "Denver, CO practice-area fallback",
     latitude: Number((base.lat + offset.lat).toFixed(6)),
     longitude: Number((base.lng + offset.lng).toFixed(6)),
-    precision: zip ? "ZIP_CENTROID_FALLBACK" : "CITY_CENTROID_FALLBACK",
-    failureReason: failureReason ? `Google geocode unavailable; plotted by ${zip ? "ZIP" : "city"} centroid. ${failureReason}` : undefined,
+    precision,
+    failureReason: failureReason ? `Google geocode unavailable; plotted by ${precision.toLowerCase().replaceAll("_", " ")}. ${failureReason}` : undefined,
   };
 }
 
