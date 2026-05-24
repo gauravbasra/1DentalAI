@@ -2033,10 +2033,37 @@ model PmsInventoryVendor {
   @@unique([tenantId, vendorName])
 }
 
+model PmsInventoryCommonItem {
+  id                 String   @id
+  skuSeed            String
+  itemName           String
+  category           String
+  clinicalUse        String
+  itemType           String   @default("CONSUMABLE")
+  unitOfMeasure      String   @default("each")
+  cdtCodes           String[]
+  defaultReorderPoint Decimal @default(0)
+  defaultParLevel    Decimal  @default(0)
+  benchmarkCostCents Int      @default(0)
+  estimatedUsesPerUnit Int    @default(1)
+  costBehavior       String   @default("VARIABLE")
+  wasteRisk          String   @default("MEDIUM")
+  requiresLotTracking Boolean @default(false)
+  requiresExpiry     Boolean  @default(false)
+  controlledSubstance Boolean @default(false)
+  status             String   @default("ACTIVE")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([category, status])
+  @@unique([skuSeed])
+}
+
 model PmsInventoryCatalogItem {
   id                  String   @id @default(cuid())
   tenantId            String
   vendorId            String?
+  commonItemId        String?
   sku                 String
   barcodeValue        String?
   itemName            String
@@ -2048,6 +2075,9 @@ model PmsInventoryCatalogItem {
   parLevel            Decimal  @default(0)
   lastUnitCostCents   Int      @default(0)
   benchmarkCostCents  Int?
+  estimatedUsesPerUnit Int     @default(1)
+  costBehavior        String   @default("VARIABLE")
+  revenueAttributionMode String @default("CDT_LINKED")
   taxable             Boolean  @default(false)
   requiresLotTracking Boolean  @default(false)
   requiresExpiry      Boolean  @default(false)
@@ -2058,6 +2088,7 @@ model PmsInventoryCatalogItem {
 
   @@index([tenantId, category])
   @@index([tenantId, status])
+  @@index([tenantId, commonItemId])
   @@unique([tenantId, barcodeValue])
   @@unique([tenantId, sku])
 }

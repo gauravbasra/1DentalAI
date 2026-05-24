@@ -6,6 +6,7 @@ import {
   awardInventoryBidToPurchaseOrder,
   createInventoryAsset,
   createInventoryItem,
+  createInventoryItemFromCommonItem,
   createInventoryRfp,
   createInventoryVendor,
   getInventoryWorkbench,
@@ -82,6 +83,17 @@ export async function POST(request: Request) {
         requiresLotTracking: Boolean(body.requiresLotTracking),
         requiresExpiry: Boolean(body.requiresExpiry),
         controlledSubstance: Boolean(body.controlledSubstance),
+      }),
+    });
+  }
+
+  if (action === "addCommonItem") {
+    return NextResponse.json({
+      data: await createInventoryItemFromCommonItem({
+        tenantId,
+        actorRole,
+        commonItemId: String(body.commonItemId ?? ""),
+        vendorId: body.vendorId ? String(body.vendorId) : undefined,
       }),
     });
   }

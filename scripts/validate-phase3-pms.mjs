@@ -48,6 +48,7 @@ const requiredFiles = [
   "prisma/migrations/202605210001_pms_core/migration.sql",
   "prisma/migrations/202605232130_pms_clinical_process_workflows/migration.sql",
   "prisma/migrations/202605240815_pms_inventory_marketplace/migration.sql",
+  "prisma/migrations/202605240925_pms_inventory_common_items_analytics/migration.sql",
 ];
 
 const requiredSchemaModels = [
@@ -97,6 +98,7 @@ const requiredSchemaModels = [
   "PmsReferral",
   "PmsLabCase",
   "PmsInventoryVendor",
+  "PmsInventoryCommonItem",
   "PmsInventoryCatalogItem",
   "PmsInventoryLot",
   "PmsInventoryMovement",
@@ -218,7 +220,7 @@ for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addT
   }
 }
 
-for (const token of ["PmsInventoryVendor", "PmsInventoryCatalogItem", "PmsInventoryLot", "PmsInventoryMovement", "PmsInventoryAsset", "PmsInventoryRfp", "PmsInventoryVendorBid", "PmsInventoryCycleCount", "getInventoryWorkbench", "receiveInventoryStock", "consumeInventoryStock", "createInventoryRfp", "resolveInventoryReportingWindow", "Filter inventory", "Apply filters", "periodUsageCents", "reportBuckets", "Practice inventory and vendor marketplace", "getInventoryVendorPortal", "submitInventoryVendorBid", "awardInventoryBidToPurchaseOrder", "receiveInventoryPurchaseOrder", "recordInventoryCycleCount", "lookupInventoryBarcode", "Print labels", "Cycle counts", "Purchase orders", "Open vendor portal"]) {
+for (const token of ["PmsInventoryVendor", "PmsInventoryCommonItem", "PmsInventoryCatalogItem", "PmsInventoryLot", "PmsInventoryMovement", "PmsInventoryAsset", "PmsInventoryRfp", "PmsInventoryVendorBid", "PmsInventoryCycleCount", "getInventoryWorkbench", "receiveInventoryStock", "consumeInventoryStock", "createInventoryRfp", "createInventoryItemFromCommonItem", "resolveInventoryReportingWindow", "Filter inventory", "Apply filters", "periodUsageCents", "usageAnalytics", "categoryAnalytics", "reorderRecommendations", "assetRoiAnalytics", "Common dental item library", "Usage analytics", "ROI", "reportBuckets", "Practice inventory and vendor marketplace", "getInventoryVendorPortal", "submitInventoryVendorBid", "awardInventoryBidToPurchaseOrder", "receiveInventoryPurchaseOrder", "recordInventoryCycleCount", "lookupInventoryBarcode", "Print labels", "Cycle counts", "Purchase orders", "Open vendor portal"]) {
   const haystack = `${schema}\n${inventoryPage}\n${vendorInventoryPortalPage}\n${fs.readFileSync("src/lib/pms-inventory-repository.ts", "utf8")}\n${fs.readFileSync("src/app/api/pms/inventory/route.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS inventory marketplace token missing: ${token}`);

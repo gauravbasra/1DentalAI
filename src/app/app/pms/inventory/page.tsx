@@ -10,6 +10,7 @@ import {
   awardInventoryBidToPurchaseOrder,
   createInventoryAsset,
   createInventoryItem,
+  createInventoryItemFromCommonItem,
   createInventoryRfp,
   createInventoryVendor,
   getInventoryWorkbench,
@@ -68,6 +69,18 @@ async function createItemAction(formData: FormData) {
     requiresLotTracking: formData.get("requiresLotTracking") === "on",
     requiresExpiry: formData.get("requiresExpiry") === "on",
     controlledSubstance: formData.get("controlledSubstance") === "on",
+  });
+  revalidatePath("/app/pms/inventory");
+}
+
+async function addCommonItemAction(formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await createInventoryItemFromCommonItem({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+    commonItemId: String(formData.get("commonItemId") ?? ""),
+    vendorId: String(formData.get("vendorId") ?? "") || undefined,
   });
   revalidatePath("/app/pms/inventory");
 }
@@ -209,6 +222,11 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
   const purchaseOrders = workbench.purchaseOrders as AnyRow[];
   const cycleCounts = workbench.cycleCounts as AnyRow[];
   const labelQueue = workbench.labelQueue as AnyRow[];
+  const commonItems = workbench.commonItems as AnyRow[];
+  const usageAnalytics = workbench.usageAnalytics as AnyRow[];
+  const categoryAnalytics = workbench.categoryAnalytics as AnyRow[];
+  const reorderRecommendations = workbench.reorderRecommendations as AnyRow[];
+  const assetRoiAnalytics = workbench.assetRoiAnalytics as AnyRow[];
   const roleParam = `role=${role.key}`;
   const modal = params.modal ?? "";
   const search = (params.q ?? "").trim().toLowerCase();
@@ -248,6 +266,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
             <ActionLink href={hrefFor("scan")}>Scan now</ActionLink>
             <ActionLink href={hrefFor("labels")}>Print labels</ActionLink>
             <ActionLink href={hrefFor("filters")}>Filters</ActionLink>
+            <ActionLink href={hrefFor("common-library")}>Common items</ActionLink>
             <ActionLink href={hrefFor("receive")}>Receive</ActionLink>
             <ActionLink href={hrefFor("consume")}>Use stock</ActionLink>
             <ActionLink href={hrefFor("cycle")}>Count</ActionLink>
@@ -272,6 +291,65 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         <Metric label="Stock value" value={<Money cents={Number(summary.inventoryValueCents)} />} />
         <Metric label="Period used" value={<Money cents={Number(summary.periodUsageCents)} />} />
         <Metric label="Received" value={<Money cents={Number(summary.periodReceivedCents)} />} />
+        <Metric label="Use events" value={summary.periodUseEvents} />
+        <Metric label="CDT linked" value={summary.periodProcedureLinkedUse} />
+        <Metric label="ROI" value={<Money cents={Number(summary.periodRoiCents)} />} tone={Number(summary.periodRoiCents) < 0 ? "red" : "neutral"} />
+      </section>
+
+      <section className="mt-5 grid gap-5 2xl:grid-cols-[1.2fr_0.8fr]">
+        <PmsCard title="Usage analytics" eyebrow="Product use, CDT mapping, and ROI">
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="border-b border-neutral-200 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">
+                <tr>
+                  <th className="py-2 pr-3">Product</th>
+                  <th className="px-3 py-2">Uses</th>
+                  <th className="px-3 py-2">Cost/use</th>
+                  <th className="px-3 py-2">Spend</th>
+                  <th className="px-3 py-2">Revenue</th>
+                  <th className="py-2 pl-3">ROI</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {usageAnalytics.slice(0, 12).map((row) => (
+                  <tr key={String(row.id)}>
+                    <td className="py-3 pr-3">
+                      <p className="font-semibold text-neutral-950">{row.itemName}</p>
+                      <p className="mt-1 text-xs text-neutral-500">{row.category} · CDT {formatCodeList(row.mappedCdtCodes)}</p>
+                    </td>
+                    <td className="px-3 py-3 text-neutral-700">{String(row.useEvents)} events · {String(row.quantityUsed)} {row.unitOfMeasure}</td>
+                    <td className="px-3 py-3 text-neutral-700"><Money cents={Number(row.avgCostPerUseCents ?? 0)} /></td>
+                    <td className="px-3 py-3 text-neutral-700"><Money cents={Number(row.usageCostCents ?? 0)} /></td>
+                    <td className="px-3 py-3 text-neutral-700"><Money cents={Number(row.estimatedRevenueCents ?? 0)} /></td>
+                    <td className="py-3 pl-3 font-semibold text-neutral-950"><Money cents={Number(row.roiCents ?? 0)} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!usageAnalytics.length ? <EmptyPmsState title="No inventory usage in this window" body="Use stock from the scan or Use stock action to populate product utilization and ROI." /> : null}
+          </div>
+        </PmsCard>
+
+        <div className="grid gap-5">
+          <PmsCard title="Reorder intelligence" eyebrow="Velocity and days on hand">
+            <div className="grid gap-2">
+              {reorderRecommendations.slice(0, 6).map((row) => (
+                <div key={String(row.id)} className="rounded-lg border border-neutral-200 bg-white p-3 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-neutral-950">{row.itemName}</p>
+                      <p className="mt-1 text-neutral-600">On hand {row.quantityOnHand} · daily use {row.avgDailyUse} · days {row.daysOnHand ?? "n/a"}</p>
+                    </div>
+                    <p className="text-right text-xs font-semibold text-neutral-700">Order {row.suggestedOrderQuantity}<br /><Money cents={Number(row.estimatedOrderCents ?? 0)} /></p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </PmsCard>
+          <PmsCard title="Category spend" eyebrow="Daily, weekly, monthly, custom filters">
+            <CompactRows rows={categoryAnalytics.slice(0, 6)} primary="category" secondary="usageCostCents" status="useEvents" />
+          </PmsCard>
+        </div>
       </section>
 
       <section className="mt-5 grid gap-5 2xl:grid-cols-[1.25fr_0.85fr]">
@@ -432,6 +510,46 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         </PmsCard>
       </section>
 
+      <section className="mt-5 grid gap-5 xl:grid-cols-2">
+        <PmsCard title="Asset ROI and utilization" eyebrow="Equipment investment vs chair-side usage">
+          <div className="grid gap-2">
+            {assetRoiAnalytics.slice(0, 6).map((asset) => (
+              <div key={String(asset.id)} className="rounded-lg bg-neutral-50 p-3 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-neutral-950">{asset.assetName}</p>
+                    <p className="mt-1 text-xs text-neutral-500">{asset.assetTag} · {asset.locationName ?? "No location"} · {asset.locationUseEvents} uses nearby</p>
+                  </div>
+                  <div className="text-right text-xs font-semibold text-neutral-700">
+                    <Money cents={Number(asset.locationUsageCents ?? 0)} />
+                    <p className="mt-1">{asset.usageToAssetCostPct ?? "0"}% of asset cost</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+        <PmsCard title="Common dental item library" eyebrow={`${commonItems.length} mapped templates`}>
+          <div className="grid gap-2">
+            {commonItems.slice(0, 6).map((item) => (
+              <div key={String(item.id)} className="rounded-lg border border-neutral-200 bg-white p-3 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-neutral-950">{item.itemName}</p>
+                    <p className="mt-1 text-xs text-neutral-500">{item.category} · CDT {formatCodeList(item.cdtCodes)}</p>
+                  </div>
+                  <form action={addCommonItemAction}>
+                    <input type="hidden" name="commonItemId" value={String(item.id)} />
+                    <button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 hover:border-neutral-950">Add</button>
+                  </form>
+                </div>
+              </div>
+            ))}
+            <ActionLink href={hrefFor("common-library")}>Open full library</ActionLink>
+          </div>
+        </PmsCard>
+      </section>
+
       {modal ? (
         <Modal title={modalTitle(modal)} closeHref={closeHref}>
           {modal === "filters" ? (
@@ -478,6 +596,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
               </div>
             </div>
           ) : null}
+          {modal === "common-library" ? <CommonLibraryForm action={addCommonItemAction} commonItems={commonItems} vendors={vendors} /> : null}
           {modal === "receive" ? <ReceiveForm action={receiveStockAction} items={items} vendors={vendors} locations={locations} selectedItem={selectedItem} /> : null}
           {modal === "consume" ? <ConsumeForm action={consumeStockAction} items={items} lots={lots} selectedItem={selectedItem} /> : null}
           {modal === "cycle" ? <CycleForm action={recordCycleCountAction} lots={lots} /> : null}
@@ -533,6 +652,7 @@ function modalTitle(modal: string) {
     filters: "Filter inventory and reporting window",
     scan: "Scan inventory barcode",
     labels: "Print inventory barcode labels",
+    "common-library": "Common dental item library",
     receive: "Receive stock",
     consume: "Record clinical use",
     cycle: "Post physical cycle count",
@@ -575,6 +695,35 @@ function BarcodeLabel({ label }: { label: AnyRow }) {
 }
 
 type InventoryAction = (formData: FormData) => Promise<void>;
+
+function CommonLibraryForm({ action, commonItems, vendors }: { action: InventoryAction; commonItems: AnyRow[]; vendors: AnyRow[] }) {
+  const categories = Array.from(new Set(commonItems.map((item) => String(item.category ?? "SUPPLIES")))).sort();
+  return (
+    <div className="grid gap-4">
+      {categories.map((category) => (
+        <div key={category} className="grid gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cyan-700">{category}</p>
+          {commonItems.filter((item) => String(item.category) === category).map((item) => (
+            <form key={String(item.id)} action={action} className="rounded-lg border border-neutral-200 bg-white p-3 text-sm">
+              <input type="hidden" name="commonItemId" value={String(item.id)} />
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="font-semibold text-neutral-950">{item.itemName}</p>
+                  <p className="mt-1 text-neutral-600">{item.clinicalUse}</p>
+                  <p className="mt-1 text-xs text-neutral-500">CDT {formatCodeList(item.cdtCodes)} · benchmark <Money cents={Number(item.benchmarkCostCents ?? 0)} /> · {item.estimatedUsesPerUnit} uses/{item.unitOfMeasure}</p>
+                </div>
+                <div className="grid min-w-48 gap-2">
+                  <Select name="vendorId" label="Preferred vendor" options={vendors.map((vendor) => [String(vendor.id), String(vendor.vendorName)])} optional />
+                  <button className="rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white">Add to catalog</button>
+                </div>
+              </div>
+            </form>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function ReceiveForm({ action, items, vendors, locations, selectedItem }: { action: InventoryAction; items: AnyRow[]; vendors: AnyRow[]; locations: AnyRow[]; selectedItem: AnyRow | null }) {
   return (
@@ -724,6 +873,12 @@ function Mini({ label, value }: { label: string; value: React.ReactNode }) {
       <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p>
     </div>
   );
+}
+
+function formatCodeList(value: unknown) {
+  if (Array.isArray(value)) return value.slice(0, 6).join(", ") || "unmapped";
+  if (typeof value === "string") return value || "unmapped";
+  return "unmapped";
 }
 
 function Input({

@@ -18,6 +18,11 @@ type InventorySummaryRow = {
   periodUsageCents: string;
   periodReceivedCents: string;
   periodMovementCount: string;
+  periodUseEvents: string;
+  periodProcedureLinkedUse: string;
+  periodWasteCents: string;
+  periodEstimatedRevenueCents: string;
+  periodRoiCents: string;
   periodRfpCount: string;
 };
 
@@ -41,7 +46,7 @@ async function addInventoryAudit(tenantId: string, actorRole: string, eventType:
 
 export async function getInventoryWorkbench(tenantId = defaultTenantId, filters: ReportingWindowFilters = {}) {
   const reportingWindow = resolveInventoryReportingWindow(filters);
-  const [summary, items, lots, vendors, assets, movements, rfps, bids, benchmarks, locations, reportBuckets, purchaseOrders, cycleCounts, labelQueue] = await Promise.all([
+  const [summary, items, lots, vendors, assets, movements, rfps, bids, benchmarks, locations, reportBuckets, purchaseOrders, cycleCounts, labelQueue, commonItems, usageAnalytics, categoryAnalytics, reorderRecommendations, assetRoiAnalytics] = await Promise.all([
     query<InventorySummaryRow>(
       `with stock as (
          select i."id", i."parLevel", i."reorderPoint", coalesce(sum(l."quantityOnHand"), 0) as qty,
@@ -67,19 +72,36 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId, filters:
         coalesce((select sum(abs("quantity") * "unitCostCents")::bigint from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" = 'CONSUMED' and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp), 0)::text as "periodUsageCents",
         coalesce((select sum(abs("quantity") * "unitCostCents")::bigint from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" = 'RECEIVED' and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp), 0)::text as "periodReceivedCents",
         (select count(*) from "PmsInventoryMovement" where "tenantId" = $1 and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp)::text as "periodMovementCount",
+        (select count(*) from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" = 'CONSUMED' and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp)::text as "periodUseEvents",
+        (select count(*) from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" = 'CONSUMED' and "procedureCode" is not null and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp)::text as "periodProcedureLinkedUse",
+        coalesce((select sum(abs("quantity") * "unitCostCents")::bigint from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" in ('WASTE', 'EXPIRED', 'ADJUSTMENT_LOSS') and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp), 0)::text as "periodWasteCents",
+        coalesce((select sum(coalesce(pc."defaultFeeCents", pl."feeCents", 0))::bigint
+          from "PmsInventoryMovement" m
+          left join "PmsProcedureCode" pc on pc."tenantId" = m."tenantId" and pc."code" = m."procedureCode"
+          left join "PmsProcedureLog" pl on pl."tenantId" = m."tenantId" and pl."appointmentId" = m."appointmentId" and pl."procedureCodeId" = pc."id"
+          where m."tenantId" = $1 and m."movementType" = 'CONSUMED' and m."procedureCode" is not null and m."createdAt" >= $2::timestamp and m."createdAt" < $3::timestamp), 0)::text as "periodEstimatedRevenueCents",
+        (coalesce((select sum(coalesce(pc."defaultFeeCents", pl."feeCents", 0))::bigint
+          from "PmsInventoryMovement" m
+          left join "PmsProcedureCode" pc on pc."tenantId" = m."tenantId" and pc."code" = m."procedureCode"
+          left join "PmsProcedureLog" pl on pl."tenantId" = m."tenantId" and pl."appointmentId" = m."appointmentId" and pl."procedureCodeId" = pc."id"
+          where m."tenantId" = $1 and m."movementType" = 'CONSUMED' and m."procedureCode" is not null and m."createdAt" >= $2::timestamp and m."createdAt" < $3::timestamp), 0)
+         - coalesce((select sum(abs("quantity") * "unitCostCents")::bigint from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" = 'CONSUMED' and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp), 0))::text as "periodRoiCents",
         (select count(*) from "PmsInventoryRfp" where "tenantId" = $1 and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp)::text as "periodRfpCount"`,
       [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query(
       `select i.*, v."vendorName",
+              c."cdtCodes",
+              c."wasteRisk",
               coalesce(sum(l."quantityOnHand"), 0)::text as "quantityOnHand",
               coalesce(sum(l."quantityOnHand" * l."unitCostCents"), 0)::bigint::text as "stockValueCents",
               min(l."expirationDate")::text as "nextExpirationDate"
        from "PmsInventoryCatalogItem" i
        left join "PmsInventoryVendor" v on v."id" = i."vendorId"
+       left join "PmsInventoryCommonItem" c on c."id" = i."commonItemId"
        left join "PmsInventoryLot" l on l."itemId" = i."id" and l."tenantId" = i."tenantId" and l."status" = 'ACTIVE'
        where i."tenantId" = $1
-       group by i."id", v."vendorName"
+       group by i."id", v."vendorName", c."cdtCodes", c."wasteRisk"
        order by case when coalesce(sum(l."quantityOnHand"), 0) <= i."reorderPoint" then 0 else 1 end, i."category", i."itemName"`,
       [tenantId],
     ),
@@ -202,6 +224,107 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId, filters:
        limit 120`,
       [tenantId],
     ),
+    query(
+      `select *
+       from "PmsInventoryCommonItem"
+       where "status" = 'ACTIVE'
+       order by "category", "itemName"`,
+    ),
+    query(
+      `with consumed as (
+         select m."itemId",
+                count(*)::int as "useEvents",
+                sum(abs(m."quantity"))::numeric as "quantityUsed",
+                sum(abs(m."quantity") * m."unitCostCents")::bigint as "usageCostCents",
+                count(distinct m."patientId") filter (where m."patientId" is not null)::int as "distinctPatients",
+                count(distinct m."appointmentId") filter (where m."appointmentId" is not null)::int as "distinctAppointments",
+                count(*) filter (where m."procedureCode" is not null)::int as "procedureLinkedUse",
+                coalesce(sum(coalesce(pc."defaultFeeCents", pl."feeCents", 0)), 0)::bigint as "estimatedRevenueCents",
+                array_remove(array_agg(distinct m."procedureCode"), null) as "usedProcedureCodes"
+         from "PmsInventoryMovement" m
+         left join "PmsProcedureCode" pc on pc."tenantId" = m."tenantId" and pc."code" = m."procedureCode"
+         left join "PmsProcedureLog" pl on pl."tenantId" = m."tenantId" and pl."appointmentId" = m."appointmentId" and pl."procedureCodeId" = pc."id"
+         where m."tenantId" = $1 and m."movementType" = 'CONSUMED' and m."createdAt" >= $2::timestamp and m."createdAt" < $3::timestamp
+         group by m."itemId"
+       )
+       select i."id", i."itemName", i."sku", i."category", i."unitOfMeasure", i."estimatedUsesPerUnit", i."costBehavior",
+              coalesce(c."cdtCodes", ARRAY[]::text[]) as "mappedCdtCodes",
+              coalesce(cn."useEvents", 0)::int as "useEvents",
+              coalesce(cn."quantityUsed", 0)::text as "quantityUsed",
+              coalesce(cn."usageCostCents", 0)::text as "usageCostCents",
+              coalesce(cn."distinctPatients", 0)::int as "distinctPatients",
+              coalesce(cn."distinctAppointments", 0)::int as "distinctAppointments",
+              coalesce(cn."procedureLinkedUse", 0)::int as "procedureLinkedUse",
+              coalesce(cn."estimatedRevenueCents", 0)::text as "estimatedRevenueCents",
+              (coalesce(cn."estimatedRevenueCents", 0) - coalesce(cn."usageCostCents", 0))::text as "roiCents",
+              case when coalesce(cn."useEvents", 0) = 0 then 0 else round(coalesce(cn."usageCostCents", 0)::numeric / cn."useEvents") end::text as "avgCostPerUseCents",
+              coalesce(cn."usedProcedureCodes", ARRAY[]::text[]) as "usedProcedureCodes"
+       from "PmsInventoryCatalogItem" i
+       left join "PmsInventoryCommonItem" c on c."id" = i."commonItemId"
+       left join consumed cn on cn."itemId" = i."id"
+       where i."tenantId" = $1 and i."status" = 'ACTIVE'
+       order by coalesce(cn."usageCostCents", 0) desc, coalesce(cn."useEvents", 0) desc, i."itemName"
+       limit 40`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
+    ),
+    query(
+      `select i."category",
+              count(m."id")::int as "useEvents",
+              coalesce(sum(abs(m."quantity")), 0)::text as "quantityUsed",
+              coalesce(sum(abs(m."quantity") * m."unitCostCents")::bigint, 0)::text as "usageCostCents",
+              coalesce(sum(coalesce(pc."defaultFeeCents", 0))::bigint, 0)::text as "estimatedRevenueCents"
+       from "PmsInventoryCatalogItem" i
+       left join "PmsInventoryMovement" m on m."itemId" = i."id" and m."tenantId" = i."tenantId" and m."movementType" = 'CONSUMED' and m."createdAt" >= $2::timestamp and m."createdAt" < $3::timestamp
+       left join "PmsProcedureCode" pc on pc."tenantId" = m."tenantId" and pc."code" = m."procedureCode"
+       where i."tenantId" = $1 and i."status" = 'ACTIVE'
+       group by i."category"
+       order by coalesce(sum(abs(m."quantity") * m."unitCostCents"), 0) desc`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
+    ),
+    query(
+      `with stock as (
+         select i."id", coalesce(sum(l."quantityOnHand"), 0) as qty
+         from "PmsInventoryCatalogItem" i
+         left join "PmsInventoryLot" l on l."itemId" = i."id" and l."tenantId" = i."tenantId" and l."status" = 'ACTIVE'
+         where i."tenantId" = $1 and i."status" = 'ACTIVE'
+         group by i."id"
+       ),
+       velocity as (
+         select "itemId", coalesce(sum(abs("quantity")), 0) / 30.0 as avg_daily_use
+         from "PmsInventoryMovement"
+         where "tenantId" = $1 and "movementType" = 'CONSUMED' and "createdAt" >= current_date - interval '30 days'
+         group by "itemId"
+       )
+       select i."id", i."itemName", i."sku", i."category",
+              s.qty::text as "quantityOnHand",
+              i."reorderPoint"::text as "reorderPoint",
+              i."parLevel"::text as "parLevel",
+              coalesce(v.avg_daily_use, 0)::numeric(12, 2)::text as "avgDailyUse",
+              case when coalesce(v.avg_daily_use, 0) = 0 then null else round(s.qty / v.avg_daily_use, 1)::text end as "daysOnHand",
+              greatest(i."parLevel" - s.qty, 0)::numeric(12, 2)::text as "suggestedOrderQuantity",
+              round(greatest(i."parLevel" - s.qty, 0) * coalesce(i."lastUnitCostCents", i."benchmarkCostCents", 0))::bigint::text as "estimatedOrderCents"
+       from "PmsInventoryCatalogItem" i
+       join stock s on s."id" = i."id"
+       left join velocity v on v."itemId" = i."id"
+       where i."tenantId" = $1 and (s.qty <= i."reorderPoint" or coalesce(v.avg_daily_use, 0) > 0)
+       order by case when s.qty <= i."reorderPoint" then 0 else 1 end, "daysOnHand" asc nulls last, i."itemName"
+       limit 30`,
+      [tenantId],
+    ),
+    query(
+      `select a."id", a."assetName", a."assetTag", a."assetType", a."purchaseCostCents", a."downtimeRisk", loc."locationName",
+              count(m."id")::int as "locationUseEvents",
+              coalesce(sum(abs(m."quantity") * m."unitCostCents")::bigint, 0)::text as "locationUsageCents",
+              case when a."purchaseCostCents" = 0 then null else round((coalesce(sum(abs(m."quantity") * m."unitCostCents"), 0)::numeric / a."purchaseCostCents") * 100, 1)::text end as "usageToAssetCostPct"
+       from "PmsInventoryAsset" a
+       left join "PmsInventoryStockLocation" loc on loc."id" = a."locationId"
+       left join "PmsInventoryMovement" m on m."fromLocationId" = a."locationId" and m."tenantId" = a."tenantId" and m."movementType" = 'CONSUMED' and m."createdAt" >= $2::timestamp and m."createdAt" < $3::timestamp
+       where a."tenantId" = $1 and a."status" = 'ACTIVE'
+       group by a."id", loc."locationName"
+       order by count(m."id") desc, a."downtimeRisk" desc
+       limit 20`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
+    ),
   ]);
 
   return {
@@ -221,6 +344,11 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId, filters:
       periodUsageCents: "0",
       periodReceivedCents: "0",
       periodMovementCount: "0",
+      periodUseEvents: "0",
+      periodProcedureLinkedUse: "0",
+      periodWasteCents: "0",
+      periodEstimatedRevenueCents: "0",
+      periodRoiCents: "0",
       periodRfpCount: "0",
     },
     reportingWindow,
@@ -237,6 +365,11 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId, filters:
     purchaseOrders: purchaseOrders.rows,
     cycleCounts: cycleCounts.rows,
     labelQueue: labelQueue.rows,
+    commonItems: commonItems.rows,
+    usageAnalytics: usageAnalytics.rows,
+    categoryAnalytics: categoryAnalytics.rows,
+    reorderRecommendations: reorderRecommendations.rows,
+    assetRoiAnalytics: assetRoiAnalytics.rows,
   };
 }
 
@@ -293,6 +426,7 @@ export async function createInventoryItem(input: {
   tenantId?: string;
   actorRole?: string;
   vendorId?: string;
+  commonItemId?: string;
   sku: string;
   itemName: string;
   category: string;
@@ -303,6 +437,8 @@ export async function createInventoryItem(input: {
   parLevel?: number;
   lastUnitCostCents?: number;
   benchmarkCostCents?: number;
+  estimatedUsesPerUnit?: number;
+  costBehavior?: string;
   taxable?: boolean;
   requiresLotTracking?: boolean;
   requiresExpiry?: boolean;
@@ -313,10 +449,11 @@ export async function createInventoryItem(input: {
   const barcodeValue = barcode("ITEM", id);
   const result = await query(
     `insert into "PmsInventoryCatalogItem"
-       ("id", "tenantId", "vendorId", "sku", "barcodeValue", "itemName", "category", "clinicalUse", "itemType", "unitOfMeasure", "reorderPoint", "parLevel", "lastUnitCostCents", "benchmarkCostCents", "taxable", "requiresLotTracking", "requiresExpiry", "controlledSubstance", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9, 'CONSUMABLE'), coalesce($10, 'each'), $11, $12, $13, $14, $15, $16, $17, $18, current_timestamp)
+       ("id", "tenantId", "vendorId", "commonItemId", "sku", "barcodeValue", "itemName", "category", "clinicalUse", "itemType", "unitOfMeasure", "reorderPoint", "parLevel", "lastUnitCostCents", "benchmarkCostCents", "estimatedUsesPerUnit", "costBehavior", "taxable", "requiresLotTracking", "requiresExpiry", "controlledSubstance", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10, 'CONSUMABLE'), coalesce($11, 'each'), $12, $13, $14, $15, $16, coalesce($17, 'VARIABLE'), $18, $19, $20, $21, current_timestamp)
      on conflict ("tenantId", "sku") do update set
       "vendorId" = excluded."vendorId",
+       "commonItemId" = excluded."commonItemId",
        "barcodeValue" = coalesce("PmsInventoryCatalogItem"."barcodeValue", excluded."barcodeValue"),
        "itemName" = excluded."itemName",
        "category" = excluded."category",
@@ -327,6 +464,8 @@ export async function createInventoryItem(input: {
        "parLevel" = excluded."parLevel",
        "lastUnitCostCents" = excluded."lastUnitCostCents",
        "benchmarkCostCents" = excluded."benchmarkCostCents",
+       "estimatedUsesPerUnit" = excluded."estimatedUsesPerUnit",
+       "costBehavior" = excluded."costBehavior",
        "taxable" = excluded."taxable",
        "requiresLotTracking" = excluded."requiresLotTracking",
        "requiresExpiry" = excluded."requiresExpiry",
@@ -337,6 +476,7 @@ export async function createInventoryItem(input: {
       id,
       tenantId,
       input.vendorId || null,
+      input.commonItemId || null,
       input.sku.trim(),
       barcodeValue,
       input.itemName.trim(),
@@ -348,6 +488,8 @@ export async function createInventoryItem(input: {
       input.parLevel ?? 0,
       input.lastUnitCostCents ?? 0,
       input.benchmarkCostCents ?? null,
+      input.estimatedUsesPerUnit ?? 1,
+      input.costBehavior?.trim() || null,
       Boolean(input.taxable),
       Boolean(input.requiresLotTracking),
       Boolean(input.requiresExpiry),
@@ -356,6 +498,61 @@ export async function createInventoryItem(input: {
   );
   const row = result.rows[0];
   await addInventoryAudit(tenantId, input.actorRole ?? "practice_manager", "INVENTORY_ITEM_UPSERTED", "PmsInventoryCatalogItem", row.id, { sku: row.sku });
+  return row;
+}
+
+export async function createInventoryItemFromCommonItem(input: {
+  tenantId?: string;
+  actorRole?: string;
+  commonItemId: string;
+  vendorId?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const common = await query<{
+    id: string;
+    skuSeed: string;
+    itemName: string;
+    category: string;
+    clinicalUse: string;
+    itemType: string;
+    unitOfMeasure: string;
+    defaultReorderPoint: string;
+    defaultParLevel: string;
+    benchmarkCostCents: number;
+    estimatedUsesPerUnit: number;
+    costBehavior: string;
+    requiresLotTracking: boolean;
+    requiresExpiry: boolean;
+    controlledSubstance: boolean;
+  }>(
+    `select * from "PmsInventoryCommonItem" where "id" = $1 and "status" = 'ACTIVE' limit 1`,
+    [input.commonItemId],
+  );
+  const template = common.rows[0];
+  if (!template) throw new Error("Common dental inventory item was not found.");
+
+  const row = await createInventoryItem({
+    tenantId,
+    actorRole: input.actorRole,
+    vendorId: input.vendorId,
+    commonItemId: template.id,
+    sku: template.skuSeed,
+    itemName: template.itemName,
+    category: template.category,
+    clinicalUse: template.clinicalUse,
+    itemType: template.itemType,
+    unitOfMeasure: template.unitOfMeasure,
+    reorderPoint: Number(template.defaultReorderPoint ?? 0),
+    parLevel: Number(template.defaultParLevel ?? 0),
+    lastUnitCostCents: template.benchmarkCostCents,
+    benchmarkCostCents: template.benchmarkCostCents,
+    estimatedUsesPerUnit: template.estimatedUsesPerUnit,
+    costBehavior: template.costBehavior,
+    requiresLotTracking: template.requiresLotTracking,
+    requiresExpiry: template.requiresExpiry,
+    controlledSubstance: template.controlledSubstance,
+  });
+  await addInventoryAudit(tenantId, input.actorRole ?? "practice_manager", "INVENTORY_COMMON_ITEM_ADDED", "PmsInventoryCatalogItem", row.id, { commonItemId: template.id, sku: template.skuSeed });
   return row;
 }
 

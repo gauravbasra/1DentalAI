@@ -79,6 +79,7 @@ const requiredTables = [
   "PmsReferral",
   "PmsLabCase",
   "PmsInventoryVendor",
+  "PmsInventoryCommonItem",
   "PmsInventoryCatalogItem",
   "PmsInventoryStockLocation",
   "PmsInventoryLot",
