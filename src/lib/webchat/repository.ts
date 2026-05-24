@@ -11,7 +11,7 @@ import {
   sendApprovedPhoneOutboundMessage,
   updatePhoneOutboundMessageApproval,
 } from "@/lib/operating-system-repository";
-import { getOpenAiWebchatConfig } from "@/lib/connector-control-repository";
+import { getConnectorSecret, getOpenAiWebchatConfig } from "@/lib/connector-control-repository";
 
 export type WebchatAnalysis = {
   intent: string;
@@ -324,7 +324,7 @@ export async function postWebchatMessage(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const leadCapture = normalizeLeadCapture(input.leadCapture ?? {});
-  if (leadCapture.sourceChannel !== "SMS" && leadCapture.consentAccepted !== true) {
+  if (leadCapture.sourceChannel !== "SMS" && leadCapture.consentAccepted !== true && !isDemoConsentOverrideEnabled(tenantId)) {
     await addWebchatAudit(tenantId, "WEBCHAT_MESSAGE_BLOCKED", input.conversationId, "BLOCKED", {
       consentAccepted: false,
       sourceChannel: leadCapture.sourceChannel || "WEBSITE",
@@ -1779,13 +1779,13 @@ async function rescheduleOfferedSlot(input: {
     patientId: input.offer.patientId,
     phone: contact.visitorPhone,
     email: contact.visitorEmail,
-    consentAccepted: Boolean(contact.consentAccepted),
+    consentAccepted: Boolean(contact.consentAccepted) || isDemoConsentOverrideEnabled(input.tenantId),
     slot: input.slot,
     serviceLabel: input.offer.serviceLabel,
     confirmationType: "RESCHEDULE_CONFIRMATION",
   });
   return schedulingDecision(
-    `Done. I moved your ${input.offer.serviceLabel.toLowerCase()} to ${formatSlot(input.slot)}. I’ve sent the updated confirmation by text and email where connectors are available.`,
+    `Done. I moved your ${input.offer.serviceLabel.toLowerCase()} to ${formatSlot(input.slot)}. ${confirmationDeliveryLine(confirmation, "updated confirmation")}`,
     "PMS_APPOINTMENT_RESCHEDULED",
     "RESCHEDULED_TO_PMS",
     { kind: "APPOINTMENT_RESCHEDULED", appointmentId: input.offer.appointmentId, patientId: input.offer.patientId, slot: input.slot, confirmation },
@@ -1981,7 +1981,7 @@ async function bookOfferedSlot(input: {
     patientId: booking.patientId,
     phone: contact.visitorPhone,
     email: contact.visitorEmail,
-    consentAccepted: Boolean(contact.consentAccepted),
+    consentAccepted: Boolean(contact.consentAccepted) || isDemoConsentOverrideEnabled(input.tenantId),
     slot: input.slot,
     serviceLabel: input.offer.serviceLabel,
     confirmationType: "APPOINTMENT_CONFIRMATION",
@@ -1996,7 +1996,7 @@ async function bookOfferedSlot(input: {
       JSON.stringify({ ...booking, slot: input.slot, serviceLabel: input.offer.serviceLabel, confirmation }),
     ],
   ).catch(() => null);
-  const confirmationLine = "The confirmation is saved with the appointment.";
+  const confirmationLine = confirmationDeliveryLine(confirmation, "confirmation");
   return schedulingDecision(
     `Booked. You’re confirmed for ${input.offer.serviceLabel.toLowerCase()} on ${formatSlot(input.slot)}. ${confirmationLine}`,
     "PMS_APPOINTMENT_BOOKED",
@@ -2108,7 +2108,7 @@ async function stageAndSendAppointmentEmailConfirmation(input: {
   const text = `Your ${input.serviceLabel.toLowerCase()} is confirmed for ${formatSlot(input.slot)}. Reply to the office if you need help changing it.`;
   const html = `<p>Your ${escapeHtml(input.serviceLabel.toLowerCase())} is confirmed for <strong>${escapeHtml(formatSlot(input.slot))}</strong>.</p><p>Reply to the office if you need help changing it.</p>`;
   const id = newId("emsg");
-  const provider = getEmailProvider();
+  const provider = await getEmailProvider(input.tenantId);
   const readiness = {
     provider: provider?.provider ?? null,
     externalSendBlocked: !provider,
@@ -2174,12 +2174,47 @@ async function stageAndSendAppointmentEmailConfirmation(input: {
   }
 }
 
-function getEmailProvider() {
+async function getEmailProvider(tenantId = defaultTenantId) {
   const from = process.env.EMAIL_FROM || process.env.RESEND_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || process.env.POSTMARK_FROM_EMAIL || "appointments@1dentalai.com";
   if (process.env.RESEND_API_KEY) return { provider: "RESEND", apiKey: process.env.RESEND_API_KEY, from };
   if (process.env.SENDGRID_API_KEY) return { provider: "SENDGRID", apiKey: process.env.SENDGRID_API_KEY, from };
   if (process.env.POSTMARK_SERVER_TOKEN) return { provider: "POSTMARK", apiKey: process.env.POSTMARK_SERVER_TOKEN, from };
+  const resend = await getConnectorSecretValue(tenantId, "RESEND", ["api_key", "apiKey", "api key", "secret"]);
+  if (resend) return { provider: "RESEND", apiKey: resend, from };
+  const sendGrid = await getConnectorSecretValue(tenantId, "SENDGRID", ["api_key", "apiKey", "api key", "secret"]);
+  if (sendGrid) return { provider: "SENDGRID", apiKey: sendGrid, from };
+  const postmark = await getConnectorSecretValue(tenantId, "POSTMARK", ["server_token", "server token", "api_key", "apiKey", "api key", "secret"]);
+  if (postmark) return { provider: "POSTMARK", apiKey: postmark, from };
+  const genericEmail = await getConnectorSecretValue(tenantId, "EMAIL", ["api_key", "apiKey", "api key", "secret"]);
+  if (genericEmail) return { provider: "RESEND", apiKey: genericEmail, from };
   return null;
+}
+
+async function getConnectorSecretValue(tenantId: string, providerKey: string, labels: string[]) {
+  for (const label of labels) {
+    try {
+      const secret = await getConnectorSecret({ tenantId, providerKey, credentialLabel: label, requireValidated: false });
+      if (secret?.value) return secret.value;
+    } catch {
+      // Keep credential discovery tolerant; missing/rotated secrets are reported by the workflow outcome.
+    }
+  }
+  return null;
+}
+
+function confirmationDeliveryLine(confirmation: { sms?: Record<string, unknown>; email?: Record<string, unknown> }, label: string) {
+  const smsStatus = String(confirmation.sms?.deliveryStatus ?? confirmation.sms?.smsDeliveryStatus ?? "");
+  const emailStatus = String(confirmation.email?.emailDeliveryStatus ?? confirmation.email?.deliveryStatus ?? "");
+  const smsSent = smsStatus === "SENT_TO_PROVIDER" || smsStatus === "DELIVERED";
+  const emailSent = emailStatus === "SENT_TO_PROVIDER" || emailStatus === "DELIVERED";
+  if (smsSent && emailSent) return `I sent the ${label} by text and email.`;
+  if (smsSent) return `I sent the ${label} by text.`;
+  if (emailSent) return `I sent the ${label} by email.`;
+  return `The ${label} is saved with the appointment; messaging delivery is waiting on the practice connector.`;
+}
+
+function isDemoConsentOverrideEnabled(tenantId: string) {
+  return tenantId === defaultTenantId && process.env.DEMO_CONSENT_OVERRIDE !== "false";
 }
 
 async function sendProviderEmail(

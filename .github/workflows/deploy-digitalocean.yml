@@ -81,6 +81,14 @@ jobs:
           OPENAI_WEBCHAT_MODEL: ${{ secrets.OPENAI_WEBCHAT_MODEL }}
           OPENAI_BAA_ENABLED: ${{ secrets.OPENAI_BAA_ENABLED }}
           OPENAI_PHI_ALLOWED: ${{ secrets.OPENAI_PHI_ALLOWED }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
+          POSTMARK_SERVER_TOKEN: ${{ secrets.POSTMARK_SERVER_TOKEN }}
+          POSTMARK_FROM_EMAIL: ${{ secrets.POSTMARK_FROM_EMAIL }}
         run: |
           ZOOM_ACCOUNT_ID_B64="$(printf '%s' "${ZOOM_ACCOUNT_ID:-}" | base64 -w 0)"
           ZOOM_CLIENT_ID_B64="$(printf '%s' "${ZOOM_CLIENT_ID:-}" | base64 -w 0)"
@@ -91,6 +99,14 @@ jobs:
           OPENAI_WEBCHAT_MODEL_B64="$(printf '%s' "${OPENAI_WEBCHAT_MODEL:-}" | base64 -w 0)"
           OPENAI_BAA_ENABLED_B64="$(printf '%s' "${OPENAI_BAA_ENABLED:-}" | base64 -w 0)"
           OPENAI_PHI_ALLOWED_B64="$(printf '%s' "${OPENAI_PHI_ALLOWED:-}" | base64 -w 0)"
+          TWILIO_ACCOUNT_SID_B64="$(printf '%s' "${TWILIO_ACCOUNT_SID:-}" | base64 -w 0)"
+          TWILIO_AUTH_TOKEN_B64="$(printf '%s' "${TWILIO_AUTH_TOKEN:-}" | base64 -w 0)"
+          RESEND_API_KEY_B64="$(printf '%s' "${RESEND_API_KEY:-}" | base64 -w 0)"
+          RESEND_FROM_EMAIL_B64="$(printf '%s' "${RESEND_FROM_EMAIL:-}" | base64 -w 0)"
+          SENDGRID_API_KEY_B64="$(printf '%s' "${SENDGRID_API_KEY:-}" | base64 -w 0)"
+          SENDGRID_FROM_EMAIL_B64="$(printf '%s' "${SENDGRID_FROM_EMAIL:-}" | base64 -w 0)"
+          POSTMARK_SERVER_TOKEN_B64="$(printf '%s' "${POSTMARK_SERVER_TOKEN:-}" | base64 -w 0)"
+          POSTMARK_FROM_EMAIL_B64="$(printf '%s' "${POSTMARK_FROM_EMAIL:-}" | base64 -w 0)"
           for i in 1 2 3; do
             timeout 600s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
             set -euo pipefail
@@ -153,6 +169,38 @@ jobs:
             if [ -n "${OPENAI_PHI_ALLOWED_B64}" ]; then
               OPENAI_PHI_ALLOWED_VALUE="\$(printf '%s' "${OPENAI_PHI_ALLOWED_B64}" | base64 -d)"
               if grep -q '^OPENAI_PHI_ALLOWED=' .env; then sed -i "s|^OPENAI_PHI_ALLOWED=.*|OPENAI_PHI_ALLOWED=\${OPENAI_PHI_ALLOWED_VALUE}|" .env; else printf '\\nOPENAI_PHI_ALLOWED=%s\\n' "\${OPENAI_PHI_ALLOWED_VALUE}" >> .env; fi
+            fi
+            if [ -n "${TWILIO_ACCOUNT_SID_B64}" ]; then
+              TWILIO_ACCOUNT_SID_VALUE="\$(printf '%s' "${TWILIO_ACCOUNT_SID_B64}" | base64 -d)"
+              if grep -q '^TWILIO_ACCOUNT_SID=' .env; then sed -i "s|^TWILIO_ACCOUNT_SID=.*|TWILIO_ACCOUNT_SID=\${TWILIO_ACCOUNT_SID_VALUE}|" .env; else printf '\\nTWILIO_ACCOUNT_SID=%s\\n' "\${TWILIO_ACCOUNT_SID_VALUE}" >> .env; fi
+            fi
+            if [ -n "${TWILIO_AUTH_TOKEN_B64}" ]; then
+              TWILIO_AUTH_TOKEN_VALUE="\$(printf '%s' "${TWILIO_AUTH_TOKEN_B64}" | base64 -d)"
+              if grep -q '^TWILIO_AUTH_TOKEN=' .env; then sed -i "s|^TWILIO_AUTH_TOKEN=.*|TWILIO_AUTH_TOKEN=\${TWILIO_AUTH_TOKEN_VALUE}|" .env; else printf '\\nTWILIO_AUTH_TOKEN=%s\\n' "\${TWILIO_AUTH_TOKEN_VALUE}" >> .env; fi
+            fi
+            if [ -n "${RESEND_API_KEY_B64}" ]; then
+              RESEND_API_KEY_VALUE="\$(printf '%s' "${RESEND_API_KEY_B64}" | base64 -d)"
+              if grep -q '^RESEND_API_KEY=' .env; then sed -i "s|^RESEND_API_KEY=.*|RESEND_API_KEY=\${RESEND_API_KEY_VALUE}|" .env; else printf '\\nRESEND_API_KEY=%s\\n' "\${RESEND_API_KEY_VALUE}" >> .env; fi
+            fi
+            if [ -n "${RESEND_FROM_EMAIL_B64}" ]; then
+              RESEND_FROM_EMAIL_VALUE="\$(printf '%s' "${RESEND_FROM_EMAIL_B64}" | base64 -d)"
+              if grep -q '^RESEND_FROM_EMAIL=' .env; then sed -i "s|^RESEND_FROM_EMAIL=.*|RESEND_FROM_EMAIL=\${RESEND_FROM_EMAIL_VALUE}|" .env; else printf '\\nRESEND_FROM_EMAIL=%s\\n' "\${RESEND_FROM_EMAIL_VALUE}" >> .env; fi
+            fi
+            if [ -n "${SENDGRID_API_KEY_B64}" ]; then
+              SENDGRID_API_KEY_VALUE="\$(printf '%s' "${SENDGRID_API_KEY_B64}" | base64 -d)"
+              if grep -q '^SENDGRID_API_KEY=' .env; then sed -i "s|^SENDGRID_API_KEY=.*|SENDGRID_API_KEY=\${SENDGRID_API_KEY_VALUE}|" .env; else printf '\\nSENDGRID_API_KEY=%s\\n' "\${SENDGRID_API_KEY_VALUE}" >> .env; fi
+            fi
+            if [ -n "${SENDGRID_FROM_EMAIL_B64}" ]; then
+              SENDGRID_FROM_EMAIL_VALUE="\$(printf '%s' "${SENDGRID_FROM_EMAIL_B64}" | base64 -d)"
+              if grep -q '^SENDGRID_FROM_EMAIL=' .env; then sed -i "s|^SENDGRID_FROM_EMAIL=.*|SENDGRID_FROM_EMAIL=\${SENDGRID_FROM_EMAIL_VALUE}|" .env; else printf '\\nSENDGRID_FROM_EMAIL=%s\\n' "\${SENDGRID_FROM_EMAIL_VALUE}" >> .env; fi
+            fi
+            if [ -n "${POSTMARK_SERVER_TOKEN_B64}" ]; then
+              POSTMARK_SERVER_TOKEN_VALUE="\$(printf '%s' "${POSTMARK_SERVER_TOKEN_B64}" | base64 -d)"
+              if grep -q '^POSTMARK_SERVER_TOKEN=' .env; then sed -i "s|^POSTMARK_SERVER_TOKEN=.*|POSTMARK_SERVER_TOKEN=\${POSTMARK_SERVER_TOKEN_VALUE}|" .env; else printf '\\nPOSTMARK_SERVER_TOKEN=%s\\n' "\${POSTMARK_SERVER_TOKEN_VALUE}" >> .env; fi
+            fi
+            if [ -n "${POSTMARK_FROM_EMAIL_B64}" ]; then
+              POSTMARK_FROM_EMAIL_VALUE="\$(printf '%s' "${POSTMARK_FROM_EMAIL_B64}" | base64 -d)"
+              if grep -q '^POSTMARK_FROM_EMAIL=' .env; then sed -i "s|^POSTMARK_FROM_EMAIL=.*|POSTMARK_FROM_EMAIL=\${POSTMARK_FROM_EMAIL_VALUE}|" .env; else printf '\\nPOSTMARK_FROM_EMAIL=%s\\n' "\${POSTMARK_FROM_EMAIL_VALUE}" >> .env; fi
             fi
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
             docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm ci && (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true) && (npx prisma migrate resolve --rolled-back 202605221910_activate_webchat_openai || true) && npx prisma migrate deploy' < /dev/null

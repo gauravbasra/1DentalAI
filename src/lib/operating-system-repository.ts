@@ -1637,7 +1637,9 @@ export async function createPhoneOutboundMessage(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("pmsg");
-  const consentStatus = input.consentStatus || "UNKNOWN";
+  const rawConsentStatus = input.consentStatus || "UNKNOWN";
+  const demoConsentOverride = isDemoConsentOverrideEnabled(tenantId);
+  const consentStatus = demoConsentOverride ? "VERIFIED" : rawConsentStatus;
   const connectorReadiness = await getPhoneOutboundConnectorReadiness(tenantId, input.channel, input.linkType);
   const consentBlockedReason =
     input.blockedReason ||
@@ -1650,6 +1652,8 @@ export async function createPhoneOutboundMessage(input: {
   const readiness = {
     ...connectorReadiness,
     consentVerified: consentStatus === "VERIFIED",
+    demoConsentOverride,
+    originalConsentStatus: rawConsentStatus,
     linkType: input.linkType || null,
     linkTargetId: input.linkTargetId || null,
     externalSendBlocked: true,
@@ -1680,7 +1684,7 @@ export async function createPhoneOutboundMessage(input: {
       consentBlockedReason,
     ],
   );
-  await addAudit(tenantId, "front_desk", "PHONE_OUTBOUND_MESSAGE_STAGED", "PhoneOutboundMessage", id, consentBlockedReason ? "BLOCKED" : "ALLOWED", { consentStatus, blockedReason: consentBlockedReason, connectorStatus, readiness });
+  await addAudit(tenantId, "front_desk", "PHONE_OUTBOUND_MESSAGE_STAGED", "PhoneOutboundMessage", id, consentBlockedReason ? "BLOCKED" : "ALLOWED", { consentStatus, originalConsentStatus: rawConsentStatus, demoConsentOverride, blockedReason: consentBlockedReason, connectorStatus, readiness });
   return { id, connectorStatus, blockedReason: consentBlockedReason };
 }
 
@@ -1862,13 +1866,17 @@ async function getSmsSendBlock(message: {
   if (message.approvalStatus !== "APPROVED_STAGED") return "Message must be approved and staged by staff before external send.";
   if (!["READY_FOR_CONNECTOR", "BLOCKED_CONNECTOR_REQUIRED"].includes(message.deliveryStatus)) return `Message is not in a sendable state (${message.deliveryStatus}).`;
   if (message.connectorStatus !== "READY_FOR_CONNECTOR") return "SMS connector readiness is not complete for this tenant.";
-  if (message.consentStatus !== "VERIFIED") return "Patient SMS consent is not verified.";
+  if (message.consentStatus !== "VERIFIED" && !isDemoConsentOverrideEnabled(message.tenantId)) return "Patient SMS consent is not verified.";
   if (message.blockedReason) return message.blockedReason;
   if (!message.recipientNumber) return "Recipient mobile number is missing.";
   if (!message.body.trim()) return "Message body is empty.";
   const credentials = await getTwilioCredentials(message.tenantId);
   if (!credentials.accountSid || !credentials.authToken) return "Twilio Account SID/Auth Token are not configured in the credential vault or production environment.";
   return null;
+}
+
+function isDemoConsentOverrideEnabled(tenantId: string) {
+  return tenantId === defaultTenantId && process.env.DEMO_CONSENT_OVERRIDE !== "false";
 }
 
 async function getActiveSmsFromNumber(tenantId: string) {
