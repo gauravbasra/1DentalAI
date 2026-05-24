@@ -189,6 +189,31 @@ export default async function PatientEngagementHome({
   const schedulingRules = center.schedulingRules as Record<string, unknown>[];
   const videoSessions = center.videoSessions as Record<string, unknown>[];
 
+  if (params.panel === "phone") {
+    return (
+      <main className="pe-shell min-h-screen bg-[#f4f6f7] text-neutral-950">
+        <div className="flex min-h-screen">
+          <GlobalRail />
+          <section className="flex min-w-0 flex-1 flex-col">
+            <header className="sticky top-0 z-20 flex h-20 items-center gap-5 border-b border-neutral-200 bg-white px-6">
+              <Link href="/wrapper" className="text-2xl font-black tracking-tight">1DentalAI</Link>
+              <div className="relative max-w-2xl flex-1">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">⌕</span>
+                <input className="h-12 w-full rounded-xl border border-neutral-200 bg-white pl-10 pr-4 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Search patients, calls, messages, payments, insurance, forms" />
+              </div>
+              <ThemeModeControl />
+              <Link href="/patient-engagement" className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-700">Back to messages</Link>
+              <Link href="/logout" className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Sign out</Link>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto p-6">
+              <PhonePanel conversation={selectedConversation} patient={patient} metrics={metrics} activeCalls={activeCalls} controls={controls} numbers={numbers} extensions={extensions} providers={providers} routes={routes} videoSessions={videoSessions} />
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="pe-shell min-h-screen bg-[#f4f6f7] text-neutral-950">
       <div className="flex min-h-screen">
@@ -883,16 +908,17 @@ function PhonePanel({
             <div className="mt-6 flex items-center justify-center gap-5">
               <span className="rounded-md bg-emerald-500 px-2 py-1 text-sm font-bold text-white">02:00</span>
               {[
-                ["MUTE", "⌁"],
-                ["HOLD", "Ⅱ"],
-                ["TRANSFER", "⠿"],
-                ["AI_VOICE_TAKEOVER", "AI"],
-                ["END_CALL", "☎"],
-              ].map(([action, label]) => (
+                ["HOLD", "Ⅱ", ""],
+                ["RESUME", "▶", ""],
+                ["CALL_PARK", "⠿", "front-desk-1"],
+                ["AI_VOICE_TAKEOVER", "AI", ""],
+                ["END_CALL", "☎", ""],
+              ].map(([action, label, parkSlot]) => (
                 <form key={action} action={callControlAction}>
                   <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
                   <input type="hidden" name="conversationId" value={conversation?.id ?? String(selectedActiveCall?.conversationId ?? "")} />
-                  <input type="hidden" name="actionType" value={action === "TRANSFER" ? "WARM_TRANSFER" : action} />
+                  <input type="hidden" name="actionType" value={action} />
+                  {parkSlot ? <input type="hidden" name="targetParkSlot" value={parkSlot} /> : null}
                   <button className={`grid h-14 w-14 place-items-center rounded-full text-sm font-bold ${action === "END_CALL" ? "bg-rose-500 text-white" : "bg-neutral-100 text-neutral-700"}`}>{label}</button>
                 </form>
               ))}
