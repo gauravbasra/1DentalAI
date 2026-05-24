@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { newId, query, withTransaction } from "@/lib/db";
+import { resolveReportingWindow, type ReportingWindowFilters } from "@/lib/reporting-window";
 import type { QueryResult, QueryResultRow } from "pg";
 
 export const defaultTenantId = "tenant_1dentalai_production";
@@ -4616,7 +4617,8 @@ export async function createReferral(input: {
   return result.rows[0];
 }
 
-export async function getPmsReports(tenantId = defaultTenantId) {
+export async function getPmsReports(tenantId = defaultTenantId, filters: ReportingWindowFilters = {}) {
+  const reportingWindow = resolveReportingWindow(filters);
   const [
     productionTiles,
     dailyAppointments,
@@ -4636,14 +4638,14 @@ export async function getPmsReports(tenantId = defaultTenantId) {
   ] = await Promise.all([
     query<{ priorDayProductionCents: string; todayScheduledProductionCents: string; tomorrowScheduledProductionCents: string }>(
       `select
-        coalesce((select sum("amountCents") from "PmsLedgerEntry" where "tenantId" = $1 and "amountCents" > 0 and "serviceDate"::date = current_date - interval '1 day'), 0)::text as "priorDayProductionCents",
-        coalesce((select sum("productionCents") from "PmsAppointment" where "tenantId" = $1 and "startsAt"::date = current_date), 0)::text as "todayScheduledProductionCents",
-        coalesce((select sum("productionCents") from "PmsAppointment" where "tenantId" = $1 and "startsAt"::date = current_date + interval '1 day'), 0)::text as "tomorrowScheduledProductionCents"`,
-      [tenantId],
+        coalesce((select sum("amountCents") from "PmsLedgerEntry" where "tenantId" = $1 and "amountCents" > 0 and coalesce("serviceDate", "postedAt") >= $2::timestamp and coalesce("serviceDate", "postedAt") < $3::timestamp), 0)::text as "priorDayProductionCents",
+        coalesce((select sum("productionCents") from "PmsAppointment" where "tenantId" = $1 and "startsAt" >= $2::timestamp and "startsAt" < $3::timestamp), 0)::text as "todayScheduledProductionCents",
+        coalesce((select sum("productionCents") from "PmsAppointment" where "tenantId" = $1 and "startsAt" >= $3::timestamp and "startsAt" < $4::timestamp), 0)::text as "tomorrowScheduledProductionCents"`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp, reportingWindow.nextEndTimestamp],
     ),
     query<{ day: string; scheduled: string; completed: string; broken: string }>(
       `with days as (
-        select generate_series(current_date - interval '6 days', current_date, interval '1 day')::date as day
+        select generate_series($2::date, ($3::date - interval '1 day')::date, interval '1 day')::date as day
        )
        select d.day::text,
         count(a."id")::text as scheduled,
@@ -4653,11 +4655,11 @@ export async function getPmsReports(tenantId = defaultTenantId) {
        left join "PmsAppointment" a on a."tenantId" = $1 and a."startsAt"::date = d.day
        group by d.day
        order by d.day`,
-      [tenantId],
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ day: string; scheduledCents: string; completedCents: string; restorativeCents: string; hygieneCents: string; otherCents: string }>(
       `with days as (
-        select generate_series(current_date - interval '6 days', current_date, interval '1 day')::date as day
+        select generate_series($2::date, ($3::date - interval '1 day')::date, interval '1 day')::date as day
        ),
        ledger as (
         select le."serviceDate"::date as day,
@@ -4668,7 +4670,7 @@ export async function getPmsReports(tenantId = defaultTenantId) {
         from "PmsLedgerEntry" le
         left join "PmsProcedureLog" pl on pl."id" = le."procedureLogId"
         left join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
-        where le."tenantId" = $1 and le."amountCents" > 0 and le."serviceDate"::date >= current_date - interval '6 days'
+        where le."tenantId" = $1 and le."amountCents" > 0 and coalesce(le."serviceDate", le."postedAt") >= $2::timestamp and coalesce(le."serviceDate", le."postedAt") < $3::timestamp
         group by le."serviceDate"::date
        )
        select d.day::text,
@@ -4680,7 +4682,7 @@ export async function getPmsReports(tenantId = defaultTenantId) {
        from days d
        left join ledger l on l.day = d.day
        order by d.day`,
-      [tenantId],
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ bucket: string; patientCount: string }>(
       `with last_visit as (
@@ -4745,8 +4747,8 @@ export async function getPmsReports(tenantId = defaultTenantId) {
         (select count(*) from rescheduled)::text as "rescheduledPatients",
         coalesce((select sum("productionCents") from rescheduled), 0)::text as "rescheduledProductionCents",
         ((select count(*) from active_patients) * greatest((select avg_fee from hygiene_avg), 15500) * 2)::text as "annualOpportunityCents",
-        coalesce((select sum("amountCents") from "PmsLedgerEntry" where "tenantId" = $1 and "amountCents" > 0 and "serviceDate" >= current_date - interval '12 months'), 0)::text as "annualProductionCents"`,
-      [tenantId],
+        coalesce((select sum("amountCents") from "PmsLedgerEntry" where "tenantId" = $1 and "amountCents" > 0 and coalesce("serviceDate", "postedAt") >= $2::timestamp and coalesce("serviceDate", "postedAt") < $3::timestamp), 0)::text as "annualProductionCents"`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ presentedCents: string; acceptedCents: string; caseCount: string; acceptedCount: string; examCount: string }>(
       `select
@@ -4766,10 +4768,10 @@ export async function getPmsReports(tenantId = defaultTenantId) {
           select 1 from "PmsTreatmentPlanItem" tpi join "PmsProcedureCode" pc on pc."id" = tpi."procedureCodeId"
           where tpi."treatmentPlanId" = tp."id" and pc."category" in ('RESTORATIVE', 'IMPLANT', 'ORAL_SURGERY', 'ENDODONTIC', 'PROSTHODONTIC')
         ))::text as "acceptedCount",
-        (select count(*) from "PmsProcedureLog" pl join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId" join "PmsPatient" p on p."id" = pl."patientId" where p."tenantId" = $1 and pc."category" = 'DIAGNOSTIC' and pl."serviceDate" >= current_date - interval '30 days')::text as "examCount"
+        (select count(*) from "PmsProcedureLog" pl join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId" join "PmsPatient" p on p."id" = pl."patientId" where p."tenantId" = $1 and pc."category" = 'DIAGNOSTIC' and pl."serviceDate" >= $2::timestamp and pl."serviceDate" < $3::timestamp)::text as "examCount"
        from "PmsTreatmentPlan" tp
-       where tp."tenantId" = $1 and tp."createdAt" >= current_date - interval '30 days'`,
-      [tenantId],
+       where tp."tenantId" = $1 and tp."createdAt" >= $2::timestamp and tp."createdAt" < $3::timestamp`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ presentedCents: string; acceptedCents: string; caseCount: string; acceptedCount: string; visitCount: string }>(
       `select
@@ -4789,10 +4791,10 @@ export async function getPmsReports(tenantId = defaultTenantId) {
           select 1 from "PmsTreatmentPlanItem" tpi join "PmsProcedureCode" pc on pc."id" = tpi."procedureCodeId"
           where tpi."treatmentPlanId" = tp."id" and pc."category" in ('HYGIENE', 'PERIODONTAL', 'PREVENTIVE')
         ))::text as "acceptedCount",
-        (select count(*) from "PmsProcedureLog" pl join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId" join "PmsPatient" p on p."id" = pl."patientId" where p."tenantId" = $1 and pc."category" in ('HYGIENE', 'PERIODONTAL', 'PREVENTIVE') and pl."serviceDate" >= current_date - interval '30 days')::text as "visitCount"
+        (select count(*) from "PmsProcedureLog" pl join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId" join "PmsPatient" p on p."id" = pl."patientId" where p."tenantId" = $1 and pc."category" in ('HYGIENE', 'PERIODONTAL', 'PREVENTIVE') and pl."serviceDate" >= $2::timestamp and pl."serviceDate" < $3::timestamp)::text as "visitCount"
        from "PmsTreatmentPlan" tp
-       where tp."tenantId" = $1 and tp."createdAt" >= current_date - interval '30 days'`,
-      [tenantId],
+       where tp."tenantId" = $1 and tp."createdAt" >= $2::timestamp and tp."createdAt" < $3::timestamp`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ newCount: string; recapturedCount: string; lostCount: string; growth: string }>(
       `with first_service as (
@@ -4810,12 +4812,12 @@ export async function getPmsReports(tenantId = defaultTenantId) {
           and not exists (select 1 from "PmsProcedureLog" pl where pl."patientId" = p."id" and pl."serviceDate" >= current_date - interval '18 months')
        )
        select
-        count(*) filter (where first_date >= current_date - interval '30 days')::text as "newCount",
+        count(*) filter (where first_date >= $2::date and first_date < $3::date)::text as "newCount",
         count(*) filter (where first_date < current_date - interval '18 months')::text as "recapturedCount",
         (select count(*) from inactive)::text as "lostCount",
-        (count(*) filter (where first_date >= current_date - interval '30 days') - (select count(*) from inactive))::text as growth
+        (count(*) filter (where first_date >= $2::date and first_date < $3::date) - (select count(*) from inactive))::text as growth
        from first_service`,
-      [tenantId],
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ visits: string; reappointed: string; unscheduled: string; goalPercent: string }>(
       `with hygiene_visits as (
@@ -4823,7 +4825,7 @@ export async function getPmsReports(tenantId = defaultTenantId) {
         from "PmsProcedureLog" pl
         join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
         join "PmsPatient" p on p."id" = pl."patientId"
-        where p."tenantId" = $1 and pl."status" = 'COMPLETED' and pc."category" in ('HYGIENE', 'PERIODONTAL', 'PREVENTIVE') and pl."serviceDate" >= current_date - interval '30 days'
+        where p."tenantId" = $1 and pl."status" = 'COMPLETED' and pc."category" in ('HYGIENE', 'PERIODONTAL', 'PREVENTIVE') and pl."serviceDate" >= $2::timestamp and pl."serviceDate" < $3::timestamp
        ),
        reappointed as (
         select hv."patientId"
@@ -4838,7 +4840,7 @@ export async function getPmsReports(tenantId = defaultTenantId) {
         (select count(*) from reappointed)::text as reappointed,
         ((select count(*) from hygiene_visits) - (select count(*) from reappointed))::text as unscheduled,
         '90'::text as "goalPercent"`,
-      [tenantId],
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ scheduled: string; cancelled: string; unscheduled: string }>(
       `select count(*)::text as scheduled,
@@ -4848,8 +4850,8 @@ export async function getPmsReports(tenantId = defaultTenantId) {
           where future."patientId" = "PmsAppointment"."patientId" and future."startsAt" > "PmsAppointment"."startsAt" and future."status" not in ('CANCELED', 'NO_SHOW', 'BROKEN')
         ))::text as unscheduled
        from "PmsAppointment"
-       where "tenantId" = $1 and "startsAt" >= current_date - interval '30 days'`,
-      [tenantId],
+       where "tenantId" = $1 and "startsAt" >= $2::timestamp and "startsAt" < $3::timestamp`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ scheduled: string; noShows: string; unscheduled: string }>(
       `select count(*)::text as scheduled,
@@ -4859,16 +4861,16 @@ export async function getPmsReports(tenantId = defaultTenantId) {
           where future."patientId" = "PmsAppointment"."patientId" and future."startsAt" > "PmsAppointment"."startsAt" and future."status" not in ('CANCELED', 'NO_SHOW', 'BROKEN')
         ))::text as unscheduled
        from "PmsAppointment"
-       where "tenantId" = $1 and "startsAt" >= current_date - interval '30 days'`,
-      [tenantId],
+       where "tenantId" = $1 and "startsAt" >= $2::timestamp and "startsAt" < $3::timestamp`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ chargesCents: string; paymentsCents: string; balanceCents: string }>(
       `select
         coalesce(sum(case when "amountCents" > 0 then "amountCents" else 0 end), 0)::text as "chargesCents",
         abs(coalesce(sum(case when "amountCents" < 0 then "amountCents" else 0 end), 0))::text as "paymentsCents",
         coalesce(sum("balanceCents"), 0)::text as "balanceCents"
-       from "PmsLedgerEntry" where "tenantId" = $1`,
-      [tenantId],
+       from "PmsLedgerEntry" where "tenantId" = $1 and coalesce("postedAt", "serviceDate") >= $2::timestamp and coalesce("postedAt", "serviceDate") < $3::timestamp`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query(
       `select coalesce(pr."displayName", 'Unassigned') as "providerName",
@@ -4876,10 +4878,10 @@ export async function getPmsReports(tenantId = defaultTenantId) {
         coalesce(sum(a."productionCents"), 0)::int as "productionCents"
        from "PmsAppointment" a
        left join "PmsProvider" pr on pr."id" = a."providerId"
-       where a."tenantId" = $1 and a."startsAt" >= current_date - interval '30 days'
+       where a."tenantId" = $1 and a."startsAt" >= $2::timestamp and a."startsAt" < $3::timestamp
        group by pr."displayName"
        order by coalesce(sum(a."productionCents"), 0) desc`,
-      [tenantId],
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ openClaims: string; billedCents: string; paidCents: string }>(
       `select count(*)::text as "openClaims",
@@ -4908,6 +4910,7 @@ export async function getPmsReports(tenantId = defaultTenantId) {
   ]);
 
   return {
+    reportingWindow,
     productionTiles: {
       priorDayProductionCents: Number(productionTiles.rows[0]?.priorDayProductionCents ?? 0),
       todayScheduledProductionCents: Number(productionTiles.rows[0]?.todayScheduledProductionCents ?? 0),

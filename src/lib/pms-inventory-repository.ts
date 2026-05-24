@@ -1,5 +1,6 @@
 import { newId, query, withTransaction } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
+import { resolveReportingWindow, type ReportingWindowFilters } from "@/lib/reporting-window";
 
 type InventorySummaryRow = {
   activeItems: string;
@@ -16,53 +17,7 @@ type InventorySummaryRow = {
   periodRfpCount: string;
 };
 
-export type InventoryReportingFilters = {
-  period?: string;
-  startDate?: string;
-  endDate?: string;
-};
-
-function formatDate(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function addDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
-
-export function resolveInventoryReportingWindow(filters: InventoryReportingFilters = {}) {
-  const today = new Date();
-  const utcToday = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-  const period = filters.period === "custom" || filters.period === "weekly" || filters.period === "monthly" ? filters.period : "daily";
-  let start = utcToday;
-  let end = addDays(utcToday, 1);
-
-  if (period === "weekly") {
-    const day = utcToday.getUTCDay();
-    const mondayOffset = day === 0 ? -6 : 1 - day;
-    start = addDays(utcToday, mondayOffset);
-    end = addDays(start, 7);
-  } else if (period === "monthly") {
-    start = new Date(Date.UTC(utcToday.getUTCFullYear(), utcToday.getUTCMonth(), 1));
-    end = new Date(Date.UTC(utcToday.getUTCFullYear(), utcToday.getUTCMonth() + 1, 1));
-  } else if (period === "custom") {
-    const parsedStart = filters.startDate ? new Date(`${filters.startDate}T00:00:00.000Z`) : null;
-    const parsedEnd = filters.endDate ? new Date(`${filters.endDate}T00:00:00.000Z`) : null;
-    if (parsedStart && !Number.isNaN(parsedStart.getTime())) start = parsedStart;
-    if (parsedEnd && !Number.isNaN(parsedEnd.getTime())) end = addDays(parsedEnd, 1);
-    if (end <= start) end = addDays(start, 1);
-  }
-
-  return {
-    period,
-    startDate: formatDate(start),
-    endDate: formatDate(addDays(end, -1)),
-    startTimestamp: start.toISOString(),
-    endTimestamp: end.toISOString(),
-  };
-}
+export const resolveInventoryReportingWindow = resolveReportingWindow;
 
 async function addInventoryAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string, metadata: Record<string, unknown> = {}) {
   await query(
@@ -72,7 +27,7 @@ async function addInventoryAudit(tenantId: string, actorRole: string, eventType:
   );
 }
 
-export async function getInventoryWorkbench(tenantId = defaultTenantId, filters: InventoryReportingFilters = {}) {
+export async function getInventoryWorkbench(tenantId = defaultTenantId, filters: ReportingWindowFilters = {}) {
   const reportingWindow = resolveInventoryReportingWindow(filters);
   const [summary, items, lots, vendors, assets, movements, rfps, bids, benchmarks, locations, reportBuckets] = await Promise.all([
     query<InventorySummaryRow>(

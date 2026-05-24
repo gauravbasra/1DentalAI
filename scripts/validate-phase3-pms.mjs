@@ -225,6 +225,14 @@ for (const token of ["PmsInventoryVendor", "PmsInventoryCatalogItem", "PmsInvent
   }
 }
 
+for (const token of ["resolveReportingWindow", "Reporting filters", "Apply calendar range", "Practice reporting window", "Huddle reporting window", "period?: string", "startDate?: string", "endDate?: string"]) {
+  const haystack = `${fs.readFileSync("src/lib/reporting-window.ts", "utf8")}\n${reportsPage}\n${fs.readFileSync("src/app/app/huddle/page.tsx", "utf8")}\n${fs.readFileSync("src/lib/patient-intelligence-repository.ts", "utf8")}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
+  if (!haystack.includes(token)) {
+    console.error(`PMS reporting filter token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
 for (const token of ["updatePatientAdministrativeProfile", "addCommunicationPreference", "addPatientConsent", "addMedicalHistoryEntry", "addPatientPharmacy", "Administrative profile", "Communication and consent", "Medical history", "Preferred pharmacy"]) {
   const haystack = `${schema}\n${patientRecordPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {

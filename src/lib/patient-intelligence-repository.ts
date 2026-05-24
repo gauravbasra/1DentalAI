@@ -1,5 +1,6 @@
 import { newId, query } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
+import { resolveReportingWindow, type ReportingWindowFilters } from "@/lib/reporting-window";
 
 async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string | null, metadata?: unknown) {
   await query(
@@ -9,43 +10,44 @@ async function addAudit(tenantId: string, actorRole: string, eventType: string, 
   );
 }
 
-export async function getMorningHuddle(tenantId = defaultTenantId) {
+export async function getMorningHuddle(tenantId = defaultTenantId, filters: ReportingWindowFilters = {}) {
+  const reportingWindow = resolveReportingWindow(filters);
   const [snapshots, yesterday, today, tomorrow, followUps, openings, providerGoals, serviceLines, workQueue, suggestedPatients, analytics] = await Promise.all([
     query(
       `select * from "MorningHuddleSnapshot"
-       where "tenantId" = $1 and "huddleDate"::date = current_date
+       where "tenantId" = $1 and "huddleDate" >= $2::timestamp and "huddleDate" < $3::timestamp
        order by "tab", "sortOrder", "label"`,
-      [tenantId],
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ completedAppointments: string; productionCents: string; collectionsCents: string; brokenAppointments: string }>(
       `select
         count(*) filter (where a."status" = 'COMPLETED')::text as "completedAppointments",
         coalesce(sum(a."productionCents") filter (where a."status" = 'COMPLETED'), 0)::text as "productionCents",
-        coalesce((select sum(abs(le."amountCents")) from "PmsLedgerEntry" le where le."tenantId" = $1 and le."entryType" = 'PAYMENT' and le."postedAt"::date = current_date - interval '1 day'), 0)::text as "collectionsCents",
+        coalesce((select sum(abs(le."amountCents")) from "PmsLedgerEntry" le where le."tenantId" = $1 and le."entryType" = 'PAYMENT' and le."postedAt" >= $2::timestamp and le."postedAt" < $3::timestamp), 0)::text as "collectionsCents",
         count(*) filter (where a."status" in ('BROKEN','CANCELED','NO_SHOW'))::text as "brokenAppointments"
        from "PmsAppointment" a
-       where a."tenantId" = $1 and a."startsAt"::date = current_date - interval '1 day'`,
-      [tenantId],
+       where a."tenantId" = $1 and a."startsAt" >= $2::timestamp and a."startsAt" < $3::timestamp`,
+      [tenantId, reportingWindow.previousStartTimestamp, reportingWindow.startTimestamp],
     ),
     query<{ scheduledAppointments: string; scheduledProductionCents: string; readinessBlocks: string; formsDue: string }>(
       `select
         count(*)::text as "scheduledAppointments",
         coalesce(sum("productionCents"), 0)::text as "scheduledProductionCents",
         count(*) filter (where "readinessStatus" <> 'READY')::text as "readinessBlocks",
-        (select count(*) from "PmsFormAssignment" where "tenantId" = $1 and "status" in ('ASSIGNED','IN_PROGRESS') and ("dueAt" is null or "dueAt"::date <= current_date))::text as "formsDue"
+        (select count(*) from "PmsFormAssignment" where "tenantId" = $1 and "status" in ('ASSIGNED','IN_PROGRESS') and ("dueAt" is null or ("dueAt" >= $2::timestamp and "dueAt" < $3::timestamp)))::text as "formsDue"
        from "PmsAppointment"
-       where "tenantId" = $1 and "startsAt"::date = current_date and "status" not in ('CANCELED','NO_SHOW','BROKEN')`,
-      [tenantId],
+       where "tenantId" = $1 and "startsAt" >= $2::timestamp and "startsAt" < $3::timestamp and "status" not in ('CANCELED','NO_SHOW','BROKEN')`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query<{ scheduledAppointments: string; scheduledProductionCents: string; openings: string; readinessBlocks: string }>(
       `select
         count(*)::text as "scheduledAppointments",
         coalesce(sum("productionCents"), 0)::text as "scheduledProductionCents",
-        greatest((select count(*) from "PmsOperatory" where "tenantId" = $1 and "status" = 'READY') * 8 - count(*), 0)::text as openings,
+        greatest((select count(*) from "PmsOperatory" where "tenantId" = $1 and "status" = 'READY') * 8 * $4::int - count(*), 0)::text as openings,
         count(*) filter (where "readinessStatus" <> 'READY')::text as "readinessBlocks"
        from "PmsAppointment"
-       where "tenantId" = $1 and "startsAt"::date = current_date + interval '1 day' and "status" not in ('CANCELED','NO_SHOW','BROKEN')`,
-      [tenantId],
+       where "tenantId" = $1 and "startsAt" >= $2::timestamp and "startsAt" < $3::timestamp and "status" not in ('CANCELED','NO_SHOW','BROKEN')`,
+      [tenantId, reportingWindow.endTimestamp, reportingWindow.nextEndTimestamp, reportingWindow.days],
     ),
     query<{ openFollowUps: string; highPriority: string; opportunityCents: string }>(
       `select
@@ -56,15 +58,16 @@ export async function getMorningHuddle(tenantId = defaultTenantId) {
        where "tenantId" = $1`,
       [tenantId],
     ),
-    getPerfectTimeSlotOpenings(tenantId),
-    getProviderGoalPacing(tenantId),
-    getServiceLineProduction(tenantId),
-    getHuddleWorkQueue(tenantId),
+    getPerfectTimeSlotOpenings(tenantId, reportingWindow),
+    getProviderGoalPacing(tenantId, reportingWindow),
+    getServiceLineProduction(tenantId, reportingWindow),
+    getHuddleWorkQueue(tenantId, reportingWindow),
     getSuggestedPatients(tenantId),
-    getHuddleAnalytics(tenantId),
+    getHuddleAnalytics(tenantId, reportingWindow),
   ]);
 
   return {
+    reportingWindow,
     snapshots: snapshots.rows,
     yesterday: yesterday.rows[0],
     today: today.rows[0],
@@ -253,20 +256,22 @@ async function getPatientFinderRecipes(tenantId: string) {
   ];
 }
 
-async function getProviderGoalPacing(tenantId: string) {
+type ResolvedReportingWindow = ReturnType<typeof resolveReportingWindow>;
+
+async function getProviderGoalPacing(tenantId: string, window: ResolvedReportingWindow) {
   return (await query(
     `select pr."id", pr."displayName", pr."providerType",
-      case when pr."providerType" in ('RDH','HYGIENIST','HYGIENE') then 120000 else 500000 end::text as "dailyGoalCents",
-      coalesce((select sum(a."productionCents") from "PmsAppointment" a where a."providerId" = pr."id" and a."tenantId" = $1 and a."startsAt"::date = current_date and a."status" not in ('CANCELED','NO_SHOW','BROKEN')), 0)::text as "todayScheduledCents",
-      coalesce((select sum(a."productionCents") from "PmsAppointment" a where a."providerId" = pr."id" and a."tenantId" = $1 and a."startsAt" >= current_date and a."startsAt" < current_date + interval '30 days' and a."status" not in ('CANCELED','NO_SHOW','BROKEN')), 0)::text as "scheduled30Cents",
-      coalesce((select sum(le."amountCents") from "PmsLedgerEntry" le join "PmsProcedureLog" pl on pl."id" = le."procedureLogId" where le."tenantId" = $1 and pl."providerId" = pr."id" and le."amountCents" > 0 and le."serviceDate"::date = current_date - interval '1 day'), 0)::text as "yesterdayProductionCents",
-      coalesce((select sum(le."amountCents") from "PmsLedgerEntry" le join "PmsProcedureLog" pl on pl."id" = le."procedureLogId" where le."tenantId" = $1 and pl."providerId" = pr."id" and le."amountCents" > 0 and coalesce(le."serviceDate", le."postedAt")::date >= current_date - interval '30 days'), 0)::text as "last30RevenueCents",
-      coalesce((select sum(extract(epoch from (a."endsAt" - a."startsAt")) / 3600.0) from "PmsAppointment" a where a."providerId" = pr."id" and a."tenantId" = $1 and a."startsAt"::date = current_date and a."status" not in ('CANCELED','NO_SHOW','BROKEN')), 0)::text as "clinicalHours",
-      coalesce((select count(*) from "PmsAppointment" a where a."providerId" = pr."id" and a."tenantId" = $1 and a."startsAt"::date = current_date and a."readinessStatus" <> 'READY' and a."status" not in ('CANCELED','NO_SHOW','BROKEN')), 0)::text as "readinessBlocks"
+      (case when pr."providerType" in ('RDH','HYGIENIST','HYGIENE') then 120000 else 500000 end * $4::int)::text as "dailyGoalCents",
+      coalesce((select sum(a."productionCents") from "PmsAppointment" a where a."providerId" = pr."id" and a."tenantId" = $1 and a."startsAt" >= $2::timestamp and a."startsAt" < $3::timestamp and a."status" not in ('CANCELED','NO_SHOW','BROKEN')), 0)::text as "todayScheduledCents",
+      coalesce((select sum(a."productionCents") from "PmsAppointment" a where a."providerId" = pr."id" and a."tenantId" = $1 and a."startsAt" >= $3::timestamp and a."startsAt" < $5::timestamp and a."status" not in ('CANCELED','NO_SHOW','BROKEN')), 0)::text as "scheduled30Cents",
+      coalesce((select sum(le."amountCents") from "PmsLedgerEntry" le join "PmsProcedureLog" pl on pl."id" = le."procedureLogId" where le."tenantId" = $1 and pl."providerId" = pr."id" and le."amountCents" > 0 and coalesce(le."serviceDate", le."postedAt") >= $6::timestamp and coalesce(le."serviceDate", le."postedAt") < $2::timestamp), 0)::text as "yesterdayProductionCents",
+      coalesce((select sum(le."amountCents") from "PmsLedgerEntry" le join "PmsProcedureLog" pl on pl."id" = le."procedureLogId" where le."tenantId" = $1 and pl."providerId" = pr."id" and le."amountCents" > 0 and coalesce(le."serviceDate", le."postedAt") >= $2::timestamp and coalesce(le."serviceDate", le."postedAt") < $3::timestamp), 0)::text as "last30RevenueCents",
+      coalesce((select sum(extract(epoch from (a."endsAt" - a."startsAt")) / 3600.0) from "PmsAppointment" a where a."providerId" = pr."id" and a."tenantId" = $1 and a."startsAt" >= $2::timestamp and a."startsAt" < $3::timestamp and a."status" not in ('CANCELED','NO_SHOW','BROKEN')), 0)::text as "clinicalHours",
+      coalesce((select count(*) from "PmsAppointment" a where a."providerId" = pr."id" and a."tenantId" = $1 and a."startsAt" >= $2::timestamp and a."startsAt" < $3::timestamp and a."readinessStatus" <> 'READY' and a."status" not in ('CANCELED','NO_SHOW','BROKEN')), 0)::text as "readinessBlocks"
      from "PmsProvider" pr
      where pr."tenantId" = $1 and pr."status" = 'ACTIVE'
      order by pr."providerType", pr."displayName"`,
-    [tenantId],
+    [tenantId, window.startTimestamp, window.endTimestamp, window.days, window.nextEndTimestamp, window.previousStartTimestamp],
   )).rows.map((row) => ({
     ...row,
     dailyGoalCents: Number(row.dailyGoalCents ?? 0),
@@ -279,7 +284,7 @@ async function getProviderGoalPacing(tenantId: string) {
   }));
 }
 
-async function getServiceLineProduction(tenantId: string) {
+async function getServiceLineProduction(tenantId: string, window: ResolvedReportingWindow) {
   return (await query(
     `with service_lines as (
        select unnest(array['Restorative/elective','Hygiene/perio','Diagnostic/new patient','Other']) as "serviceLine"
@@ -296,7 +301,7 @@ async function getServiceLineProduction(tenantId: string) {
        from "PmsLedgerEntry" le
        left join "PmsProcedureLog" pl on pl."id" = le."procedureLogId"
        left join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
-       where le."tenantId" = $1 and le."amountCents" > 0 and le."serviceDate"::date = current_date - interval '1 day'
+       where le."tenantId" = $1 and le."amountCents" > 0 and coalesce(le."serviceDate", le."postedAt") >= $4::timestamp and coalesce(le."serviceDate", le."postedAt") < $2::timestamp
        group by 1
      ),
      scheduled as (
@@ -307,11 +312,11 @@ async function getServiceLineProduction(tenantId: string) {
           when exists (select 1 from "PmsAppointmentProcedure" ap join "PmsProcedureCode" pc on pc."id" = ap."procedureCodeId" where ap."appointmentId" = a."id" and pc."category" = 'DIAGNOSTIC') or a."appointmentType" ilike '%new%' then 'Diagnostic/new patient'
           else 'Other'
         end as "serviceLine",
-        sum(a."productionCents") filter (where a."startsAt"::date = current_date) as today,
-        sum(a."productionCents") filter (where a."startsAt"::date = current_date + interval '1 day') as tomorrow,
-        count(*) filter (where a."startsAt"::date = current_date and a."readinessStatus" <> 'READY') as blocks
+        sum(a."productionCents") filter (where a."startsAt" >= $2::timestamp and a."startsAt" < $3::timestamp) as today,
+        sum(a."productionCents") filter (where a."startsAt" >= $3::timestamp and a."startsAt" < $5::timestamp) as tomorrow,
+        count(*) filter (where a."startsAt" >= $2::timestamp and a."startsAt" < $3::timestamp and a."readinessStatus" <> 'READY') as blocks
        from "PmsAppointment" a
-       where a."tenantId" = $1 and a."startsAt"::date between current_date and current_date + interval '1 day' and a."status" not in ('CANCELED','NO_SHOW','BROKEN')
+       where a."tenantId" = $1 and a."startsAt" >= $2::timestamp and a."startsAt" < $5::timestamp and a."status" not in ('CANCELED','NO_SHOW','BROKEN')
        group by 1
      )
      select sl."serviceLine",
@@ -323,7 +328,7 @@ async function getServiceLineProduction(tenantId: string) {
      left join completed c on c."serviceLine" = sl."serviceLine"
      left join scheduled s on s."serviceLine" = sl."serviceLine"
      order by case sl."serviceLine" when 'Restorative/elective' then 0 when 'Hygiene/perio' then 1 when 'Diagnostic/new patient' then 2 else 3 end`,
-    [tenantId],
+    [tenantId, window.startTimestamp, window.endTimestamp, window.previousStartTimestamp, window.nextEndTimestamp],
   )).rows.map((row) => ({
     ...row,
     yesterdayCents: Number(row.yesterdayCents ?? 0),
@@ -333,7 +338,7 @@ async function getServiceLineProduction(tenantId: string) {
   }));
 }
 
-async function getHuddleWorkQueue(tenantId: string) {
+async function getHuddleWorkQueue(tenantId: string, window: ResolvedReportingWindow) {
   return (await query(
     `select * from (
        select 'TODAY' as day, 'Readiness blocker' as "workType", p."id" as "patientId", p."firstName", p."lastName", a."startsAt"::text as "eventAt",
@@ -341,7 +346,7 @@ async function getHuddleWorkQueue(tenantId: string) {
         'Clear forms, eligibility, consent, or clinical prep before the visit.' as "nextAction", '/app/pms/schedule' as route, 'front_desk' as "ownerRoleKey"
        from "PmsAppointment" a
        left join "PmsPatient" p on p."id" = a."patientId"
-       where a."tenantId" = $1 and a."startsAt"::date = current_date and a."readinessStatus" <> 'READY' and a."status" not in ('CANCELED','NO_SHOW','BROKEN')
+       where a."tenantId" = $1 and a."startsAt" >= $2::timestamp and a."startsAt" < $3::timestamp and a."readinessStatus" <> 'READY' and a."status" not in ('CANCELED','NO_SHOW','BROKEN')
        union all
        select 'TODAY', 'Treatment in chair', p."id", p."firstName", p."lastName", a."startsAt"::text,
         tp."name", tp."totalFeeCents"::text,
@@ -349,7 +354,7 @@ async function getHuddleWorkQueue(tenantId: string) {
        from "PmsAppointment" a
        join "PmsPatient" p on p."id" = a."patientId"
        join "PmsTreatmentPlan" tp on tp."patientId" = p."id" and tp."tenantId" = $1 and tp."status" in ('PRESENTED','DRAFT')
-       where a."tenantId" = $1 and a."startsAt"::date = current_date and a."status" not in ('CANCELED','NO_SHOW','BROKEN')
+       where a."tenantId" = $1 and a."startsAt" >= $2::timestamp and a."startsAt" < $3::timestamp and a."status" not in ('CANCELED','NO_SHOW','BROKEN')
        union all
        select 'TOMORROW', 'Tomorrow fill', p."id", p."firstName", p."lastName", null,
         'Due recall with no future visit', '15500',
@@ -357,11 +362,11 @@ async function getHuddleWorkQueue(tenantId: string) {
        from "PmsRecall" r
        join "PmsPatient" p on p."id" = r."patientId"
        where r."tenantId" = $1 and r."status" in ('DUE','OVERDUE')
-         and not exists (select 1 from "PmsAppointment" future where future."patientId" = p."id" and future."startsAt" >= current_date and future."status" not in ('CANCELED','NO_SHOW','BROKEN'))
+         and not exists (select 1 from "PmsAppointment" future where future."patientId" = p."id" and future."startsAt" >= $2::timestamp and future."status" not in ('CANCELED','NO_SHOW','BROKEN'))
      ) q
      order by case day when 'TODAY' then 0 else 1 end, "opportunityCents"::int desc, "eventAt" asc nulls last
      limit 12`,
-    [tenantId],
+    [tenantId, window.startTimestamp, window.endTimestamp],
   )).rows.map((row) => ({
     ...row,
     opportunityCents: Number(row.opportunityCents ?? 0),
@@ -408,10 +413,10 @@ async function getSuggestedPatients(tenantId: string) {
   }));
 }
 
-async function getPerfectTimeSlotOpenings(tenantId: string) {
+async function getPerfectTimeSlotOpenings(tenantId: string, window: ResolvedReportingWindow) {
   return (await query(
     `with days as (
-       select generate_series(current_date, current_date + interval '2 days', interval '1 day')::date as day
+       select generate_series($2::date, ($3::date - interval '1 day')::date, interval '1 day')::date as day
      )
      select d.day::text,
        greatest((select count(*) from "PmsOperatory" where "tenantId" = $1 and "status" = 'READY') * 8 - count(a."id"), 0)::text as openings,
@@ -420,11 +425,11 @@ async function getPerfectTimeSlotOpenings(tenantId: string) {
      left join "PmsAppointment" a on a."tenantId" = $1 and a."startsAt"::date = d.day and a."status" not in ('CANCELED','NO_SHOW','BROKEN')
      group by d.day
      order by d.day`,
-    [tenantId],
+    [tenantId, window.startTimestamp, window.nextEndTimestamp],
   )).rows;
 }
 
-async function getHuddleAnalytics(tenantId: string) {
+async function getHuddleAnalytics(tenantId: string, window: ResolvedReportingWindow) {
   const [hygieneRecall, brokenImpact, roomProviderProduction] = await Promise.all([
     query<{ dueCount: string; overdueCount: string; unscheduledDueCount: string; recallOpportunityCents: string; hygieneVisits30: string; hygieneReappointed30: string; reappointmentRate: string }>(
       `with hygiene_fee as (
@@ -451,7 +456,7 @@ async function getHuddleAnalytics(tenantId: string) {
         from "PmsProcedureLog" pl
         join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
         join "PmsPatient" p on p."id" = pl."patientId"
-        where p."tenantId" = $1 and pl."status" = 'COMPLETED' and pc."category" in ('HYGIENE','PERIODONTAL','PREVENTIVE') and pl."serviceDate" >= current_date - interval '30 days'
+        where p."tenantId" = $1 and pl."status" = 'COMPLETED' and pc."category" in ('HYGIENE','PERIODONTAL','PREVENTIVE') and pl."serviceDate" >= $2::timestamp and pl."serviceDate" < $3::timestamp
        ),
        reappointed as (
         select hv."patientId"
@@ -472,7 +477,7 @@ async function getHuddleAnalytics(tenantId: string) {
           else round(((select count(*) from reappointed)::numeric / nullif((select count(*) from hygiene_visits), 0)) * 100)::text
         end as "reappointmentRate"
        from recall_base rb`,
-      [tenantId],
+      [tenantId, window.startTimestamp, window.endTimestamp],
     ),
     query<{ brokenCount: string; noShowCount: string; cancelCount: string; lostProductionCents: string; unscheduledPatientCount: string; recoveredCount: string; recoveredProductionCents: string }>(
       `with broken as (
@@ -484,7 +489,7 @@ async function getHuddleAnalytics(tenantId: string) {
               and future."status" not in ('CANCELED','NO_SHOW','BROKEN')
           ) as recovered
         from "PmsAppointment" a
-        where a."tenantId" = $1 and a."startsAt" >= current_date - interval '30 days' and a."status" in ('CANCELED','BROKEN','NO_SHOW')
+        where a."tenantId" = $1 and a."startsAt" >= $2::timestamp and a."startsAt" < $3::timestamp and a."status" in ('CANCELED','BROKEN','NO_SHOW')
        )
        select count(*)::text as "brokenCount",
         count(*) filter (where "status" = 'NO_SHOW')::text as "noShowCount",
@@ -494,7 +499,7 @@ async function getHuddleAnalytics(tenantId: string) {
         count(*) filter (where recovered)::text as "recoveredCount",
         coalesce(sum("productionCents") filter (where recovered), 0)::text as "recoveredProductionCents"
        from broken`,
-      [tenantId],
+      [tenantId, window.startTimestamp, window.endTimestamp],
     ),
     query<{ roomName: string; providerName: string; scheduledCents: string; bookedMinutes: string; appointmentCount: string }>(
       `select coalesce(op."name", 'Unassigned room') as "roomName",
@@ -506,13 +511,13 @@ async function getHuddleAnalytics(tenantId: string) {
        left join "PmsOperatory" op on op."id" = a."operatoryId"
        left join "PmsProvider" pr on pr."id" = a."providerId"
        where a."tenantId" = $1
-        and a."startsAt" >= current_date
-        and a."startsAt" < current_date + interval '30 days'
+        and a."startsAt" >= $2::timestamp
+        and a."startsAt" < $3::timestamp
         and a."status" not in ('CANCELED','NO_SHOW','BROKEN')
        group by op."name", pr."displayName"
        order by coalesce(sum(a."productionCents"), 0) desc
        limit 6`,
-      [tenantId],
+      [tenantId, window.startTimestamp, window.nextEndTimestamp],
     ),
   ]);
 

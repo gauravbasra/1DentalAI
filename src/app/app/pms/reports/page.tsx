@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { Money, PmsCard, PmsSectionNav } from "@/components/pms-ui";
 import { requireAuth } from "@/lib/auth";
@@ -36,11 +37,12 @@ type DailyProductionRow = {
 
 type Reports = Awaited<ReturnType<typeof getPmsReports>>;
 
-export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
+export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ role?: string; period?: string; startDate?: string; endDate?: string }> }) {
   const params = await searchParams;
   const session = await requireAuth();
   const role = getRole(params.role);
-  const reports = await getPmsReports(session.tenantId);
+  const reports = await getPmsReports(session.tenantId, { period: params.period, startDate: params.startDate, endDate: params.endDate });
+  const reportingWindow = reports.reportingWindow;
   const collectionRate = ratio(reports.collections.paymentsCents, reports.collections.chargesCents);
   const showRate = ratio(reports.schedule.completed, reports.schedule.scheduled);
   const restorativeAcceptance = ratio(reports.restorativeCase.acceptedCents, reports.restorativeCase.presentedCents);
@@ -58,6 +60,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/reports" />
       <PmsSectionNav active="/app/pms/reports" roleKey={role.key} />
+
+      <ReportingFilters basePath="/app/pms/reports" roleKey={role.key} period={reportingWindow.period} startDate={reportingWindow.startDate} endDate={reportingWindow.endDate} label="Practice reporting window" />
 
       <section className="grid gap-3 lg:grid-cols-3">
         <TopMetric label="Prior day production" value={<Money cents={reports.productionTiles.priorDayProductionCents} />} trend={reports.productionTiles.priorDayProductionCents >= 0 ? "up" : "down"} />
@@ -404,6 +408,38 @@ function TrendDot({ trend }: { trend: "up" | "down" | "flat" }) {
 
 function SmallMetric({ label, value }: { label: string; value: React.ReactNode }) {
   return <div className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p><p className="mt-2 text-lg font-semibold text-neutral-950">{value}</p></div>;
+}
+
+function ReportingFilters({ basePath, roleKey, period, startDate, endDate, label }: { basePath: string; roleKey: string; period: string; startDate: string; endDate: string; label: string }) {
+  return (
+    <section className="mb-4 rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cyan-700">Reporting filters</p>
+          <h2 className="mt-1 text-lg font-semibold text-neutral-950">{label}</h2>
+          <p className="mt-1 text-sm text-neutral-600">Showing {period} metrics from {new Date(`${startDate}T00:00:00`).toLocaleDateString()} to {new Date(`${endDate}T00:00:00`).toLocaleDateString()}.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {[
+            ["daily", "Daily"],
+            ["weekly", "Weekly"],
+            ["monthly", "Monthly"],
+          ].map(([value, text]) => (
+            <Link key={value} href={`${basePath}?role=${roleKey}&period=${value}`} className={`rounded-md border px-3 py-2 text-sm font-semibold ${period === value ? "border-neutral-950 bg-neutral-950 text-white" : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"}`}>
+              {text}
+            </Link>
+          ))}
+        </div>
+      </div>
+      <form className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]" action={basePath}>
+        <input type="hidden" name="role" value={roleKey} />
+        <input type="hidden" name="period" value="custom" />
+        <label className="grid gap-1 text-sm font-semibold text-neutral-700">Start date<input name="startDate" type="date" defaultValue={startDate} className="rounded-md border border-neutral-300 px-3 py-2" /></label>
+        <label className="grid gap-1 text-sm font-semibold text-neutral-700">End date<input name="endDate" type="date" defaultValue={endDate} className="rounded-md border border-neutral-300 px-3 py-2" /></label>
+        <button className="self-end rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800">Apply calendar range</button>
+      </form>
+    </section>
+  );
 }
 
 function ratio(numerator: number, denominator: number) {
