@@ -68,7 +68,11 @@ export async function createTwilioCall(input: { tenantId?: string; from: string;
   });
   if (input.statusCallback) {
     body.set("StatusCallback", input.statusCallback);
-    body.set("StatusCallbackEvent", "initiated ringing answered completed");
+    body.append("StatusCallbackEvent", "initiated");
+    body.append("StatusCallbackEvent", "ringing");
+    body.append("StatusCallbackEvent", "answered");
+    body.append("StatusCallbackEvent", "completed");
+    body.set("StatusCallbackMethod", "POST");
   }
   return twilioRequest({ tenantId: input.tenantId, path: "/Calls.json", body });
 }
