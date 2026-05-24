@@ -34,8 +34,7 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
   return (
     <main className="pe-shell min-h-screen bg-[#f4f6f7] text-neutral-950">
       <div className="flex min-h-screen">
-        <PmsGlobalRail roleKey={role.key} />
-        <PmsProductRail roleKey={role.key} dashboard={dashboard} readinessItems={readinessItems} />
+        <PmsGlobalRail roleKey={role.key} dashboard={dashboard} readinessItems={readinessItems} />
 
         <section className="flex min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-20 flex h-20 items-center gap-5 border-b border-neutral-200 bg-white px-6">
@@ -305,37 +304,7 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
   );
 }
 
-function PmsGlobalRail({ roleKey }: { roleKey: string }) {
-  const items = [
-    ["Command", "⌂", `/app/pms?role=${roleKey}`],
-    ["Schedule", "◷", `/app/pms/schedule?role=${roleKey}`],
-    ["Patients", "♙", `/app/pms/patients?role=${roleKey}`],
-    ["Forms", "▤", `/app/pms/forms?role=${roleKey}`],
-    ["Imaging", "▧", `/app/pms/imaging?role=${roleKey}`],
-    ["Scribe", "✎", `/app/pms/scribe?role=${roleKey}`],
-    ["Treat", "◇", `/app/pms/treatment-plans?role=${roleKey}`],
-    ["Ledger", "$", `/app/pms/ledger?role=${roleKey}`],
-    ["Insure", "▣", `/app/pms/insurance?role=${roleKey}`],
-    ["Labs", "□", `/app/pms/labs?role=${roleKey}`],
-    ["Map", "◎", `/app/pms/patient-map?role=${roleKey}`],
-    ["Reports", "▥", `/app/pms/reports?role=${roleKey}`],
-  ];
-
-  return (
-    <aside className="hidden w-[92px] shrink-0 border-r border-neutral-200 bg-[#e9eef2] py-4 xl:block">
-      <nav className="flex h-full flex-col items-center gap-2">
-        {items.map(([label, icon, href]) => (
-          <Link key={label} href={href} className="flex w-full flex-col items-center gap-1 px-2 py-2 text-center text-[11px] font-semibold text-neutral-600 hover:bg-white hover:text-cyan-700">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-white text-lg shadow-sm">{icon}</span>
-            {label}
-          </Link>
-        ))}
-      </nav>
-    </aside>
-  );
-}
-
-function PmsProductRail({
+function PmsGlobalRail({
   roleKey,
   dashboard,
   readinessItems,
@@ -344,47 +313,64 @@ function PmsProductRail({
   dashboard: { activePatients: ReactNode; todayAppointments: ReactNode; openClaimCount: ReactNode };
   readinessItems: Array<{ label: string; value: ReactNode }>;
 }) {
-  const nav = [
-    ["Command", "Live operating view", `/app/pms?role=${roleKey}`],
-    ["Schedule", "Chair flow and holds", `/app/pms/schedule?role=${roleKey}`],
-    ["Patients", "Chart and family record", `/app/pms/patients?role=${roleKey}`],
-    ["Treatment", "Plans, CDT, case acceptance", `/app/pms/treatment-plans?role=${roleKey}`],
-    ["Insurance", "Eligibility and claims", `/app/pms/insurance?role=${roleKey}`],
-    ["Ledger", "Balances and payments", `/app/pms/ledger?role=${roleKey}`],
-    ["Documents", "Forms, EOBs, referrals", `/app/pms/documents?role=${roleKey}`],
-    ["Patient Map", "Geographic demand", `/app/pms/patient-map?role=${roleKey}`],
-    ["Reports", "Production analytics", `/app/pms/reports?role=${roleKey}`],
+  const items = [
+    ["Command", "⌂", "Live operating view", `/app/pms?role=${roleKey}`],
+    ["Schedule", "◷", "Chair flow and holds", `/app/pms/schedule?role=${roleKey}`],
+    ["Patients", "♙", "Chart and family record", `/app/pms/patients?role=${roleKey}`],
+    ["Forms", "▤", "Intake, consents, mapped fields", `/app/pms/forms?role=${roleKey}`],
+    ["Imaging", "▧", "X-rays and study attachments", `/app/pms/imaging?role=${roleKey}`],
+    ["Scribe", "✎", "Clinical notes and AI draft", `/app/pms/scribe?role=${roleKey}`],
+    ["Treatment", "◇", "Plans, CDT, case acceptance", `/app/pms/treatment-plans?role=${roleKey}`],
+    ["Ledger", "$", "Balances and payments", `/app/pms/ledger?role=${roleKey}`],
+    ["Insurance", "▣", "Eligibility and claims", `/app/pms/insurance?role=${roleKey}`],
+    ["Labs", "□", "Cases and delivery risk", `/app/pms/labs?role=${roleKey}`],
+    ["Documents", "▤", "Forms, EOBs, referrals", `/app/pms/documents?role=${roleKey}`],
+    ["Map", "◎", "Geographic demand", `/app/pms/patient-map?role=${roleKey}`],
+    ["Reports", "▥", "Production analytics", `/app/pms/reports?role=${roleKey}`],
   ];
 
   return (
-    <aside className="hidden w-[286px] shrink-0 border-r border-neutral-200 bg-white lg:block">
-      <div className="border-b border-neutral-200 p-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">PMS</p>
-        <h2 className="mt-2 text-2xl font-black tracking-tight text-neutral-950">Dental ops</h2>
-        <p className="mt-2 text-sm leading-6 text-neutral-600">Patient record, schedule, chart, treatment, insurance, ledger, and reports in one work surface.</p>
-      </div>
-      <div className="grid grid-cols-3 gap-2 border-b border-neutral-200 p-4">
-        <MiniRailMetric label="Patients" value={dashboard.activePatients} />
-        <MiniRailMetric label="Today" value={dashboard.todayAppointments} />
-        <MiniRailMetric label="Claims" value={dashboard.openClaimCount} />
-      </div>
-      <nav className="space-y-1 p-3">
-        {nav.map(([label, description, href]) => (
-          <Link key={label} href={href} className="block rounded-xl px-3 py-3 hover:bg-cyan-50">
-            <p className="text-sm font-bold text-neutral-950">{label}</p>
-            <p className="mt-0.5 text-xs text-neutral-500">{description}</p>
+    <aside className="group hidden h-screen w-[92px] shrink-0 overflow-hidden border-r border-neutral-200 bg-[#e9eef2] transition-[width] duration-200 ease-out hover:w-[330px] focus-within:w-[330px] lg:block">
+      <div className="flex h-full min-w-[330px] flex-col">
+        <div className="border-b border-neutral-200 px-4 py-4">
+          <Link href={`/app/pms?role=${roleKey}`} className="flex items-center gap-3">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white text-sm font-black text-cyan-800 shadow-sm">PMS</span>
+            <span className="min-w-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+              <span className="block text-[11px] font-black uppercase tracking-[0.18em] text-cyan-700">PMS</span>
+              <span className="mt-1 block text-xl font-black tracking-tight text-neutral-950">Dental ops</span>
+            </span>
           </Link>
-        ))}
-      </nav>
-      <div className="mx-3 mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-3">
-        <p className="text-xs font-bold uppercase tracking-[0.14em] text-amber-800">Readiness</p>
-        <div className="mt-2 space-y-2">
-          {readinessItems.map((item) => (
-            <div key={item.label} className="flex items-center justify-between text-xs">
-              <span className="text-amber-900">{item.label}</span>
-              <span className="font-black text-amber-950">{item.value}</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2 border-b border-neutral-200 px-3 py-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+          <MiniRailMetric label="Patients" value={dashboard.activePatients} />
+          <MiniRailMetric label="Today" value={dashboard.todayAppointments} />
+          <MiniRailMetric label="Claims" value={dashboard.openClaimCount} />
+        </div>
+        <nav className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3" aria-label="PMS navigation">
+          <div className="grid gap-1">
+            {items.map(([label, icon, description, href]) => (
+              <Link key={label} href={href} title={label} className="grid min-h-14 grid-cols-[56px_1fr] items-center rounded-2xl text-neutral-600 transition hover:bg-white hover:text-cyan-800 hover:shadow-sm focus:bg-white focus:outline-none focus:ring-4 focus:ring-cyan-100">
+                <span className="grid h-11 w-11 place-items-center justify-self-center rounded-xl bg-white text-lg shadow-sm group-hover:bg-neutral-50 group-focus-within:bg-neutral-50">{icon}</span>
+                <span className="min-w-0 pr-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+                  <span className="block truncate text-sm font-black text-neutral-950">{label}</span>
+                  <span className="mt-0.5 block truncate text-xs font-medium text-neutral-500">{description}</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </nav>
+        <div className="border-t border-neutral-200 p-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-amber-800">Readiness</p>
+            <div className="mt-2 space-y-2">
+              {readinessItems.map((item) => (
+                <div key={item.label} className="flex items-center justify-between gap-3 text-xs">
+                  <span className="truncate text-amber-900">{item.label}</span>
+                  <span className="font-black text-amber-950">{item.value}</span>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
       </div>
     </aside>
