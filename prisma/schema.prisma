@@ -2000,6 +2000,248 @@ model PmsLabCase {
   @@index([appointmentId])
 }
 
+model PmsInventoryVendor {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  vendorName         String
+  vendorType         String
+  marketplaceStatus  String   @default("PRIVATE_VENDOR")
+  contactName        String?
+  email              String?
+  phone              String?
+  website            String?
+  paymentTerms       String?
+  reliabilityScore   Int      @default(80)
+  averageLeadDays    Int      @default(5)
+  contractExpiresAt  DateTime?
+  complianceStatus   String   @default("NEEDS_REVIEW")
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantId, marketplaceStatus])
+  @@index([tenantId, vendorType])
+  @@unique([tenantId, vendorName])
+}
+
+model PmsInventoryCatalogItem {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  vendorId            String?
+  sku                 String
+  itemName            String
+  category            String
+  clinicalUse         String?
+  itemType            String   @default("CONSUMABLE")
+  unitOfMeasure       String   @default("each")
+  reorderPoint        Decimal  @default(0)
+  parLevel            Decimal  @default(0)
+  lastUnitCostCents   Int      @default(0)
+  benchmarkCostCents  Int?
+  taxable             Boolean  @default(false)
+  requiresLotTracking Boolean  @default(false)
+  requiresExpiry      Boolean  @default(false)
+  controlledSubstance Boolean  @default(false)
+  status              String   @default("ACTIVE")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([tenantId, category])
+  @@index([tenantId, status])
+  @@unique([tenantId, sku])
+}
+
+model PmsInventoryStockLocation {
+  id           String   @id @default(cuid())
+  tenantId     String
+  locationName String
+  locationType String   @default("STORAGE")
+  operatoryId  String?
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@unique([tenantId, locationName])
+}
+
+model PmsInventoryLot {
+  id                String   @id @default(cuid())
+  tenantId          String
+  itemId            String
+  vendorId          String?
+  locationId        String
+  lotNumber         String?
+  serialNumber      String?
+  expirationDate    DateTime?
+  quantityOnHand    Decimal  @default(0)
+  unitCostCents     Int      @default(0)
+  receivedAt        DateTime @default(now())
+  status            String   @default("ACTIVE")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantId, itemId, status])
+  @@index([tenantId, expirationDate])
+  @@index([tenantId, locationId])
+}
+
+model PmsInventoryMovement {
+  id             String   @id @default(cuid())
+  tenantId       String
+  itemId         String
+  lotId          String?
+  fromLocationId String?
+  toLocationId   String?
+  patientId      String?
+  appointmentId  String?
+  procedureCode  String?
+  movementType   String
+  quantity       Decimal
+  unitCostCents  Int      @default(0)
+  reason         String
+  actorRole      String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, itemId, createdAt])
+  @@index([tenantId, movementType, createdAt])
+  @@index([patientId, createdAt])
+}
+
+model PmsInventoryAsset {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  vendorId              String?
+  locationId            String?
+  assetTag              String
+  assetName             String
+  assetType             String
+  manufacturer          String?
+  modelNumber           String?
+  serialNumber          String?
+  purchaseDate          DateTime?
+  purchaseCostCents     Int      @default(0)
+  warrantyExpiresAt     DateTime?
+  maintenanceIntervalDays Int    @default(180)
+  nextMaintenanceAt     DateTime?
+  status                String   @default("ACTIVE")
+  downtimeRisk          String   @default("LOW")
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([tenantId, nextMaintenanceAt])
+  @@unique([tenantId, assetTag])
+}
+
+model PmsInventoryPurchaseOrder {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  vendorId            String
+  poNumber            String
+  status              String   @default("DRAFT")
+  requestedByRole     String
+  subtotalCents       Int      @default(0)
+  taxCents            Int      @default(0)
+  shippingCents       Int      @default(0)
+  totalCents          Int      @default(0)
+  expectedDeliveryAt  DateTime?
+  approvedAt          DateTime?
+  receivedAt          DateTime?
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([tenantId, expectedDeliveryAt])
+  @@unique([tenantId, poNumber])
+}
+
+model PmsInventoryPurchaseOrderLine {
+  id             String   @id @default(cuid())
+  purchaseOrderId String
+  itemId         String
+  quantity       Decimal
+  unitCostCents  Int
+  receivedQuantity Decimal @default(0)
+  lineTotalCents Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([purchaseOrderId])
+  @@index([itemId])
+}
+
+model PmsInventoryRfp {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  rfpNumber          String
+  title              String
+  status             String   @default("DRAFT")
+  category           String
+  releaseMode        String   @default("PRIVATE")
+  responseDueAt      DateTime?
+  evaluationCriteria Json?
+  awardedVendorId    String?
+  projectedSpendCents Int     @default(0)
+  createdByRole      String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([tenantId, category])
+  @@unique([tenantId, rfpNumber])
+}
+
+model PmsInventoryRfpLine {
+  id          String   @id @default(cuid())
+  rfpId       String
+  itemId      String?
+  itemName    String
+  quantity    Decimal
+  requirements String?
+  createdAt   DateTime @default(now())
+
+  @@index([rfpId])
+}
+
+model PmsInventoryVendorBid {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  rfpId              String
+  vendorId           String
+  status             String   @default("SUBMITTED")
+  bidTotalCents      Int      @default(0)
+  leadDays           Int      @default(5)
+  warrantyTerms      String?
+  notes              String?
+  submittedAt        DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([rfpId])
+  @@unique([rfpId, vendorId])
+}
+
+model PmsInventoryBenchmarkSnapshot {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  itemCategory         String
+  metricName           String
+  practiceValue        Decimal
+  benchmarkMedianValue Decimal
+  percentile           Int      @default(50)
+  peerGroup            String   @default("GENERAL_DENTAL")
+  snapshotDate         DateTime @default(now())
+  source               String   @default("1DENTALAI_NETWORK")
+  createdAt            DateTime @default(now())
+
+  @@index([tenantId, itemCategory, metricName])
+  @@index([snapshotDate])
+}
+
 model PmsTask {
   id            String   @id @default(cuid())
   tenantId      String

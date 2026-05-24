@@ -16,6 +16,7 @@ const requiredFiles = [
   "src/app/app/pms/treatment-plans/page.tsx",
   "src/app/app/pms/ledger/page.tsx",
   "src/app/app/pms/insurance/page.tsx",
+  "src/app/app/pms/inventory/page.tsx",
   "src/app/app/pms/labs/page.tsx",
   "src/app/app/pms/documents/page.tsx",
   "src/app/app/pms/reports/page.tsx",
@@ -33,17 +34,20 @@ const requiredFiles = [
   "src/app/api/pms/chart/[patientId]/route.ts",
   "src/app/api/pms/perio/[patientId]/route.ts",
   "src/app/api/pms/clinical-workflows/route.ts",
+  "src/app/api/pms/inventory/route.ts",
   "src/app/api/pms/perio/[patientId]/complete/route.ts",
   "src/app/api/pms/scribe/generate/route.ts",
   "src/app/api/pms/scribe/save/route.ts",
   "src/app/api/pms/scribe/transcribe/route.ts",
   "src/lib/pms-repository.ts",
+  "src/lib/pms-inventory-repository.ts",
   "src/lib/pms-clinical-workflows.ts",
   "scripts/validate-pms-clinical-workflows.mjs",
   "scripts/validate-pms-scribe-go-live.mjs",
   "scripts/validate-pms-scribe-perio-e2e.mjs",
   "prisma/migrations/202605210001_pms_core/migration.sql",
   "prisma/migrations/202605232130_pms_clinical_process_workflows/migration.sql",
+  "prisma/migrations/202605240815_pms_inventory_marketplace/migration.sql",
 ];
 
 const requiredSchemaModels = [
@@ -92,6 +96,13 @@ const requiredSchemaModels = [
   "PmsPrescription",
   "PmsReferral",
   "PmsLabCase",
+  "PmsInventoryVendor",
+  "PmsInventoryCatalogItem",
+  "PmsInventoryLot",
+  "PmsInventoryMovement",
+  "PmsInventoryAsset",
+  "PmsInventoryRfp",
+  "PmsInventoryVendorBid",
   "PmsTask",
   "PatientEngagementEvent",
   "ReputationRecoveryCase",
@@ -195,12 +206,21 @@ const insurancePage = fs.readFileSync("src/app/app/pms/insurance/page.tsx", "utf
 const ledgerPage = fs.readFileSync("src/app/app/pms/ledger/page.tsx", "utf8");
 const imagingPage = fs.readFileSync("src/app/app/pms/imaging/page.tsx", "utf8");
 const labsPage = fs.readFileSync("src/app/app/pms/labs/page.tsx", "utf8");
+const inventoryPage = fs.readFileSync("src/app/app/pms/inventory/page.tsx", "utf8");
 const documentsPage = fs.readFileSync("src/app/app/pms/documents/page.tsx", "utf8");
 const reportsPage = fs.readFileSync("src/app/app/pms/reports/page.tsx", "utf8");
 for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addToothCondition", "addProcedureLog", "Treatment plan builder", "addTreatmentPlanItem", "updateTreatmentPlanStatus", "Treatment plan was not found in this tenant", "Treatment plan acceptance requires at least one procedure item", "itemUpdate.rowCount !== itemCount", "tenantId: session.tenantId"]) {
   const haystack = `${schema}\n${patientsPage}\n${patientRecordPage}\n${chartPage}\n${treatmentPlanPage}\n${insurancePage}\n${ledgerPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS family/chart production token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["PmsInventoryVendor", "PmsInventoryCatalogItem", "PmsInventoryLot", "PmsInventoryMovement", "PmsInventoryAsset", "PmsInventoryRfp", "PmsInventoryVendorBid", "getInventoryWorkbench", "receiveInventoryStock", "consumeInventoryStock", "createInventoryRfp", "Practice inventory and vendor marketplace"]) {
+  const haystack = `${schema}\n${inventoryPage}\n${fs.readFileSync("src/lib/pms-inventory-repository.ts", "utf8")}\n${fs.readFileSync("src/app/api/pms/inventory/route.ts", "utf8")}`;
+  if (!haystack.includes(token)) {
+    console.error(`PMS inventory marketplace token missing: ${token}`);
     process.exit(1);
   }
 }

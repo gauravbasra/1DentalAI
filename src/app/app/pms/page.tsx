@@ -323,6 +323,7 @@ function PmsGlobalRail({
     ["Treatment", "◇", "Plans, CDT, case acceptance", `/app/pms/treatment-plans?role=${roleKey}`],
     ["Ledger", "$", "Balances and payments", `/app/pms/ledger?role=${roleKey}`],
     ["Insurance", "▣", "Eligibility and claims", `/app/pms/insurance?role=${roleKey}`],
+    ["Inventory", "▦", "Supplies, assets, vendors", `/app/pms/inventory?role=${roleKey}`],
     ["Labs", "□", "Cases and delivery risk", `/app/pms/labs?role=${roleKey}`],
     ["Documents", "▤", "Forms, EOBs, referrals", `/app/pms/documents?role=${roleKey}`],
     ["Map", "◎", "Geographic demand", `/app/pms/patient-map?role=${roleKey}`],
@@ -385,6 +386,7 @@ function MobilePmsDock({ roleKey }: { roleKey: string }) {
     ["Treat", `/app/pms/treatment-plans?role=${roleKey}`],
     ["Insurance", `/app/pms/insurance?role=${roleKey}`],
     ["Ledger", `/app/pms/ledger?role=${roleKey}`],
+    ["Inventory", `/app/pms/inventory?role=${roleKey}`],
     ["Map", `/app/pms/patient-map?role=${roleKey}`],
     ["Reports", `/app/pms/reports?role=${roleKey}`],
   ];
