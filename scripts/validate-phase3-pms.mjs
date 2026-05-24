@@ -129,6 +129,7 @@ execFileSync(process.execPath, ["scripts/validate-pms-clinical-workflows.mjs"], 
 execFileSync(process.execPath, ["scripts/validate-pms-eligibility-rpa.mjs"], { stdio: "inherit" });
 execFileSync(process.execPath, ["scripts/validate-pms-eligibility-artifacts.mjs"], { stdio: "inherit" });
 execFileSync(process.execPath, ["scripts/validate-payer-portal-browser-runner.mjs"], { stdio: "inherit" });
+execFileSync(process.execPath, ["scripts/validate-payer-portal-demo-e2e.mjs"], { stdio: "inherit" });
 execFileSync(process.execPath, ["scripts/validate-rcm-payer-artifacts.mjs"], { stdio: "inherit" });
 execFileSync(process.execPath, ["scripts/validate-pms-scribe-go-live.mjs"], { stdio: "inherit" });
 

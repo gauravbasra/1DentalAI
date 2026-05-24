@@ -18,6 +18,7 @@ const migration = read("prisma/migrations/202605232245_pms_eligibility_rpa_evide
 const service = read("src/lib/pms-eligibility-rpa.ts");
 const payerService = read("src/lib/payer-network-repository.ts");
 const browserRunner = read("src/lib/payer-portal-browser-runner.ts");
+const portalDemo = read("scripts/validate-payer-portal-demo-e2e.mjs");
 const artifacts = read("src/lib/pms-eligibility-artifacts.ts");
 const route = read("src/app/api/pms/insurance/eligibility-rpa/route.ts");
 const pkg = read("package.json");
@@ -145,6 +146,19 @@ requireTokens("browser runner", browserRunner, [
   "fieldEvidenceHash",
   "PAYER_SCREENSHOT_REFERENCE",
   "sha256",
+]);
+
+requireTokens("payer portal demo e2e", portalDemo, [
+  "executeEligibilityPortalBrowserRunWithCredentials",
+  "browser-login-eligibility-extract-evidence-writeback",
+  "PAYER_PORTAL_DEMO_DB_TEST",
+  "PmsPatientInsurance",
+  "PmsBenefitSummary",
+  "PmsEligibilityEvidence",
+  "PayerRpaRunLog",
+  "PayerGeneratedArtifactReference",
+  "browser moved screens",
+  "no PHI/credential leakage in manifest",
 ]);
 
 requireTokens("eligibility artifacts", artifacts, [

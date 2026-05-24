@@ -14,6 +14,8 @@ Build eligibility runs from payer route readiness through RPA/clearinghouse evid
 
 QA pass requires: no PHI in logs, failed payer portal selectors fail closed, PDF and screenshot artifact checksums exist, benefit summary writes to patient coverage only after review, and appointment readiness updates from real evidence.
 
+The Phase 2 demo must use the same browser runner that real payer portals use. A non-PHI portal fixture is acceptable only for local/CI proof of browser movement, extraction, evidence capture, and PMS writeback; real payer go-live still requires portal URL, validated credential reference, layout selectors, MFA handling, and payer-specific QA signoff.
+
 ## Phase 3: Claims, EOB, ERA, And Ledger Posting
 
 Build 837D claim creation, line-level validation, 277CA ack handling, 276/277 claim status, 835 ERA import, EOB PDF generation, denial case creation, and idempotent ledger posting.
