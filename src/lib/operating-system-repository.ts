@@ -1708,17 +1708,17 @@ export async function updatePhoneOutboundMessageApproval(id: string, approvalSta
   const result = await query<{ tenantId: string; appliedStatus: string; deliveryStatus: string; connectorStatus: string; blockedReason: string | null }>(
     `update "PhoneOutboundMessage"
      set "approvalStatus" = case
-         when $2 = 'APPROVED_STAGED' and "consentStatus" <> 'VERIFIED' then 'BLOCKED'
-         when $2 = 'APPROVED_STAGED' and coalesce("blockedReason", '') <> '' then 'BLOCKED'
-         else $2
+         when $2::text = 'APPROVED_STAGED' and "consentStatus" <> 'VERIFIED' then 'BLOCKED'
+         when $2::text = 'APPROVED_STAGED' and coalesce("blockedReason", '') <> '' then 'BLOCKED'
+         else $2::text
        end,
        "deliveryStatus" = case
-         when $2 = 'APPROVED_STAGED' and "consentStatus" = 'VERIFIED' and coalesce("blockedReason", '') = '' and "connectorStatus" = 'READY_FOR_CONNECTOR' then 'READY_FOR_CONNECTOR'
-         when $2 = 'APPROVED_STAGED' and "consentStatus" = 'VERIFIED' and coalesce("blockedReason", '') = '' and "connectorStatus" <> 'READY_FOR_CONNECTOR' then 'BLOCKED_CONNECTOR_REQUIRED'
+         when $2::text = 'APPROVED_STAGED' and "consentStatus" = 'VERIFIED' and coalesce("blockedReason", '') = '' and "connectorStatus" = 'READY_FOR_CONNECTOR' then 'READY_FOR_CONNECTOR'
+         when $2::text = 'APPROVED_STAGED' and "consentStatus" = 'VERIFIED' and coalesce("blockedReason", '') = '' and "connectorStatus" <> 'READY_FOR_CONNECTOR' then 'BLOCKED_CONNECTOR_REQUIRED'
          else "deliveryStatus"
        end,
        "blockedReason" = case
-         when $2 = 'APPROVED_STAGED' and "consentStatus" <> 'VERIFIED' then 'Cannot approve outbound message until patient channel consent is verified.'
+         when $2::text = 'APPROVED_STAGED' and "consentStatus" <> 'VERIFIED' then 'Cannot approve outbound message until patient channel consent is verified.'
          else "blockedReason"
        end,
        "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('approvedByRole', $3::text, 'approvedAt', current_timestamp, 'externalSendBlocked', "connectorStatus" <> 'READY_FOR_CONNECTOR'),
