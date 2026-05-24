@@ -22,7 +22,10 @@ export const pmsNav = [
 
 export function PmsSectionNav({ active, roleKey }: { active: string; roleKey: string }) {
   return (
-    <nav aria-label="PMS section navigation" className="app-scrollbar sticky top-[124px] z-30 mb-4 flex gap-1 overflow-x-auto rounded-lg border border-neutral-200 bg-white p-1 shadow-sm md:top-[112px] xl:top-[96px]">
+    <nav
+      aria-label="PMS section navigation"
+      className="app-scrollbar sticky top-0 z-40 -mx-4 mb-4 flex gap-1 overflow-x-auto border-b border-neutral-200 bg-white/95 px-4 py-2 shadow-sm backdrop-blur sm:-mx-6 sm:px-6 xl:-mx-8 xl:px-8"
+    >
       {pmsNav.map((item) => (
         <Link
           key={item.href}
