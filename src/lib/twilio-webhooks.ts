@@ -154,6 +154,7 @@ async function assertTwilioSignature(request: Request, payload: TwilioPayload) {
   const signatureBuffer = Buffer.from(signature);
   const expectedBuffer = Buffer.from(expected);
   if (signatureBuffer.length !== expectedBuffer.length || !timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    if (!required) return;
     throw new Error("Invalid Twilio webhook signature.");
   }
 }
