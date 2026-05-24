@@ -337,6 +337,31 @@ for (const token of ["getBenefitUtilizationLedger", "payerReportedAnnualUsedCent
     failures.push(`src/lib/pms-repository.ts: missing benefit consumption ledger token ${token}.`);
   }
 }
+for (const token of ["PmsBenefitFact", "PmsBenefitRule", "PmsTreatmentCoverageAnalysis", "PmsPayerCasePacket"]) {
+  if (!prismaSchema.includes(`model ${token}`)) {
+    failures.push(`prisma/schema.prisma: missing Phase 3 benefit case model ${token}.`);
+  }
+}
+for (const token of [
+  "buildTreatmentBenefitCase",
+  "listTreatmentBenefitCaseWorkup",
+  "PAYER_BENEFIT_CASE_PACKET_GENERATED",
+  "This is not a benefit guarantee",
+  "posted paid claims",
+  "pending claim exposure",
+  "frequency before quoting",
+  "Prior authorization or predetermination packet",
+]) {
+  if (!repositorySource.includes(token)) {
+    failures.push(`src/lib/pms-repository.ts: missing Phase 3 benefit case token ${token}.`);
+  }
+}
+const treatmentPlanApi = fs.readFileSync(path.join(root, "src/app/api/pms/treatment-plans/route.ts"), "utf8");
+for (const token of ["POST", "buildBenefitCase", "auth.session.tenantId", "auth.session.roleKey"]) {
+  if (!treatmentPlanApi.includes(token)) {
+    failures.push(`src/app/api/pms/treatment-plans/route.ts: missing benefit case API token ${token}.`);
+  }
+}
 for (const token of ["getFormAssignmentDetail(assignmentId: string, tenantId = defaultTenantId)", "recordFormResponse(input: {", "tenantId?: string;", "reviewProfileChangeRequest(input: {", "applyProfileChange(change.patientId, change.targetModel, change.targetField, change.proposedValue, tenantId)", "updateDocumentStatus(documentId: string, status: string, actorRole = \"front_desk\", tenantId = defaultTenantId)", "updateLabCaseStatus(labCaseId: string, status: string, actorRole = \"dental_assistant\", tenantId = defaultTenantId)"]) {
   if (!repositorySource.includes(token)) {
     failures.push(`src/lib/pms-repository.ts: missing tenant-filtered PMS mutation/read helper token ${token}.`);

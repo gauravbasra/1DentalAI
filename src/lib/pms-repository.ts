@@ -3061,7 +3061,16 @@ export async function listTreatmentPlans(tenantId = defaultTenantId) {
   return (await query(
     `select tp.*, p."firstName", p."lastName", p."chartNumber", pr."displayName" as "providerName",
        coalesce(items.item_count, 0)::int as "itemCount",
-       coalesce(items.accepted_count, 0)::int as "acceptedItemCount"
+       coalesce(items.accepted_count, 0)::int as "acceptedItemCount",
+       packet."id" as "casePacketId",
+       packet."packetStatus" as "casePacketStatus",
+       packet."summary" as "caseSummary",
+       packet."confidenceScore" as "caseConfidenceScore",
+       packet."estimatedInsuranceCents" as "caseInsuranceEstimateCents",
+       packet."estimatedPatientCents" as "casePatientEstimateCents",
+       coalesce(coverage_analysis.analysis_count, 0)::int as "coverageAnalysisCount",
+       coalesce(coverage_analysis.blocked_count, 0)::int as "coverageBlockedCount",
+       coalesce(coverage_analysis.review_count, 0)::int as "coverageReviewCount"
      from "PmsTreatmentPlan" tp
      join "PmsPatient" p on p."id" = tp."patientId"
      left join "PmsProvider" pr on pr."id" = tp."providerId"
@@ -3070,10 +3079,70 @@ export async function listTreatmentPlans(tenantId = defaultTenantId) {
        from "PmsTreatmentPlanItem"
        group by "treatmentPlanId"
      ) items on items."treatmentPlanId" = tp."id"
+     left join lateral (
+       select pp.*
+       from "PmsPayerCasePacket" pp
+       where pp."tenantId" = tp."tenantId" and pp."treatmentPlanId" = tp."id"
+       order by pp."generatedAt" desc
+       limit 1
+     ) packet on true
+     left join lateral (
+       select count(*) as analysis_count,
+         count(*) filter (where ca."coverageStatus" like 'BLOCKED%') as blocked_count,
+         count(*) filter (where ca."coverageStatus" in ('NEEDS_REVIEW','LIMIT_REVIEW','PRIOR_AUTH_REVIEW')) as review_count
+       from "PmsTreatmentCoverageAnalysis" ca
+       where ca."tenantId" = tp."tenantId" and ca."treatmentPlanId" = tp."id"
+     ) coverage_analysis on true
      where tp."tenantId" = $1
      order by tp."updatedAt" desc`,
     [tenantId],
   )).rows;
+}
+
+export async function listTreatmentBenefitCaseWorkup(tenantId = defaultTenantId) {
+  const [analyses, packets, facts, rules] = await Promise.all([
+    query(
+      `select ca.*, tp."name" as "planName", p."firstName", p."lastName", p."chartNumber", ip."payerName", ip."planName" as "insurancePlanName"
+       from "PmsTreatmentCoverageAnalysis" ca
+       join "PmsTreatmentPlan" tp on tp."id" = ca."treatmentPlanId" and tp."tenantId" = ca."tenantId"
+       join "PmsPatient" p on p."id" = tp."patientId" and p."tenantId" = ca."tenantId"
+       join "PmsPatientInsurance" pi on pi."id" = ca."patientInsuranceId" and pi."tenantId" = ca."tenantId"
+       join "PmsInsurancePlan" ip on ip."id" = pi."planId" and ip."tenantId" = ca."tenantId"
+       where ca."tenantId" = $1
+       order by ca."updatedAt" desc
+       limit 80`,
+      [tenantId],
+    ),
+    query(
+      `select pp.*, tp."name" as "planName", p."firstName", p."lastName", p."chartNumber", ip."payerName"
+       from "PmsPayerCasePacket" pp
+       join "PmsTreatmentPlan" tp on tp."id" = pp."treatmentPlanId" and tp."tenantId" = pp."tenantId"
+       join "PmsPatient" p on p."id" = tp."patientId" and p."tenantId" = pp."tenantId"
+       join "PmsPatientInsurance" pi on pi."id" = pp."patientInsuranceId" and pi."tenantId" = pp."tenantId"
+       join "PmsInsurancePlan" ip on ip."id" = pi."planId" and ip."tenantId" = pp."tenantId"
+       where pp."tenantId" = $1
+       order by pp."generatedAt" desc
+       limit 30`,
+      [tenantId],
+    ),
+    query(
+      `select *
+       from "PmsBenefitFact"
+       where "tenantId" = $1
+       order by "createdAt" desc
+       limit 60`,
+      [tenantId],
+    ),
+    query(
+      `select *
+       from "PmsBenefitRule"
+       where "tenantId" = $1
+       order by "updatedAt" desc
+       limit 60`,
+      [tenantId],
+    ),
+  ]);
+  return { analyses: analyses.rows, packets: packets.rows, facts: facts.rows, rules: rules.rows };
 }
 
 export async function createTreatmentPlan(input: {
@@ -3157,6 +3226,362 @@ export async function addTreatmentPlanItem(input: {
   });
   await addAudit(tenantId, input.actorRole ?? "treatment_coordinator", "TREATMENT_PLAN_ITEM_ADDED", "PmsTreatmentPlan", input.treatmentPlanId, "ALLOWED", { procedureCodeId: input.procedureCodeId });
   return result;
+}
+
+type TreatmentBenefitItem = {
+  id: string;
+  procedureCodeId: string;
+  cdtCode: string;
+  description: string;
+  procedureCategory: string;
+  feeCents: number;
+  tooth: string | null;
+  surface: string | null;
+};
+
+function stringifyBenefitJson(value: unknown) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function procedureCoveragePercent(category: string, code: string) {
+  const normalized = category.toUpperCase();
+  if (["DIAGNOSTIC", "PREVENTIVE"].includes(normalized) || /^D0|^D1/.test(code)) return 0.8;
+  if (["RESTORATIVE", "BASIC", "PERIODONTAL", "ENDODONTIC"].includes(normalized) || /^D2|^D3|^D4/.test(code)) return 0.5;
+  if (["CROWN", "PROSTHODONTIC", "IMPLANT", "ORAL_SURGERY"].includes(normalized) || /^D5|^D6|^D7/.test(code)) return 0.5;
+  if (normalized.includes("ORTHO") || /^D8/.test(code)) return 0;
+  return 0.5;
+}
+
+function benefitRuleHints(text: string) {
+  const lower = text.toLowerCase();
+  return [
+    lower.includes("frequency") || lower.includes("per benefit year") || lower.includes("per year") ? "FREQUENCY_LIMIT" : null,
+    lower.includes("waiting") ? "WAITING_PERIOD" : null,
+    lower.includes("missing tooth") ? "MISSING_TOOTH_CLAUSE" : null,
+    lower.includes("replacement") || lower.includes("replace") ? "REPLACEMENT_CLAUSE" : null,
+    lower.includes("prior auth") || lower.includes("preauth") || lower.includes("pre-authorization") || lower.includes("predetermination") ? "PRIOR_AUTH_OR_PREDETERMINATION" : null,
+    lower.includes("downgrade") || lower.includes("alternate benefit") ? "DOWNGRADE_OR_ALTERNATE_BENEFIT" : null,
+    lower.includes("age") || lower.includes("under ") || lower.includes("through age") ? "AGE_LIMIT" : null,
+  ].filter(Boolean) as string[];
+}
+
+function requiredAttachmentsForItem(item: TreatmentBenefitItem, blockers: string[]) {
+  const category = item.procedureCategory.toUpperCase();
+  const attachments = new Set<string>();
+  if (["PERIODONTAL"].includes(category) || /^D4/.test(item.cdtCode)) attachments.add("Perio chart and periodontal diagnosis");
+  if (["CROWN", "PROSTHODONTIC", "IMPLANT", "ENDODONTIC", "ORAL_SURGERY"].includes(category) || /^D2|^D3|^D5|^D6|^D7/.test(item.cdtCode)) {
+    attachments.add("Current diagnostic X-ray");
+    attachments.add("Clinical narrative with tooth/site and medical necessity");
+  }
+  if (blockers.some((blocker) => /prior auth|predetermination/i.test(blocker))) attachments.add("Prior authorization or predetermination packet");
+  if (blockers.some((blocker) => /replacement|missing tooth/i.test(blocker))) attachments.add("Prior placement/loss date evidence and payer history");
+  return Array.from(attachments);
+}
+
+export async function buildTreatmentBenefitCase(input: {
+  tenantId?: string;
+  actorRole?: string;
+  treatmentPlanId: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const actorRole = input.actorRole ?? "billing_rcm";
+  return withTransaction(async (client) => {
+    const plan = (await client.query<{
+      id: string;
+      patientId: string;
+      providerId: string | null;
+      name: string;
+      status: string;
+      firstName: string;
+      lastName: string;
+      chartNumber: string;
+    }>(
+      `select tp."id", tp."patientId", tp."providerId", tp."name", tp."status", p."firstName", p."lastName", p."chartNumber"
+       from "PmsTreatmentPlan" tp
+       join "PmsPatient" p on p."id" = tp."patientId" and p."tenantId" = tp."tenantId"
+       where tp."tenantId" = $1 and tp."id" = $2
+       for update`,
+      [tenantId, input.treatmentPlanId],
+    )).rows[0];
+    if (!plan) throw new Error("Treatment plan was not found in this tenant.");
+
+    const coverage = (await client.query<{
+      patientInsuranceId: string;
+      payerName: string;
+      planName: string;
+      eligibilityStatus: string;
+      benefitYear: number | null;
+      deductibleCents: number | null;
+      deductibleMetCents: number | null;
+      annualMaxCents: number | null;
+      annualUsedCents: number | null;
+      frequencies: unknown;
+      limitations: unknown;
+      evidenceId: string | null;
+      sourceTraceId: string | null;
+      pdfArtifactId: string | null;
+    }>(
+      `select pi."id" as "patientInsuranceId", ip."payerName", ip."planName", pi."eligibilityStatus",
+         bs."benefitYear", bs."deductibleCents", bs."deductibleMetCents", bs."annualMaxCents", bs."annualUsedCents", bs."frequencies", bs."limitations",
+         ev."id" as "evidenceId", ev."sourceTraceId", ev."pdfArtifactId"
+       from "PmsPatientInsurance" pi
+       join "PmsInsurancePlan" ip on ip."id" = pi."planId" and ip."tenantId" = pi."tenantId"
+       left join lateral (
+         select bs.*
+         from "PmsBenefitSummary" bs
+         where bs."tenantId" = pi."tenantId" and bs."patientInsuranceId" = pi."id"
+         order by case when bs."benefitYear" = extract(year from current_date)::int then 0 else 1 end, bs."benefitYear" desc
+         limit 1
+       ) bs on true
+       left join lateral (
+         select ev.*
+         from "PmsEligibilityEvidence" ev
+         where ev."tenantId" = pi."tenantId" and ev."patientInsuranceId" = pi."id"
+         order by ev."createdAt" desc
+         limit 1
+       ) ev on true
+       where pi."tenantId" = $1 and pi."patientId" = $2 and pi."priority" = 1
+       order by case when pi."eligibilityStatus" = 'ACTIVE' then 0 else 1 end, pi."updatedAt" desc
+       limit 1`,
+      [tenantId, plan.patientId],
+    )).rows[0];
+    if (!coverage) throw new Error("Benefit case requires primary patient insurance.");
+
+    const items = (await client.query<TreatmentBenefitItem>(
+      `select tpi."id", tpi."procedureCodeId", pc."code" as "cdtCode", pc."description", pc."category" as "procedureCategory",
+         tpi."feeCents", tpi."tooth", tpi."surface"
+       from "PmsTreatmentPlanItem" tpi
+       join "PmsProcedureCode" pc on pc."id" = tpi."procedureCodeId" and pc."tenantId" = $2
+       where tpi."treatmentPlanId" = $1
+       order by tpi."phase", tpi."sequence"`,
+      [plan.id, tenantId],
+    )).rows;
+    if (!items.length) throw new Error("Benefit case requires treatment plan items.");
+
+    const benefitYear = Number(coverage.benefitYear ?? new Date().getFullYear());
+    const claimUsage = (await client.query<{
+      postedPaidCents: number;
+      pendingBilledCents: number;
+      openClaimCount: number;
+    }>(
+      `select coalesce(sum(c."paidCents") filter (where c."status" in ('PAID','PARTIAL','CLOSED')), 0)::int as "postedPaidCents",
+         coalesce(sum(c."billedCents") filter (where c."status" not in ('PAID','CLOSED','VOID','DENIED','REJECTED')), 0)::int as "pendingBilledCents",
+         count(*) filter (where c."status" not in ('PAID','CLOSED','VOID','DENIED','REJECTED'))::int as "openClaimCount"
+       from "PmsClaim" c
+       where c."tenantId" = $1 and c."patientInsuranceId" = $2
+         and extract(year from coalesce(c."submittedAt", c."createdAt"))::int = $3`,
+      [tenantId, coverage.patientInsuranceId, benefitYear],
+    )).rows[0] ?? { postedPaidCents: 0, pendingBilledCents: 0, openClaimCount: 0 };
+    const annualMaxCents = Number(coverage.annualMaxCents ?? 0);
+    const payerReportedAnnualUsedCents = Number(coverage.annualUsedCents ?? 0);
+    const postedPaidCents = Number(claimUsage.postedPaidCents ?? 0);
+    const pendingBilledCents = Number(claimUsage.pendingBilledCents ?? 0);
+    const effectiveUsedCents = Math.max(payerReportedAnnualUsedCents, postedPaidCents);
+    let remainingCursor = annualMaxCents > 0 ? Math.max(annualMaxCents - effectiveUsedCents - pendingBilledCents, 0) : 0;
+
+    const facts = [
+      ["eligibility_status", "Eligibility status", coverage.eligibilityStatus, "TEXT"],
+      ["annual_max", "Annual maximum", annualMaxCents, "MONEY"],
+      ["payer_reported_annual_used", "Payer reported annual used", payerReportedAnnualUsedCents, "MONEY"],
+      ["posted_paid_claims", "Posted paid claims this benefit year", postedPaidCents, "MONEY"],
+      ["pending_claim_exposure", "Pending open claim exposure", pendingBilledCents, "MONEY"],
+      ["estimated_remaining", "Estimated remaining before proposed treatment", remainingCursor, "MONEY"],
+      ["deductible", "Deductible", Number(coverage.deductibleCents ?? 0), "MONEY"],
+      ["deductible_met", "Deductible met", Number(coverage.deductibleMetCents ?? 0), "MONEY"],
+      ["frequencies", "Frequency limits", coverage.frequencies ?? null, "JSON"],
+      ["limitations", "Limitations", coverage.limitations ?? null, "JSON"],
+    ] as const;
+    const factIds: Record<string, string> = {};
+    for (const [factKey, factLabel, factValue, valueType] of facts) {
+      const id = newId("bfact");
+      factIds[factKey] = id;
+      await client.query(
+        `insert into "PmsBenefitFact"
+           ("id", "tenantId", "patientInsuranceId", "sourceEvidenceId", "sourceType", "factKey", "factLabel", "factValue", "valueType", "benefitYear", "confidenceScore", "sourceTraceId", "evidenceArtifactId")
+         values ($1, $2, $3, $4, 'ELIGIBILITY_CLAIMS_TREATMENT_CASE', $5, $6, $7::jsonb, $8, $9, $10, $11, $12)`,
+        [
+          id,
+          tenantId,
+          coverage.patientInsuranceId,
+          coverage.evidenceId,
+          factKey,
+          factLabel,
+          JSON.stringify(factValue),
+          valueType,
+          benefitYear,
+          coverage.evidenceId ? 88 : 65,
+          coverage.sourceTraceId,
+          coverage.pdfArtifactId,
+        ],
+      );
+    }
+
+    const ruleTexts = [stringifyBenefitJson(coverage.frequencies), stringifyBenefitJson(coverage.limitations)].filter(Boolean);
+    const ruleIds: string[] = [];
+    for (const text of ruleTexts) {
+      const hints = benefitRuleHints(text);
+      for (const hint of hints.length ? hints : ["FREE_TEXT_LIMITATION"]) {
+        const id = newId("brule");
+        ruleIds.push(id);
+        await client.query(
+          `insert into "PmsBenefitRule"
+             ("id", "tenantId", "patientInsuranceId", "sourceFactId", "ruleType", "ruleKey", "ruleText", "benefitYear", "status", "confidenceScore")
+           values ($1, $2, $3, $4, $5, $6, $7, $8, 'NEEDS_REVIEW', $9)`,
+          [id, tenantId, coverage.patientInsuranceId, factIds.limitations ?? factIds.frequencies ?? null, hint, hint.toLowerCase(), text.slice(0, 2000), benefitYear, coverage.evidenceId ? 80 : 55],
+        );
+      }
+    }
+
+    const priorHistory = (await client.query<{
+      cdtCode: string;
+      paidCount: number;
+      latestServiceDate: string | null;
+    }>(
+      `select pc."code" as "cdtCode",
+         count(*) filter (where c."status" in ('PAID','PARTIAL','CLOSED'))::int as "paidCount",
+         max(cl."serviceDate")::text as "latestServiceDate"
+       from "PmsClaimLine" cl
+       join "PmsClaim" c on c."id" = cl."claimId" and c."tenantId" = $1 and c."patientInsuranceId" = $2
+       join "PmsProcedureCode" pc on pc."id" = cl."procedureCodeId" and pc."tenantId" = $1
+       where extract(year from coalesce(cl."serviceDate", c."createdAt"))::int = $3
+       group by pc."code"`,
+      [tenantId, coverage.patientInsuranceId, benefitYear],
+    )).rows.reduce((map, row) => map.set(row.cdtCode, row), new Map<string, { cdtCode: string; paidCount: number; latestServiceDate: string | null }>());
+
+    let totalInsurance = 0;
+    let totalPatient = 0;
+    const packetBlockers: string[] = [];
+    const requiredAttachments = new Set<string>();
+    await client.query(`delete from "PmsTreatmentCoverageAnalysis" where "tenantId" = $1 and "treatmentPlanId" = $2 and "patientInsuranceId" = $3`, [tenantId, plan.id, coverage.patientInsuranceId]);
+
+    for (const item of items) {
+      const prior = priorHistory.get(item.cdtCode);
+      const blockers = [
+        coverage.eligibilityStatus === "ACTIVE" ? null : "Eligibility is not active.",
+        annualMaxCents > 0 ? null : "Annual maximum is unknown.",
+        remainingCursor > 0 ? null : "Annual maximum appears exhausted before this treatment item.",
+        prior && prior.paidCount > 0 ? `${item.cdtCode} has paid claim history in this benefit year; verify frequency before quoting.` : null,
+        ...ruleTexts.flatMap((text) => benefitRuleHints(text).map((hint) => `${hint.replaceAll("_", " ").toLowerCase()} requires review.`)),
+      ].filter(Boolean) as string[];
+      const percent = procedureCoveragePercent(item.procedureCategory, item.cdtCode);
+      const rawInsurance = Math.round(Number(item.feeCents ?? 0) * percent);
+      const estimatedInsurance = blockers.some((blocker) => /exhausted|unknown|not active/i.test(blocker)) ? 0 : Math.min(rawInsurance, remainingCursor);
+      const remainingBefore = remainingCursor;
+      remainingCursor = Math.max(remainingCursor - estimatedInsurance, 0);
+      const estimatedPatient = Number(item.feeCents ?? 0) - estimatedInsurance;
+      const attachments = requiredAttachmentsForItem(item, blockers);
+      attachments.forEach((attachment) => requiredAttachments.add(attachment));
+      packetBlockers.push(...blockers);
+      totalInsurance += estimatedInsurance;
+      totalPatient += estimatedPatient;
+      const coverageStatus = blockers.length ? (estimatedInsurance === 0 ? "BLOCKED_BENEFIT_REVIEW" : "NEEDS_REVIEW") : "ESTIMATED_PENDING_REVIEW";
+      await client.query(
+        `insert into "PmsTreatmentCoverageAnalysis"
+           ("id", "tenantId", "treatmentPlanId", "treatmentPlanItemId", "patientInsuranceId", "procedureCodeId", "cdtCode", "procedureCategory",
+            "feeCents", "estimatedInsuranceCents", "estimatedPatientCents", "remainingBeforeCents", "remainingAfterCents", "coverageStatus",
+            "denialRisk", "confidenceScore", "matchedRuleIds", "blockers", "requiredActions", "evidenceSummary")
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::text[], $18::jsonb, $19::jsonb, $20::jsonb)`,
+        [
+          newId("tcov"),
+          tenantId,
+          plan.id,
+          item.id,
+          coverage.patientInsuranceId,
+          item.procedureCodeId,
+          item.cdtCode,
+          item.procedureCategory,
+          item.feeCents,
+          estimatedInsurance,
+          estimatedPatient,
+          remainingBefore,
+          remainingCursor,
+          coverageStatus,
+          blockers.length ? "MEDIUM_OR_HIGH" : "LOW_ESTIMATE_NOT_GUARANTEE",
+          blockers.length ? 55 : 78,
+          ruleIds,
+          JSON.stringify(blockers),
+          JSON.stringify([
+            blockers.length ? "Review payer portal/271 evidence before presenting final patient estimate." : "Staff review required before quoting; estimate is not a guarantee.",
+            attachments.length ? `Attach: ${attachments.join(", ")}` : "No special attachment inferred from current item category.",
+          ]),
+          JSON.stringify({
+            benefitYear,
+            annualMaxCents,
+            payerReportedAnnualUsedCents,
+            postedPaidCents,
+            pendingBilledCents,
+            priorPaidClaimCountForCdt: prior?.paidCount ?? 0,
+            sourceEvidenceId: coverage.evidenceId,
+            sourceTraceId: coverage.sourceTraceId,
+          }),
+        ],
+      );
+    }
+
+    const uniqueBlockers = Array.from(new Set(packetBlockers));
+    const packetStatus = uniqueBlockers.some((blocker) => /exhausted|unknown|not active/i.test(blocker)) ? "BLOCKED_REVIEW_REQUIRED" : uniqueBlockers.length ? "NEEDS_REVIEW" : "READY_FOR_STAFF_REVIEW";
+    const packetId = newId("case");
+    const narrative = [
+      `Benefit case for ${plan.lastName}, ${plan.firstName} (${plan.chartNumber}) and payer ${coverage.payerName}.`,
+      `Annual max ${annualMaxCents}; payer reported used ${payerReportedAnnualUsedCents}; posted paid claims ${postedPaidCents}; pending claim exposure ${pendingBilledCents}.`,
+      `Estimated insurance ${totalInsurance}; estimated patient ${totalPatient}.`,
+      "This is not a benefit guarantee. Staff must review payer evidence, CDT-specific rules, history, and required attachments before presentation or submission.",
+    ].join("\n");
+    await client.query(
+      `insert into "PmsPayerCasePacket"
+         ("id", "tenantId", "treatmentPlanId", "patientInsuranceId", "packetStatus", "summary", "findings", "blockers", "nextActions", "requiredAttachments",
+          "narrativeDraft", "estimatedInsuranceCents", "estimatedPatientCents", "confidenceScore", "generatedByRole")
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11, $12, $13, $14, $15)`,
+      [
+        packetId,
+        tenantId,
+        plan.id,
+        coverage.patientInsuranceId,
+        packetStatus,
+        `${items.length} CDT item(s) analyzed against eligibility, claims, pending exposure, and payer rules.`,
+        JSON.stringify({ benefitYear, annualMaxCents, payerReportedAnnualUsedCents, postedPaidCents, pendingBilledCents, remainingAfterCaseCents: remainingCursor }),
+        JSON.stringify(uniqueBlockers),
+        JSON.stringify([
+          uniqueBlockers.length ? "Resolve benefit blockers before final patient estimate." : "Review and approve generated estimate before presentation.",
+          "Verify CDT-specific frequency/replacement/waiting-period clauses from payer portal or 271 notes.",
+          "Attach required evidence before prior auth, predetermination, or claim submission.",
+        ]),
+        JSON.stringify(Array.from(requiredAttachments)),
+        narrative,
+        totalInsurance,
+        totalPatient,
+        uniqueBlockers.length ? 58 : 78,
+        actorRole,
+      ],
+    );
+    await client.query(
+      `update "PmsTreatmentPlan"
+       set "insuranceEstimateCents" = $3,
+         "patientEstimateCents" = $4,
+         "updatedAt" = current_timestamp
+       where "tenantId" = $1 and "id" = $2`,
+      [tenantId, plan.id, totalInsurance, totalPatient],
+    );
+    await client.query(
+      `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+       values ($1, $2, $3, 'PAYER_BENEFIT_CASE_PACKET_GENERATED', 'PmsTreatmentPlan', $4, $5, $6::jsonb)`,
+      [
+        newId("audit"),
+        tenantId,
+        actorRole,
+        plan.id,
+        packetStatus.startsWith("BLOCKED") ? "BLOCKED" : "ALLOWED",
+        JSON.stringify({ packetId, patientInsuranceId: coverage.patientInsuranceId, itemCount: items.length, blockerCount: uniqueBlockers.length, noBenefitGuarantee: true }),
+      ],
+    );
+    return { id: packetId, packetStatus, estimatedInsuranceCents: totalInsurance, estimatedPatientCents: totalPatient, blockers: uniqueBlockers };
+  });
 }
 
 export async function updateTreatmentPlanStatus(treatmentPlanId: string, status: string, actorRole = "treatment_coordinator", tenantId = defaultTenantId) {

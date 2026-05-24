@@ -1612,6 +1612,109 @@ model PmsBenefitSummary {
   @@unique([tenantId, patientInsuranceId, benefitYear])
 }
 
+model PmsBenefitFact {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  patientInsuranceId   String
+  sourceEvidenceId     String?
+  sourceType           String   @default("ELIGIBILITY_AND_CLAIMS")
+  factKey              String
+  factLabel            String
+  factValue            Json
+  valueType            String
+  cdtCode              String?
+  procedureCategory    String?
+  benefitYear          Int?
+  confidenceScore      Int      @default(0)
+  sourceTraceId        String?
+  evidenceArtifactId   String?
+  createdAt            DateTime @default(now())
+
+  @@index([tenantId, patientInsuranceId, factKey])
+  @@index([tenantId, cdtCode])
+  @@index([tenantId, procedureCategory])
+}
+
+model PmsBenefitRule {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  patientInsuranceId   String
+  sourceFactId         String?
+  ruleType             String
+  ruleKey              String
+  ruleText             String
+  cdtCode              String?
+  procedureCategory    String?
+  toothScope           String?
+  frequencyWindow      String?
+  benefitYear          Int?
+  status               String   @default("NEEDS_REVIEW")
+  confidenceScore      Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([tenantId, patientInsuranceId, ruleType])
+  @@index([tenantId, cdtCode, ruleType])
+  @@index([tenantId, procedureCategory, ruleType])
+}
+
+model PmsTreatmentCoverageAnalysis {
+  id                         String   @id @default(cuid())
+  tenantId                   String
+  treatmentPlanId            String
+  treatmentPlanItemId        String
+  patientInsuranceId         String
+  procedureCodeId            String
+  cdtCode                    String
+  procedureCategory          String
+  feeCents                   Int      @default(0)
+  estimatedInsuranceCents    Int      @default(0)
+  estimatedPatientCents      Int      @default(0)
+  remainingBeforeCents       Int      @default(0)
+  remainingAfterCents        Int      @default(0)
+  coverageStatus             String   @default("NEEDS_REVIEW")
+  denialRisk                 String   @default("UNKNOWN")
+  confidenceScore            Int      @default(0)
+  matchedRuleIds             String[] @default([])
+  blockers                   Json
+  requiredActions            Json
+  evidenceSummary            Json
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  @@unique([tenantId, treatmentPlanItemId, patientInsuranceId])
+  @@index([tenantId, treatmentPlanId, coverageStatus])
+  @@index([tenantId, patientInsuranceId, cdtCode])
+}
+
+model PmsPayerCasePacket {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  treatmentPlanId      String
+  patientInsuranceId   String
+  packetStatus         String   @default("NEEDS_REVIEW")
+  caseType             String   @default("TREATMENT_BENEFIT_CASE")
+  summary              String
+  findings             Json
+  blockers             Json
+  nextActions          Json
+  requiredAttachments  Json
+  narrativeDraft       String?
+  estimatedInsuranceCents Int   @default(0)
+  estimatedPatientCents   Int   @default(0)
+  confidenceScore      Int      @default(0)
+  generatedByRole      String   @default("billing_rcm")
+  generatedAt          DateTime @default(now())
+  reviewedByRole       String?
+  reviewedAt           DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([tenantId, treatmentPlanId, generatedAt])
+  @@index([tenantId, packetStatus])
+  @@index([tenantId, patientInsuranceId])
+}
+
 model PmsClaim {
   id              String   @id @default(cuid())
   tenantId        String
