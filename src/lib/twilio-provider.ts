@@ -12,8 +12,8 @@ export type TwilioProviderResult = {
 
 export async function getTwilioCredentials(tenantId = defaultTenantId) {
   return {
-    accountSid: process.env.TWILIO_ACCOUNT_SID || await getTwilioSecret("account_sid", tenantId),
-    authToken: process.env.TWILIO_AUTH_TOKEN || await getTwilioSecret("auth_token", tenantId),
+    accountSid: process.env.TWILIO_ACCOUNT_SID || await getTwilioSecretAny(["account_sid", "accountSid", "account sid", "sid", "api_key"], tenantId),
+    authToken: process.env.TWILIO_AUTH_TOKEN || await getTwilioSecretAny(["auth_token", "authToken", "auth token", "api_secret", "client_secret", "secret"], tenantId),
   };
 }
 
@@ -24,6 +24,14 @@ export async function getTwilioSecret(label: string, tenantId = defaultTenantId)
   } catch {
     return null;
   }
+}
+
+async function getTwilioSecretAny(labels: string[], tenantId = defaultTenantId) {
+  for (const label of labels) {
+    const value = await getTwilioSecret(label, tenantId);
+    if (value) return value;
+  }
+  return null;
 }
 
 export async function twilioRequest(input: {
