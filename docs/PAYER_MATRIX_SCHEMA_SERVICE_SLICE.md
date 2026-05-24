@@ -1,7 +1,7 @@
 # Payer Matrix Schema And Service Slice
 
-Status: Phase 1 read-only API and DB behavior slice implemented  
-Date: 2026-05-24  
+Status: Phase 1 read-only API and DB behavior slice implemented
+Date: 2026-05-24
 Owner: Payer Integration Worker
 
 ## Purpose
