@@ -2,7 +2,8 @@ import { newId, query, withTransaction } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
 import { recordPayerGeneratedArtifact } from "@/lib/payer-network-repository";
 import { buildEobPdfArtifactPayload, buildPriorAuthPdfArtifactPayload } from "@/lib/rcm-payer-artifacts";
-import { createTwilioCall, findTwilioConferenceSid, getTwilioCredentials, updateTwilioCall, updateTwilioConferenceParticipant, twilioXmlEscape } from "@/lib/twilio-provider";
+import { createTwilioCall, findTwilioConferenceSid, getTwilioCall, getTwilioCredentials, updateTwilioCall, updateTwilioConferenceParticipant, twilioXmlEscape } from "@/lib/twilio-provider";
+import { getZoomAccessToken } from "@/lib/zoom-repository";
 import { redirectLiveCallToVoiceAi } from "@/lib/voice-ai-repository";
 
 async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string | null, outcome = "ALLOWED", metadata?: unknown) {
@@ -1070,7 +1071,7 @@ export async function updateRevenueFindingStatus(id: string, status: string, act
 }
 
 export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
-  const [conversations, messages, routes, tasks, analytics, numbers, extensions, devices, providers, activeCalls, controls, voicemails, screenPops, transcriptEvents, aiAssistEvents, aiReceptionPolicies, channelSettings, knowledgeSources, webChats, webChatMessages, leadForms, formPackets, schedulingRules, metrics, patients] = await Promise.all([
+  const [conversations, messages, routes, tasks, analytics, numbers, extensions, devices, providers, activeCalls, controls, voicemails, screenPops, transcriptEvents, aiAssistEvents, aiReceptionPolicies, channelSettings, knowledgeSources, webChats, webChatMessages, leadForms, formPackets, schedulingRules, videoSessions, metrics, patients] = await Promise.all([
     query(
       `select c.*, p."firstName", p."lastName", p."chartNumber", p."phone", p."email",
         a."appointmentType", a."startsAt",
@@ -1361,6 +1362,16 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
        order by sr."sourceChannel", sr."name"`,
       [tenantId],
     ),
+    query(
+      `select vs.*, c."callerName", c."callerNumber", p."firstName", p."lastName", p."chartNumber"
+       from "PhoneVideoSession" vs
+       left join "PhoneConversation" c on c."id" = vs."conversationId"
+       left join "PmsPatient" p on p."id" = vs."patientId"
+       where vs."tenantId" = $1
+       order by vs."createdAt" desc
+       limit 20`,
+      [tenantId],
+    ),
     query<{ openCalls: string; missedCalls: string; needsReview: string; highIntent: string; stagedMessages: string; openTasks: string; opportunityCents: string; setupRequired: string; activeCallControls: string; offlineDevices: string; newVoicemails: string; openWebChats: string; kbNeedsReview: string; schedulingBlocked: string; formPackets: string }>(
       `select
         (select count(*) from "PhoneConversation" where "tenantId" = $1 and "status" = 'OPEN')::text as "openCalls",
@@ -1420,6 +1431,7 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
     leadForms: leadForms.rows,
     formPackets: formPackets.rows,
     schedulingRules: schedulingRules.rows,
+    videoSessions: videoSessions.rows,
     metrics: metrics.rows[0],
     setupReadiness,
     architectureCandidates,
@@ -2241,6 +2253,179 @@ export async function createSoftphoneOutboundDial(input: {
     providerResponse,
   });
   return { conversationId, activeCallId, providerStatus, blockedReason, resultSummary, providerCallId };
+}
+
+export async function refreshPhoneCarrierStatus(input: {
+  tenantId?: string;
+  activeCallId: string;
+  requestedByRole?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const call = (await query<{
+    id: string;
+    conversationId: string | null;
+    providerCallId: string | null;
+  }>(
+    `select "id", "conversationId", "providerCallId"
+     from "PhoneActiveCall"
+     where "tenantId" = $1 and "id" = $2
+     limit 1`,
+    [tenantId, input.activeCallId],
+  )).rows[0];
+  if (!call) throw new Error("Active call not found.");
+  if (!call.providerCallId) throw new Error("This call does not have a Twilio provider call ID yet.");
+
+  const result = await getTwilioCall({ tenantId, callSid: call.providerCallId });
+  const providerCallStatus = String(result.data?.status || result.status || result.providerStatus || "unknown");
+  const mappedState = mapTwilioProviderStatusToActiveCall(providerCallStatus);
+  await query(
+    `update "PhoneActiveCall"
+     set "callState" = $3,
+       "endedAt" = case when $4 then coalesce("endedAt", current_timestamp) else "endedAt" end,
+       "updatedAt" = current_timestamp
+     where "tenantId" = $1 and "id" = $2`,
+    [tenantId, input.activeCallId, mappedState, ["completed", "busy", "failed", "no-answer", "canceled"].includes(providerCallStatus)],
+  );
+  await query(
+    `insert into "PhoneCallControlAction"
+       ("id", "tenantId", "activeCallId", "conversationId", "actionType", "requestedByRole", "providerStatus", "blockedReason", "resultSummary", "providerResponse", "executedAt", "updatedAt")
+     values ($1, $2, $3, $4, 'REFRESH_CARRIER_STATUS', $5, $6, $7, $8, $9::jsonb, current_timestamp, current_timestamp)`,
+    [
+      newId("pctrl"),
+      tenantId,
+      input.activeCallId,
+      call.conversationId,
+      input.requestedByRole || "front_desk",
+      result.ok ? "PROVIDER_ACCEPTED" : result.providerStatus,
+      result.ok ? null : result.error,
+      result.ok ? `Twilio call status is ${providerCallStatus}.` : `Twilio status lookup failed: ${result.error}`,
+      JSON.stringify(result.data ?? { providerStatus: result.providerStatus, error: result.error }),
+    ],
+  );
+  await addAudit(tenantId, input.requestedByRole || "front_desk", "PHONE_CARRIER_STATUS_REFRESHED", "PhoneActiveCall", input.activeCallId, result.ok ? "ALLOWED" : "BLOCKED", {
+    providerCallId: call.providerCallId,
+    providerCallStatus,
+    mappedState,
+    providerError: result.error,
+  });
+  return { providerCallStatus, mappedState, ok: result.ok, error: result.error ?? null };
+}
+
+export async function createPhoneZoomVideoSession(input: {
+  tenantId?: string;
+  conversationId?: string;
+  activeCallId?: string;
+  requestedByRole?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const conversation = input.conversationId
+    ? (await query<{
+        id: string;
+        patientId: string | null;
+        callerName: string | null;
+        callerNumber: string | null;
+      }>(
+        `select "id", "patientId", "callerName", "callerNumber"
+         from "PhoneConversation"
+         where "tenantId" = $1 and "id" = $2
+         limit 1`,
+        [tenantId, input.conversationId],
+      )).rows[0]
+    : null;
+  const existing = input.conversationId
+    ? (await query<{ id: string; joinUrl: string; startUrl: string | null; status: string }>(
+        `select "id", "joinUrl", "startUrl", "status"
+         from "PhoneVideoSession"
+         where "tenantId" = $1 and "conversationId" = $2 and "status" not in ('ENDED','CANCELED','DELETED')
+         order by "createdAt" desc
+         limit 1`,
+        [tenantId, input.conversationId],
+      )).rows[0]
+    : null;
+  if (existing) return { ...existing, reused: true };
+
+  const token = await getZoomAccessToken();
+  const topic = "1DentalAI virtual consult";
+  const response = await fetch("https://api.zoom.us/v2/users/me/meetings", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      topic,
+      type: 1,
+      agenda: "Virtual dental conversation initiated from 1DentalAI phone console. Patient details remain inside 1DentalAI.",
+      settings: {
+        waiting_room: true,
+        join_before_host: false,
+        approval_type: 0,
+        audio: "both",
+        host_video: true,
+        participant_video: true,
+      },
+    }),
+    cache: "no-store",
+  });
+  const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok || !data.id || !data.join_url) {
+    throw new Error(typeof data.message === "string" ? data.message : `Zoom meeting creation failed with HTTP ${response.status}.`);
+  }
+
+  const sessionId = newId("pvideo");
+  await query(
+    `insert into "PhoneVideoSession"
+      ("id", "tenantId", "conversationId", "activeCallId", "patientId", "provider", "providerMeetingId", "providerUuid", "topic", "startUrl", "joinUrl", "password", "status", "createdByRole", "metadata", "updatedAt")
+     values ($1, $2, $3, $4, $5, 'ZOOM', $6, $7, $8, $9, $10, $11, 'CREATED', $12, $13::jsonb, current_timestamp)`,
+    [
+      sessionId,
+      tenantId,
+      input.conversationId || null,
+      input.activeCallId || null,
+      conversation?.patientId ?? null,
+      String(data.id),
+      typeof data.uuid === "string" ? data.uuid : null,
+      typeof data.topic === "string" ? data.topic : topic,
+      typeof data.start_url === "string" ? data.start_url : null,
+      String(data.join_url),
+      typeof data.password === "string" ? data.password : null,
+      input.requestedByRole || "front_desk",
+      JSON.stringify({ zoom: { id: data.id, uuid: data.uuid }, source: "PHONE_CONSOLE", callerNumber: conversation?.callerNumber ?? null, callerName: conversation?.callerName ?? null }),
+    ],
+  );
+  await query(
+    `insert into "PhoneCallControlAction"
+       ("id", "tenantId", "activeCallId", "conversationId", "actionType", "requestedByRole", "providerStatus", "resultSummary", "providerResponse", "executedAt", "updatedAt")
+     values ($1, $2, $3, $4, 'CREATE_VIDEO_MEETING', $5, 'PROVIDER_ACCEPTED', $6, $7::jsonb, current_timestamp, current_timestamp)`,
+    [
+      newId("pctrl"),
+      tenantId,
+      input.activeCallId || null,
+      input.conversationId || null,
+      input.requestedByRole || "front_desk",
+      "Zoom video meeting created for phone conversation.",
+      JSON.stringify({ provider: "ZOOM", meetingId: data.id, joinUrl: data.join_url, noPhiInTopic: true }),
+    ],
+  );
+  await addAudit(tenantId, input.requestedByRole || "front_desk", "PHONE_ZOOM_VIDEO_SESSION_CREATED", "PhoneVideoSession", sessionId, "ALLOWED", {
+    conversationId: input.conversationId || null,
+    activeCallId: input.activeCallId || null,
+    zoomMeetingId: data.id,
+    noPhiInTopic: true,
+  });
+  return { id: sessionId, joinUrl: String(data.join_url), startUrl: typeof data.start_url === "string" ? data.start_url : null, status: "CREATED", reused: false };
+}
+
+function mapTwilioProviderStatusToActiveCall(status: string) {
+  if (status === "in-progress") return "CONNECTED";
+  if (status === "ringing") return "RINGING";
+  if (status === "queued" || status === "initiated") return "QUEUED";
+  if (status === "completed") return "COMPLETED";
+  if (status === "busy") return "BUSY";
+  if (status === "no-answer") return "NO_ANSWER";
+  if (status === "canceled") return "CANCELED";
+  if (status === "failed") return "FAILED";
+  return status.toUpperCase().replaceAll("-", "_");
 }
 
 export async function createPhoneNumberProvisioning(input: {

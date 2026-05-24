@@ -7,13 +7,14 @@ import {
   createPhoneNumberProvisioning,
   createPhoneCallControlAction,
   createPhoneOutboundMessage,
+  createPhoneZoomVideoSession,
   createSoftphoneOutboundDial,
   getPhoneOperatingCenter,
+  refreshPhoneCarrierStatus,
   sendApprovedPhoneOutboundMessage,
   updatePhoneConversationStatus,
   updatePhoneOutboundMessageApproval,
 } from "@/lib/operating-system-repository";
-import { createVoiceAiTestCall } from "@/lib/voice-ai-repository";
 import { ThemeModeControl } from "./theme-mode-control";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +61,25 @@ async function callControlAction(formData: FormData) {
   revalidatePath("/patient-engagement");
 }
 
+async function refreshCarrierStatusAction(formData: FormData) {
+  "use server";
+  await refreshPhoneCarrierStatus({
+    activeCallId: String(formData.get("activeCallId") ?? ""),
+    requestedByRole: "front_desk",
+  });
+  revalidatePath("/patient-engagement");
+}
+
+async function createVideoSessionAction(formData: FormData) {
+  "use server";
+  await createPhoneZoomVideoSession({
+    conversationId: String(formData.get("conversationId") ?? "") || undefined,
+    activeCallId: String(formData.get("activeCallId") ?? "") || undefined,
+    requestedByRole: "front_desk",
+  });
+  revalidatePath("/patient-engagement");
+}
+
 async function approveOutboundMessageAction(formData: FormData) {
   "use server";
   await updatePhoneOutboundMessageApproval(String(formData.get("messageId") ?? ""), "APPROVED_STAGED", "front_desk");
@@ -69,16 +89,6 @@ async function approveOutboundMessageAction(formData: FormData) {
 async function sendOutboundMessageAction(formData: FormData) {
   "use server";
   await sendApprovedPhoneOutboundMessage(String(formData.get("messageId") ?? ""), "front_desk");
-  revalidatePath("/patient-engagement");
-}
-
-async function voiceAiTestCallAction(formData: FormData) {
-  "use server";
-  await createVoiceAiTestCall({
-    toNumber: String(formData.get("toNumber") ?? ""),
-    scenario: String(formData.get("scenario") ?? "event_greeting"),
-    actorRole: "front_desk",
-  });
   revalidatePath("/patient-engagement");
 }
 
@@ -169,7 +179,6 @@ export default async function PatientEngagementHome({
   const providers = center.providers as Record<string, unknown>[];
   const activeCalls = center.activeCalls as Record<string, unknown>[];
   const controls = center.controls as Record<string, unknown>[];
-  const voicemails = center.voicemails as Record<string, unknown>[];
   const aiReceptionPolicies = center.aiReceptionPolicies as Record<string, unknown>[];
   const channelSettings = center.channelSettings as Record<string, unknown>[];
   const knowledgeSources = center.knowledgeSources as Record<string, unknown>[];
@@ -178,6 +187,7 @@ export default async function PatientEngagementHome({
   const leadForms = center.leadForms as Record<string, unknown>[];
   const formPackets = center.formPackets as Record<string, unknown>[];
   const schedulingRules = center.schedulingRules as Record<string, unknown>[];
+  const videoSessions = center.videoSessions as Record<string, unknown>[];
 
   return (
     <main className="pe-shell min-h-screen bg-[#f4f6f7] text-neutral-950">
@@ -275,7 +285,6 @@ export default async function PatientEngagementHome({
         providers={providers}
         activeCalls={activeCalls}
         controls={controls}
-        voicemails={voicemails}
         aiReceptionPolicies={aiReceptionPolicies}
         channelSettings={channelSettings}
         knowledgeSources={knowledgeSources}
@@ -284,6 +293,7 @@ export default async function PatientEngagementHome({
         leadForms={leadForms}
         formPackets={formPackets}
         schedulingRules={schedulingRules}
+        videoSessions={videoSessions}
       />
     </main>
   );
@@ -604,7 +614,6 @@ function FlowOverlay({
   providers,
   activeCalls,
   controls,
-  voicemails,
   aiReceptionPolicies,
   channelSettings,
   knowledgeSources,
@@ -613,6 +622,7 @@ function FlowOverlay({
   leadForms,
   formPackets,
   schedulingRules,
+  videoSessions,
 }: {
   panel?: string;
   selectedConversation: ConversationRow | null;
@@ -637,7 +647,6 @@ function FlowOverlay({
   providers: Record<string, unknown>[];
   activeCalls: Record<string, unknown>[];
   controls: Record<string, unknown>[];
-  voicemails: Record<string, unknown>[];
   aiReceptionPolicies: Record<string, unknown>[];
   channelSettings: Record<string, unknown>[];
   knowledgeSources: Record<string, unknown>[];
@@ -646,6 +655,7 @@ function FlowOverlay({
   leadForms: Record<string, unknown>[];
   formPackets: Record<string, unknown>[];
   schedulingRules: Record<string, unknown>[];
+  videoSessions: Record<string, unknown>[];
 }) {
   if (!panel) return null;
   const closeHref = selectedConversation ? `/patient-engagement?conversationId=${selectedConversation.id}` : "/patient-engagement";
@@ -689,7 +699,7 @@ function FlowOverlay({
           {panel === "payment" ? <PaymentPanel conversation={selectedConversation} patient={patient} /> : null}
           {panel === "insurance" ? <InsurancePanel patient={patient} insurancePlans={insurancePlans} benefits={benefits} /> : null}
           {panel === "forms" ? <FormsPanel conversation={selectedConversation} patient={patient} forms={forms} /> : null}
-          {panel === "phone" ? <PhonePanel conversation={selectedConversation} metrics={metrics} activeCalls={activeCalls} controls={controls} voicemails={voicemails} numbers={numbers} extensions={extensions} devices={devices} providers={providers} routes={routes} tasks={allTasks} /> : null}
+          {panel === "phone" ? <PhonePanel conversation={selectedConversation} patient={patient} metrics={metrics} activeCalls={activeCalls} controls={controls} numbers={numbers} extensions={extensions} providers={providers} routes={routes} videoSessions={videoSessions} /> : null}
           {panel === "sms" ? <SmsPanel conversation={selectedConversation} patient={patient} messages={messages} /> : null}
           {panel === "webchat" ? <WebchatPanel metrics={metrics} webChats={webChats} webChatMessages={webChatMessages} knowledgeSources={knowledgeSources} leadForms={leadForms} schedulingRules={schedulingRules} channelSettings={channelSettings} /> : null}
           {panel === "automessages" ? <AutoMessagesPanel messages={messages} channelSettings={channelSettings} formPackets={formPackets} schedulingRules={schedulingRules} /> : null}
@@ -710,199 +720,267 @@ function FlowOverlay({
 
 function PhonePanel({
   conversation,
+  patient,
   metrics,
   activeCalls,
   controls,
-  voicemails,
   numbers,
   extensions,
-  devices,
   providers,
   routes,
-  tasks,
+  videoSessions,
 }: {
   conversation: ConversationRow | null;
+  patient: PatientContext;
   metrics: Record<string, string>;
   activeCalls: Record<string, unknown>[];
   controls: Record<string, unknown>[];
-  voicemails: Record<string, unknown>[];
   numbers: Record<string, unknown>[];
   extensions: Record<string, unknown>[];
-  devices: Record<string, unknown>[];
   providers: Record<string, unknown>[];
   routes: Record<string, unknown>[];
-  tasks: TaskRow[];
+  videoSessions: Record<string, unknown>[];
 }) {
   const selectedActiveCall = activeCalls.find((call) => String(call.conversationId) === conversation?.id) ?? activeCalls[0];
   const activeNumberOptions = numbers.filter((number) => String(number.status) === "ACTIVE" && String(number.voiceStatus) === "ACTIVE");
+  const selectedVideoSession = videoSessions.find((session) => String(session.conversationId) === String(conversation?.id)) ?? videoSessions[0];
+  const dialKeys = ["1", "2 ABC", "3 DEF", "4 GHI", "5 JKL", "6 MNO", "7 PQRS", "8 TUV", "9 WXYZ", "*", "0 +", "#"];
   return (
-    <div className="space-y-5">
-      <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
-        <div className="border-b border-neutral-100 px-6 py-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h3 className="text-3xl font-semibold">Softphone dialer</h3>
-              <p className="mt-2 text-sm text-neutral-500">Outbound calls start from an active practice DID, write a conversation, create an active call row, and send the real request to Twilio. Operator bridge rings your staff phone first; Voice AI calls the patient directly.</p>
-            </div>
-            <SmallTag tone="green">Live Twilio path</SmallTag>
-          </div>
+    <div className="overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-sm">
+      <div className="flex h-14 items-center justify-between bg-gradient-to-r from-sky-500 via-blue-600 to-violet-600 px-5 text-white">
+        <div className="flex items-center gap-3">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/15 text-xl font-black">1D</span>
+          <span className="text-sm font-semibold">Phone console</span>
         </div>
-        <form action={softphoneDialAction} className="grid gap-4 p-6 md:grid-cols-2">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">Call from</p>
-            <select name="fromNumberId" className="mt-2 h-12 w-full rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
-              <option value="">Default active Twilio number</option>
+        <div className="flex items-center gap-5 text-xs font-semibold">
+          <span className="flex items-center gap-2">Auto answer <span className="h-5 w-10 rounded-full bg-emerald-400 p-0.5"><span className="block h-4 w-4 translate-x-5 rounded-full bg-white" /></span></span>
+          <span className="flex items-center gap-2">DND <span className="h-5 w-10 rounded-full bg-orange-500 p-0.5"><span className="block h-4 w-4 translate-x-5 rounded-full bg-white" /></span></span>
+          <span>Front desk · REGISTERED</span>
+        </div>
+      </div>
+
+      <div className="grid min-h-[760px] grid-cols-[72px_350px_minmax(0,1fr)]">
+        <nav className="border-r border-neutral-200 bg-white py-5 text-[11px] font-semibold text-neutral-500">
+          {[
+            ["Keypad", "⠿"],
+            ["Video", "▣"],
+            ["Recents", "☏"],
+            ["Contacts", "♙"],
+            ["Chats", "◌"],
+            ["Messages", "▤"],
+            ["Numbers", "#"],
+            ["Settings", "⚙"],
+          ].map(([label, icon]) => (
+            <a key={label} href={label === "Settings" ? panelHref("settings", conversation?.id) : "#phone-dialer"} className="flex flex-col items-center gap-1 border-l-4 border-transparent px-2 py-3 text-center hover:border-blue-600 hover:text-blue-700">
+              <span className="text-xl">{icon}</span>
+              {label}
+            </a>
+          ))}
+        </nav>
+
+        <aside id="phone-dialer" className="border-r border-neutral-200 bg-[#fbfcff] p-4">
+          <div className="flex items-center justify-between border-b border-neutral-200 pb-4">
+            <h3 className="text-lg font-semibold">Active calls</h3>
+            <span className="text-neutral-400">⌄</span>
+          </div>
+          <div className="mt-3 space-y-2">
+            {activeCalls.slice(0, 3).map((call, index) => (
+              <div key={String(call.id)} className={`flex items-center gap-3 rounded-xl px-3 py-2 ${String(call.id) === String(selectedActiveCall?.id) ? "bg-blue-50" : "bg-white"}`}>
+                <span className="grid h-9 w-9 place-items-center rounded-full bg-sky-500 text-sm font-bold text-white">{initials(null, null, String(call.callerName ?? call.fromNumber ?? "Call"))}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{String(call.callerName ?? call.fromNumber ?? `Call ${index + 1}`)}</p>
+                  <p className="text-xs text-neutral-500">{clean(call.callState)} · {String(call.toNumber ?? "")}</p>
+                </div>
+                <form action={callControlAction}>
+                  <input type="hidden" name="activeCallId" value={String(call.id)} />
+                  <input type="hidden" name="conversationId" value={String(call.conversationId ?? "")} />
+                  <input type="hidden" name="actionType" value="HOLD" />
+                  <button className="grid h-9 w-9 place-items-center rounded-full bg-white text-sm shadow-sm">Ⅱ</button>
+                </form>
+                <form action={callControlAction}>
+                  <input type="hidden" name="activeCallId" value={String(call.id)} />
+                  <input type="hidden" name="conversationId" value={String(call.conversationId ?? "")} />
+                  <input type="hidden" name="actionType" value="END_CALL" />
+                  <button className="grid h-9 w-9 place-items-center rounded-full bg-rose-500 text-sm text-white">☎</button>
+                </form>
+              </div>
+            ))}
+            {!activeCalls.length ? <p className="rounded-xl border border-dashed border-neutral-200 bg-white p-4 text-sm text-neutral-500">No live calls right now. Incoming Twilio webhooks populate this list.</p> : null}
+          </div>
+
+          <form action={softphoneDialAction} className="mt-8 space-y-4">
+            <select name="fromNumberId" className="mx-auto block h-9 rounded-full border border-neutral-200 bg-white px-4 text-xs font-semibold text-violet-700">
+              <option value="">Caller ID · default</option>
               {activeNumberOptions.map((number) => (
                 <option key={String(number.id)} value={String(number.id)}>{String(number.label)} · {String(number.phoneNumber)}</option>
               ))}
             </select>
-          </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">Target patient number</p>
-            <input name="targetNumber" required defaultValue={conversation?.callerNumber ?? ""} className="mt-2 h-12 w-full rounded-xl border border-neutral-200 px-4 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="+17206954333" />
-          </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">Operator callback number</p>
-            <input name="operatorNumber" defaultValue="" className="mt-2 h-12 w-full rounded-xl border border-neutral-200 px-4 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Your desk or mobile number" />
-            <p className="mt-2 text-xs leading-5 text-neutral-500">Required for operator bridge. This is how Twilio connects the browser dial request to a human until Twilio Voice SDK browser identity is configured.</p>
-          </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">Mode</p>
-            <select name="mode" className="mt-2 h-12 w-full rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+            <input name="targetNumber" required defaultValue={conversation?.callerNumber ?? ""} className="h-11 w-full rounded-xl border border-transparent bg-transparent px-4 text-center text-sm outline-none focus:border-blue-300 focus:bg-white" placeholder="Enter number or patient name" />
+            <input name="operatorNumber" className="h-10 w-full rounded-xl border border-neutral-200 bg-white px-4 text-center text-xs outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Operator bridge phone" />
+            <div className="grid grid-cols-3 gap-4">
+              {dialKeys.map((key) => {
+                const [digit, letters] = key.split(" ");
+                return (
+                  <button key={key} type="button" className="h-12 rounded-full bg-neutral-100 text-lg font-semibold text-neutral-950">
+                    {digit}<span className="block text-[8px] font-bold text-neutral-500">{letters ?? ""}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <select name="mode" className="h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-xs font-semibold">
               <option value="OPERATOR_BRIDGE">Operator bridge</option>
               <option value="VOICE_AI">Voice AI direct</option>
             </select>
-          </div>
-          <div className="md:col-span-2 flex justify-end">
-            <button className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">Dial now</button>
-          </div>
-        </form>
-      </section>
-      <section className="rounded-2xl border border-neutral-200 bg-white p-6">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h3 className="text-2xl font-semibold">Live call controls</h3>
-            <p className="mt-2 text-sm text-neutral-500">Controls execute only against a live Twilio call leg. Incoming calls populate this panel from webhooks and show matched patient context.</p>
-          </div>
-        </div>
-        <div className="mt-6 grid gap-3 sm:grid-cols-4">
-          {[
-            ["ANSWER", "Answer"],
-            ["HOLD", "Hold"],
-            ["RESUME", "Resume"],
-            ["CALL_PARK", "Park"],
-            ["SEND_TO_VOICEMAIL", "Voicemail"],
-            ["END_CALL", "End"],
-            ["AI_VOICE_TAKEOVER", "AI takeover"],
-          ].map(([action, label]) => (
-            <form key={action} action={callControlAction}>
-              <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
-              <input type="hidden" name="conversationId" value={conversation?.id ?? String(selectedActiveCall?.conversationId ?? "")} />
-              <input type="hidden" name="actionType" value={action} />
-              {action === "CALL_PARK" ? <input type="hidden" name="targetParkSlot" value="front-desk-1" /> : null}
-              <button className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-4 text-sm font-semibold shadow-sm hover:bg-neutral-50">{label}</button>
-            </form>
-          ))}
-        </div>
-      </section>
-      <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6">
-        <div className="flex items-start justify-between gap-5">
-          <div>
-            <h3 className="text-2xl font-semibold">Voice AI live test</h3>
-            <p className="mt-2 text-sm leading-6 text-emerald-950/70">Places a real Twilio outbound call and answers with ElevenLabs voice. The call writes to PhoneConversation, PhoneActiveCall, transcript events, AI assist events, tasks, and audit logs.</p>
-          </div>
-          <SmallTag tone="green">Twilio + ElevenLabs</SmallTag>
-        </div>
-        <form action={voiceAiTestCallAction} className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px_auto]">
-          <input name="toNumber" required defaultValue={conversation?.callerNumber ?? ""} className="h-12 rounded-xl border border-emerald-200 bg-white px-4 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100" placeholder="+13035550199" />
-          <select name="scenario" className="h-12 rounded-xl border border-emerald-200 bg-white px-4 text-sm font-semibold outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100">
-            <option value="event_greeting">Event greeting</option>
-            <option value="appointment_reminder">Appointment reminder</option>
-            <option value="recall">Recall</option>
-            <option value="reactivation">Reactivation</option>
-            <option value="inbound_takeover">Inbound takeover</option>
-          </select>
-          <button className="h-12 rounded-xl bg-emerald-700 px-5 text-sm font-semibold text-white">Call now</button>
-        </form>
-        <p className="mt-3 text-xs leading-5 text-emerald-900/70">If Twilio rejects the configured From number, the action is recorded as a provider error instead of fake success.</p>
-      </section>
-      <section className="grid gap-4 sm:grid-cols-3">
-        <MetricTile label="Open calls" value={metrics.openCalls ?? "0"} />
-        <MetricTile label="Missed calls" value={metrics.missedCalls ?? "0"} />
-        <MetricTile label="Voicemails" value={metrics.newVoicemails ?? "0"} />
-      </section>
-      <ActionCard title="Live calls" empty="No active calls are currently registered. Incoming Twilio webhooks populate this queue.">
-        {activeCalls.slice(0, 6).map((call) => (
-          <RecordLine key={String(call.id)} title={`${String(call.fromNumber)} → ${String(call.toNumber)}`} meta={`${clean(call.callState)} · ${String(call.extensionName ?? "no extension")} · ${formatDate(call.startedAt)}`} />
-        ))}
-      </ActionCard>
-      <ActionCard title="Recent call-control actions" empty="No call controls have been requested yet.">
-        {controls.slice(0, 8).map((control) => (
-          <div key={String(control.id)} className="rounded-xl bg-neutral-50 p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold">{clean(control.actionType)}</p>
-                <p className="mt-1 text-xs text-neutral-500">{String(control.resultSummary ?? "No provider result recorded.")}</p>
+            <div className="flex justify-center">
+              <div className="inline-flex overflow-hidden rounded-full bg-emerald-600 shadow-lg">
+                <button className="h-12 px-8 text-xl text-white">☎</button>
+                <button formAction={createVideoSessionAction} formNoValidate className="h-12 border-l border-emerald-500 px-8 text-xl text-white">▣</button>
               </div>
-              <SmallTag tone={statusTone(control.providerStatus)}>{clean(control.providerStatus)}</SmallTag>
             </div>
-            {control.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{String(control.blockedReason)}</p> : null}
+            <input type="hidden" name="conversationId" value={conversation?.id ?? String(selectedActiveCall?.conversationId ?? "")} />
+            <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
+          </form>
+
+          <div className="mt-6 grid grid-cols-3 gap-2 text-center">
+            <MetricTile label="Open" value={metrics.openCalls ?? "0"} />
+            <MetricTile label="Missed" value={metrics.missedCalls ?? "0"} />
+            <MetricTile label="VM" value={metrics.newVoicemails ?? "0"} />
           </div>
-        ))}
-      </ActionCard>
-      <ActionCard title="Numbers, routes, and devices" empty="No phone setup records found.">
-        {numbers.slice(0, 5).map((number) => <RecordLine key={String(number.id)} title={`${String(number.label)} · ${String(number.phoneNumber)}`} meta={`voice ${clean(number.voiceStatus)} · sms ${clean(number.smsStatus)} · E911 ${clean(number.e911Status)}`} />)}
-        {routes.slice(0, 4).map((route) => <RecordLine key={String(route.id)} title={`Route: ${String(route.name)}`} meta={`${clean(route.triggerType)} → ${clean(route.destinationType)} · ${clean(route.status)}`} />)}
-        {extensions.slice(0, 4).map((extension) => <RecordLine key={String(extension.id)} title={`Ext ${String(extension.extensionNumber)} · ${String(extension.displayName)}`} meta={`${clean(extension.ownerRoleKey)} · voicemail ${String(extension.voicemailEnabled)}`} />)}
-        {devices.slice(0, 4).map((device) => <RecordLine key={String(device.id)} title={`${String(device.label)} · ${String(device.deviceType)}`} meta={`${clean(device.provisioningStatus)} · ${clean(device.registrationStatus)} · ${String(device.deskLocation ?? "no desk")}`} />)}
-        {providers.slice(0, 4).map((provider) => <RecordLine key={String(provider.id)} title={`${String(provider.name)} · ${String(provider.providerType)}`} meta={`credentials ${clean(provider.credentialStatus)} · webhook ${clean(provider.webhookStatus)} · ${String(provider.nextAction ?? "")}`} />)}
-      </ActionCard>
-      <section className="rounded-2xl border border-neutral-200 bg-white p-6">
-        <h3 className="text-2xl font-semibold">Provision numbers and extensions</h3>
-        <p className="mt-2 text-sm text-neutral-500">Add practice DIDs, campaign DIDs, billing lines, and internal extensions. These records drive routing, caller ID, SMS, E911 readiness, and screen pop ownership.</p>
-        <form action={provisionPhoneNumberAction} className="mt-5 grid gap-3 md:grid-cols-3">
-          <input name="label" required className="h-12 rounded-xl border border-neutral-200 px-4 text-sm" placeholder="Main line / Marketing DID" />
-          <input name="phoneNumber" required className="h-12 rounded-xl border border-neutral-200 px-4 text-sm" placeholder="+13035234562" />
-          <select name="numberType" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold">
-            <option value="MAIN">Main</option>
-            <option value="BILLING">Billing</option>
-            <option value="MARKETING">Marketing DID</option>
-            <option value="HYGIENE">Hygiene</option>
-          </select>
-          <select name="voiceStatus" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold"><option value="ACTIVE">Voice active</option><option value="NOT_CONFIGURED">Voice not configured</option></select>
-          <select name="smsStatus" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold"><option value="ACTIVE">SMS active</option><option value="NOT_CONFIGURED">SMS not configured</option></select>
-          <select name="e911Status" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold"><option value="ACTIVE">E911 active</option><option value="VALIDATED">E911 validated</option><option value="NOT_CONFIGURED">E911 missing</option></select>
-          <input type="hidden" name="provider" value="TWILIO" />
-          <input type="hidden" name="recordingPolicy" value="CONSENT_REQUIRED" />
-          <button className="md:col-span-3 rounded-xl bg-neutral-950 px-5 py-3 text-sm font-semibold text-white">Save number</button>
-        </form>
-        <form action={provisionPhoneExtensionAction} className="mt-5 grid gap-3 md:grid-cols-4">
-          <input name="extensionNumber" required className="h-12 rounded-xl border border-neutral-200 px-4 text-sm" placeholder="101" />
-          <input name="displayName" required className="h-12 rounded-xl border border-neutral-200 px-4 text-sm" placeholder="Front desk" />
-          <select name="ownerRoleKey" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold">
-            <option value="front_desk">Front desk</option>
-            <option value="billing">Billing</option>
-            <option value="office_manager">Office manager</option>
-            <option value="provider">Provider</option>
-          </select>
-          <select name="extensionType" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold">
-            <option value="USER">User</option>
-            <option value="QUEUE">Queue</option>
-            <option value="ROOM">Room</option>
-            <option value="AI_AGENT">AI agent</option>
-          </select>
-          <input type="hidden" name="voicemailEnabled" value="true" />
-          <button className="md:col-span-4 rounded-xl border border-neutral-200 bg-white px-5 py-3 text-sm font-semibold">Save extension</button>
-        </form>
-      </section>
-      <ActionCard title="Voicemail and phone tasks" empty="No voicemail or phone work items.">
-        {voicemails.slice(0, 5).map((vm) => <RecordLine key={String(vm.id)} title={`${String(vm.callerName ?? vm.callerNumber ?? "Voicemail")} · ${String(vm.extensionName ?? "queue")}`} meta={`${clean(vm.status)} · ${String(vm.transcription ?? "no transcript yet")}`} />)}
-        {tasks.slice(0, 5).map((task) => <RecordLine key={task.id} title={task.nextAction || task.taskType} meta={`${clean(task.priority)} · ${clean(task.status)} · ${clean(task.ownerRoleKey)}`} />)}
-      </ActionCard>
+        </aside>
+
+        <section className="flex min-w-0 flex-col bg-white">
+          <div className="flex h-16 items-center justify-between border-b border-neutral-200 px-6">
+            <div className="flex items-center gap-6 text-sm font-semibold">
+              <Link href="/patient-engagement" className="text-3xl leading-none">‹</Link>
+              {["Favorites", "Active Call", "Recent", "Missed Call"].map((tab) => (
+                <span key={tab} className={tab === "Active Call" ? "rounded-full bg-slate-100 px-4 py-2 text-blue-700" : "text-neutral-600"}>{tab}</span>
+              ))}
+            </div>
+            <form action={refreshCarrierStatusAction}>
+              <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
+              <button className="rounded-xl border border-neutral-200 px-4 py-2 text-sm font-semibold">Refresh carrier status</button>
+            </form>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-6">
+            <h2 className="text-center text-3xl font-semibold">{conversation?.callerName ?? patient.name ?? "Phone workspace"}</h2>
+            <div className="mt-5 overflow-hidden rounded-2xl bg-neutral-900 shadow-sm">
+              <div className="relative aspect-video bg-[radial-gradient(circle_at_45%_35%,#64748b,#111827_58%,#020617)]">
+                <div className="absolute inset-0 grid place-items-center text-center text-white">
+                  <div>
+                    <p className="text-7xl font-black">{initials(null, null, conversation?.callerName ?? patient.name ?? "Video")}</p>
+                    <p className="mt-3 text-sm text-white/70">{selectedVideoSession ? "Zoom video session ready" : "Create Zoom video when the caller needs face-to-face help"}</p>
+                    {selectedVideoSession ? <a href={String(selectedVideoSession.joinUrl)} target="_blank" className="mt-4 inline-flex rounded-full bg-white px-5 py-2 text-sm font-semibold text-neutral-950">Open Zoom</a> : null}
+                  </div>
+                </div>
+                <div className="absolute bottom-5 right-5 w-48 overflow-hidden rounded-xl border border-white/20 bg-black/40 p-4 text-white shadow-2xl">
+                  <p className="text-xs font-semibold">You</p>
+                  <div className="mt-3 grid aspect-video place-items-center rounded-lg bg-slate-800 text-3xl">☺</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-center gap-5">
+              <span className="rounded-md bg-emerald-500 px-2 py-1 text-sm font-bold text-white">02:00</span>
+              {[
+                ["MUTE", "⌁"],
+                ["HOLD", "Ⅱ"],
+                ["TRANSFER", "⠿"],
+                ["AI_VOICE_TAKEOVER", "AI"],
+                ["END_CALL", "☎"],
+              ].map(([action, label]) => (
+                <form key={action} action={callControlAction}>
+                  <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
+                  <input type="hidden" name="conversationId" value={conversation?.id ?? String(selectedActiveCall?.conversationId ?? "")} />
+                  <input type="hidden" name="actionType" value={action === "TRANSFER" ? "WARM_TRANSFER" : action} />
+                  <button className={`grid h-14 w-14 place-items-center rounded-full text-sm font-bold ${action === "END_CALL" ? "bg-rose-500 text-white" : "bg-neutral-100 text-neutral-700"}`}>{label}</button>
+                </form>
+              ))}
+            </div>
+
+            <div className="mt-7 grid gap-4 xl:grid-cols-2">
+              <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xl font-semibold">Carrier result</h3>
+                  <SmallTag tone={statusTone(selectedActiveCall?.callState)}>{clean(selectedActiveCall?.callState ?? "NO_CALL")}</SmallTag>
+                </div>
+                <p className="mt-2 text-sm text-neutral-500">Provider SID: {String(selectedActiveCall?.providerCallId ?? "not assigned")}</p>
+                <div className="mt-4 space-y-2">
+                  {controls.slice(0, 4).map((control) => (
+                    <div key={String(control.id)} className="rounded-xl bg-neutral-50 p-3">
+                      <p className="text-sm font-semibold">{clean(control.actionType)}</p>
+                      <p className="mt-1 text-xs leading-5 text-neutral-500">{String(control.resultSummary ?? "No provider result recorded.")}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+                <h3 className="text-xl font-semibold">Patient call pop</h3>
+                <div className="mt-4 flex items-center gap-4">
+                  <span className="grid h-14 w-14 place-items-center rounded-full bg-amber-100 text-lg font-black">{initials(null, null, patient.name ?? conversation?.callerName ?? "Patient")}</span>
+                  <div>
+                    <p className="text-lg font-semibold">{patient.name ?? conversation?.callerName ?? "Unknown caller"}</p>
+                    <p className="text-sm text-neutral-500">{String(conversation?.callerNumber ?? selectedActiveCall?.fromNumber ?? "No phone number")}</p>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  <Link href={panelHref("patient", conversation?.id)} className="rounded-xl border border-neutral-200 px-3 py-2 text-center text-sm font-semibold">Patient</Link>
+                  <Link href={panelHref("payment", conversation?.id)} className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm font-semibold">{money(patient.openBalanceCents ?? 0)}</Link>
+                  <Link href={panelHref("insurance", conversation?.id)} className="rounded-xl border border-neutral-200 px-3 py-2 text-center text-sm font-semibold">Insurance</Link>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div className="border-t border-neutral-200 bg-[#f8fafc] p-5">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+            <h3 className="text-lg font-semibold">Provision numbers</h3>
+            <form action={provisionPhoneNumberAction} className="mt-4 grid gap-3">
+              <input name="label" required className="h-11 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="Main line / Marketing DID" />
+              <input name="phoneNumber" required className="h-11 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="+13035234562" />
+              <div className="grid grid-cols-2 gap-2">
+                <select name="numberType" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="MAIN">Main</option><option value="BILLING">Billing</option><option value="MARKETING">Marketing DID</option><option value="HYGIENE">Hygiene</option></select>
+                <select name="voiceStatus" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="ACTIVE">Voice active</option><option value="NOT_CONFIGURED">Voice missing</option></select>
+                <select name="smsStatus" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="ACTIVE">SMS active</option><option value="NOT_CONFIGURED">SMS missing</option></select>
+                <select name="e911Status" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="ACTIVE">E911 active</option><option value="VALIDATED">E911 validated</option><option value="NOT_CONFIGURED">E911 missing</option></select>
+              </div>
+              <input type="hidden" name="provider" value="TWILIO" />
+              <input type="hidden" name="recordingPolicy" value="CONSENT_REQUIRED" />
+              <button className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Save number</button>
+            </form>
+          </section>
+
+          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+            <h3 className="text-lg font-semibold">Provision extensions</h3>
+            <form action={provisionPhoneExtensionAction} className="mt-4 grid gap-3">
+              <input name="extensionNumber" required className="h-11 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="101" />
+              <input name="displayName" required className="h-11 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="Front desk" />
+              <div className="grid grid-cols-2 gap-2">
+                <select name="ownerRoleKey" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="front_desk">Front desk</option><option value="billing">Billing</option><option value="office_manager">Office manager</option><option value="provider">Provider</option></select>
+                <select name="extensionType" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="USER">User</option><option value="QUEUE">Queue</option><option value="ROOM">Room</option><option value="AI_AGENT">AI agent</option></select>
+              </div>
+              <input type="hidden" name="voicemailEnabled" value="true" />
+              <button className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm font-semibold">Save extension</button>
+            </form>
+          </section>
+
+          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+            <h3 className="text-lg font-semibold">Setup inventory</h3>
+            <div className="mt-4 space-y-3">
+              {numbers.slice(0, 3).map((number) => <RecordLine key={String(number.id)} title={`${String(number.label)} · ${String(number.phoneNumber)}`} meta={`voice ${clean(number.voiceStatus)} · sms ${clean(number.smsStatus)} · E911 ${clean(number.e911Status)}`} />)}
+              {extensions.slice(0, 3).map((extension) => <RecordLine key={String(extension.id)} title={`Ext ${String(extension.extensionNumber)} · ${String(extension.displayName)}`} meta={`${clean(extension.ownerRoleKey)} · ${clean(extension.extensionType)}`} />)}
+              {routes.slice(0, 2).map((route) => <RecordLine key={String(route.id)} title={`Route: ${String(route.name)}`} meta={`${clean(route.triggerType)} → ${clean(route.destinationType)} · ${clean(route.status)}`} />)}
+              {providers.slice(0, 2).map((provider) => <RecordLine key={String(provider.id)} title={`${String(provider.name)} · ${String(provider.providerType)}`} meta={`credentials ${clean(provider.credentialStatus)} · webhook ${clean(provider.webhookStatus)}`} />)}
+            </div>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
-
 function SmsPanel({ conversation, patient, messages }: { conversation: ConversationRow | null; patient: PatientContext; messages: MessageRow[] }) {
   const conversationMessages = messages.filter((message) => message.conversationId === conversation?.id || message.patientId === patient.id).slice(0, 12);
   return (

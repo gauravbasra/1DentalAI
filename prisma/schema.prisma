@@ -2806,6 +2806,32 @@ model PhoneActiveCall {
   @@index([tenantId, providerConferenceName])
 }
 
+model PhoneVideoSession {
+  id                String   @id
+  tenantId          String
+  conversationId    String?
+  activeCallId      String?
+  patientId         String?
+  provider          String   @default("ZOOM")
+  providerMeetingId String
+  providerUuid      String?
+  topic             String
+  startUrl          String?
+  joinUrl           String
+  password          String?
+  status            String   @default("CREATED")
+  createdByRole     String   @default("front_desk")
+  metadata          Json?
+  startedAt         DateTime?
+  endedAt           DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantId, conversationId, createdAt])
+  @@index([tenantId, status])
+  @@unique([provider, providerMeetingId])
+}
+
 model PhoneScreenPopSnapshot {
   id                 String   @id
   tenantId           String

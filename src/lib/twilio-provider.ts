@@ -73,6 +73,14 @@ export async function createTwilioCall(input: { tenantId?: string; from: string;
   return twilioRequest({ tenantId: input.tenantId, path: "/Calls.json", body });
 }
 
+export async function getTwilioCall(input: { tenantId?: string; callSid: string }) {
+  return twilioRequest({
+    tenantId: input.tenantId,
+    method: "GET",
+    path: `/Calls/${encodeURIComponent(input.callSid)}.json`,
+  });
+}
+
 export async function updateTwilioCall(input: { tenantId?: string; callSid: string; twiml?: string; status?: "completed" }) {
   const body = new URLSearchParams();
   if (input.twiml) body.set("Twiml", input.twiml);
