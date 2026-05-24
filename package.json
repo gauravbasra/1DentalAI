@@ -19,7 +19,7 @@
     "test:pms-eligibility-artifacts": "node scripts/validate-pms-eligibility-artifacts.mjs",
     "test:payer-portal-browser": "node scripts/validate-payer-portal-browser-runner.mjs",
     "test:rcm-payer-artifacts": "node scripts/validate-rcm-payer-artifacts.mjs",
-    "test:payer-matrix": "node scripts/validate-payer-matrix-slice.mjs",
+    "test:payer-matrix": "node scripts/validate-payer-matrix-slice.mjs && node scripts/validate-payer-route-readiness-behavior.mjs",
     "test:pms-scribe-perio-e2e": "node scripts/validate-pms-scribe-perio-e2e.mjs",
     "test:scribe": "node scripts/validate-pms-scribe-go-live.mjs"
   },

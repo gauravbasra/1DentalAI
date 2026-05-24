@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 import { newId, query } from "@/lib/db";
 import {
   defaultTenantId,
@@ -71,6 +71,11 @@ type SchedulingOffer = {
   serviceLabel: string;
   requestedDay: string;
   options: PmsOnlineSlot[];
+};
+
+type RescheduleOffer = SchedulingOffer & {
+  appointmentId: string;
+  patientId: string;
 };
 
 type SchedulingIntake = {
@@ -1497,31 +1502,80 @@ async function buildRescheduleReply(input: {
   leadCapture: LeadCapture;
 }): Promise<WebchatAiDecision> {
   const contact = await getConversationContact(input.tenantId, input.conversationId, input.leadCapture);
-  const phoneDigits = digits(contact.visitorPhone);
+  const submittedPhone = extractPhoneFromText(input.body);
+  if (submittedPhone && !contact.visitorPhone) {
+    contact.visitorPhone = submittedPhone;
+    await query(
+      `update "PatientWebChatConversation"
+       set "visitorPhone" = $3, "updatedAt" = current_timestamp
+       where "tenantId" = $1 and "id" = $2 and coalesce("visitorPhone", '') = ''`,
+      [input.tenantId, input.conversationId, submittedPhone],
+    ).catch(() => null);
+  }
+  const phoneForOtp = contact.visitorPhone || submittedPhone;
+  const phoneDigits = digits(phoneForOtp);
   const email = contact.visitorEmail?.trim() || "";
+  const selectedIndex = parseSlotSelection(input.body);
+  if (selectedIndex !== null) {
+    const offer = await getLatestRescheduleOffer(input.tenantId, input.conversationId);
+    if (offer) {
+      const verified = await hasVerifiedRescheduleOtp(input.tenantId, input.conversationId, phoneDigits);
+      if (!verified) {
+        return schedulingDecision(
+          "Before I can change an appointment, please enter the verification code sent to the mobile number on the appointment.",
+          "RESCHEDULE_OTP_REQUIRED",
+          "OTP_REQUIRED_BEFORE_RESCHEDULE",
+          { kind: "RESCHEDULE_OTP_REQUIRED", appointmentId: offer.appointmentId },
+        );
+      }
+      const slot = offer.options[selectedIndex];
+      if (!slot) {
+        return schedulingDecision(
+          `I offered ${offer.options.length} replacement times. Reply with one of those numbers, or tell me another day and I’ll check again.`,
+          "RESCHEDULE_SELECTION_INVALID",
+          "INVALID_SLOT_SELECTION",
+          { kind: "RESCHEDULE_SLOT_OFFER", appointmentId: offer.appointmentId, offeredCount: offer.options.length },
+        );
+      }
+      return rescheduleOfferedSlot({ ...input, offer, slot });
+    }
+  }
   if (!phoneDigits && !email) {
     return schedulingDecision(
-      "I can help reschedule. Please share the phone number or email on the appointment so I can find it first.",
+      "I can help reschedule. Please share the mobile number on the appointment so I can send a verification code first.",
       "RESCHEDULE_IDENTITY_NEEDED",
       "IDENTITY_NEEDED",
       { reason: "CONTACT_REQUIRED" },
     );
   }
+  const submittedOtp = extractOtp(input.body);
+  if (submittedOtp) {
+    const verification = await verifyRescheduleOtp(input.tenantId, input.conversationId, phoneDigits, submittedOtp);
+    if (!verification.verified) {
+      return schedulingDecision(
+        verification.message,
+        "RESCHEDULE_OTP_INVALID",
+        "OTP_VERIFICATION_FAILED",
+        { kind: "RESCHEDULE_OTP", reason: verification.reason },
+      );
+    }
+  }
   const appointments = await query<{
     id: string;
+    patientId: string;
     startsAt: string;
     appointmentType: string;
     providerName: string | null;
   }>(
-    `select a."id", a."startsAt"::text as "startsAt", a."appointmentType", pr."displayName" as "providerName"
+    `select a."id", a."patientId", a."startsAt"::text as "startsAt", a."appointmentType", pr."displayName" as "providerName"
      from "PmsAppointment" a
      join "PmsPatient" p on p."id" = a."patientId"
      left join "PmsProvider" pr on pr."id" = a."providerId"
      where a."tenantId" = $1
-       and a."status" not in ('CANCELED', 'NO_SHOW', 'BROKEN', 'COMPLETED')
-       and a."startsAt" >= current_timestamp
-       and (
-        ($2 <> '' and regexp_replace(coalesce(p."phone", ''), '[^0-9]', '', 'g') = $2)
+      and a."status" not in ('CANCELED', 'NO_SHOW', 'BROKEN', 'COMPLETED')
+      and a."startsAt" >= current_timestamp
+      and (
+        ($2 <> '' and right(regexp_replace(coalesce(p."phone", ''), '[^0-9]', '', 'g'), 10) = right($2, 10))
         or ($3 <> '' and lower(coalesce(p."email", '')) = lower($3))
        )
      order by a."startsAt"
@@ -1530,10 +1584,29 @@ async function buildRescheduleReply(input: {
   );
   if (!appointments.rows.length) {
     return schedulingDecision(
-      "I couldn’t find an upcoming appointment from that phone or email. Please share the appointment date or another contact detail and I’ll check again.",
+      "I couldn’t find an upcoming appointment from that mobile number or email. Please check the contact detail or ask the front desk to help.",
       "RESCHEDULE_APPOINTMENT_NOT_FOUND",
       "APPOINTMENT_NOT_FOUND",
       { contactMatched: false },
+    );
+  }
+  const verified = await hasVerifiedRescheduleOtp(input.tenantId, input.conversationId, phoneDigits);
+  if (!verified) {
+    const challenge = await createAndSendRescheduleOtp({
+      tenantId: input.tenantId,
+      conversationId: input.conversationId,
+      phone: phoneForOtp,
+      patientId: appointments.rows[0].patientId,
+      appointmentId: appointments.rows[0].id,
+      consentAccepted: Boolean(contact.consentAccepted),
+    });
+    return schedulingDecision(
+      challenge.deliveryStatus === "SENT_TO_PROVIDER" || challenge.deliveryStatus === "READY_FOR_CONNECTOR"
+        ? "I found your appointment. I sent a verification code to the mobile number on file. Please enter that code here and then I’ll show reschedule options."
+        : `I found your appointment, but I could not send the verification code yet. ${challenge.reason} Please ask the front desk to verify and reschedule this appointment.`,
+      challenge.deliveryStatus === "SENT_TO_PROVIDER" || challenge.deliveryStatus === "READY_FOR_CONNECTOR" ? "RESCHEDULE_OTP_SENT" : "RESCHEDULE_OTP_BLOCKED",
+      challenge.deliveryStatus,
+      { kind: "RESCHEDULE_OTP", appointmentId: appointments.rows[0].id, delivery: challenge },
     );
   }
   const sameDay = appointments.rows.some((appointment) => isToday(appointment.startsAt));
@@ -1563,8 +1636,228 @@ async function buildRescheduleReply(input: {
     ].join("\n"),
     "RESCHEDULE_SLOTS_OFFERED",
     "SLOTS_READ_FROM_PMS",
-    { kind: "RESCHEDULE_SLOT_OFFER", appointmentId: appointments.rows[0].id, slug: procedure.slug, serviceLabel: procedure.label, options: slots },
+    { kind: "RESCHEDULE_SLOT_OFFER", appointmentId: appointments.rows[0].id, patientId: appointments.rows[0].patientId, slug: procedure.slug, serviceLabel: procedure.label, options: slots },
   );
+}
+
+async function getLatestRescheduleOffer(tenantId: string, conversationId: string): Promise<RescheduleOffer | null> {
+  const result = await query<{ metadata: unknown }>(
+    `select "metadata"
+     from "PatientWebChatMessage"
+     where "tenantId" = $1
+       and "conversationId" = $2
+       and "senderType" = 'ASSISTANT'
+       and "metadata"->'scheduling'->>'kind' = 'RESCHEDULE_SLOT_OFFER'
+     order by "createdAt" desc
+     limit 1`,
+    [tenantId, conversationId],
+  );
+  const scheduling = (result.rows[0]?.metadata as { scheduling?: Partial<RescheduleOffer> } | undefined)?.scheduling;
+  if (!scheduling?.appointmentId || !scheduling?.patientId || !scheduling?.slug || !scheduling?.serviceLabel || !Array.isArray(scheduling.options)) return null;
+  return {
+    appointmentId: String(scheduling.appointmentId),
+    patientId: String(scheduling.patientId),
+    slug: String(scheduling.slug),
+    serviceLabel: String(scheduling.serviceLabel),
+    requestedDay: String(scheduling.requestedDay ?? "any"),
+    options: scheduling.options as PmsOnlineSlot[],
+  };
+}
+
+async function rescheduleOfferedSlot(input: {
+  tenantId: string;
+  conversationId: string;
+  body: string;
+  leadCapture: LeadCapture;
+  offer: RescheduleOffer;
+  slot: PmsOnlineSlot;
+}): Promise<WebchatAiDecision> {
+  const conflict = await query<{ id: string }>(
+    `select "id"
+     from "PmsAppointment"
+     where "tenantId" = $1
+       and "id" <> $2
+       and "status" not in ('CANCELED', 'NO_SHOW', 'BROKEN')
+       and "startsAt" < $6::timestamp
+       and "endsAt" > $5::timestamp
+       and ("providerId" = $3 or "operatoryId" = $4)
+     limit 1`,
+    [input.tenantId, input.offer.appointmentId, input.slot.providerId, input.slot.operatoryId, input.slot.startsAt, input.slot.endsAt],
+  );
+  if (conflict.rows.length) {
+    const fresh = (await getOnlineSchedulingAvailability(input.offer.slug, input.tenantId)).slice(0, 5);
+    return schedulingDecision(
+      [
+        "That replacement time is no longer available. Here are the current openings:",
+        ...fresh.map((slot, index) => `${index + 1}. ${formatSlot(slot)}`),
+        "Reply with the number you want and I’ll move the appointment.",
+      ].join("\n"),
+      "RESCHEDULE_SLOT_REFRESHED",
+      "SLOT_RECHECK_FAILED",
+      { kind: "RESCHEDULE_SLOT_OFFER", appointmentId: input.offer.appointmentId, patientId: input.offer.patientId, slug: input.offer.slug, serviceLabel: input.offer.serviceLabel, options: fresh },
+    );
+  }
+  await query(
+    `update "PmsAppointment"
+     set "startsAt" = $3::timestamp,
+       "endsAt" = $4::timestamp,
+       "providerId" = $5,
+       "operatoryId" = $6,
+       "status" = 'CONFIRMED',
+       "notes" = coalesce("notes", '') || E'\nRescheduled from webchat after OTP verification.',
+       "updatedAt" = current_timestamp
+     where "tenantId" = $1 and "id" = $2`,
+    [input.tenantId, input.offer.appointmentId, input.slot.startsAt, input.slot.endsAt, input.slot.providerId, input.slot.operatoryId],
+  );
+  await query(
+    `insert into "PmsAppointmentStatusHistory" ("id", "appointmentId", "status", "actorRole", "note")
+     values ($1, $2, 'RESCHEDULED', 'webchat_otp', $3)`,
+    [newId("apst"), input.offer.appointmentId, `Moved to ${formatSlot(input.slot)} after OTP verification.`],
+  );
+  await query(
+    `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+     values ($1, $2, 'webchat_otp', 'APPOINTMENT_RESCHEDULED_FROM_WEBCHAT', 'PmsAppointment', $3, 'ALLOWED', $4::jsonb)`,
+    [newId("audit"), input.tenantId, input.offer.appointmentId, JSON.stringify({ conversationId: input.conversationId, slot: input.slot })],
+  );
+  const contact = await getConversationContact(input.tenantId, input.conversationId, input.leadCapture);
+  const confirmation = await sendAppointmentConfirmations({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+    appointmentId: input.offer.appointmentId,
+    patientId: input.offer.patientId,
+    phone: contact.visitorPhone,
+    email: contact.visitorEmail,
+    consentAccepted: Boolean(contact.consentAccepted),
+    slot: input.slot,
+    serviceLabel: input.offer.serviceLabel,
+    confirmationType: "RESCHEDULE_CONFIRMATION",
+  });
+  return schedulingDecision(
+    `Done. I moved your ${input.offer.serviceLabel.toLowerCase()} to ${formatSlot(input.slot)}. I’ve sent the updated confirmation by text and email where connectors are available.`,
+    "PMS_APPOINTMENT_RESCHEDULED",
+    "RESCHEDULED_TO_PMS",
+    { kind: "APPOINTMENT_RESCHEDULED", appointmentId: input.offer.appointmentId, patientId: input.offer.patientId, slot: input.slot, confirmation },
+  );
+}
+
+async function createAndSendRescheduleOtp(input: {
+  tenantId: string;
+  conversationId: string;
+  phone?: string;
+  patientId?: string;
+  appointmentId?: string;
+  consentAccepted: boolean;
+}) {
+  const phoneDigits = digits(input.phone);
+  if (!phoneDigits) return { deliveryStatus: "BLOCKED", reason: "Mobile number is required for reschedule verification." };
+  const code = String(randomInt(100000, 1000000));
+  const id = newId("otp");
+  const otpHash = hashOtp(code);
+  const destinationHash = hashLookup(phoneDigits);
+  await query(
+    `update "PatientCommunicationOtp"
+     set "status" = 'SUPERSEDED', "updatedAt" = current_timestamp
+     where "tenantId" = $1
+       and "conversationId" = $2
+       and "purpose" = 'RESCHEDULE_APPOINTMENT'
+       and "status" = 'PENDING'`,
+    [input.tenantId, input.conversationId],
+  );
+  await query(
+    `insert into "PatientCommunicationOtp"
+       ("id", "tenantId", "conversationId", "patientId", "appointmentId", "channel", "destinationHash", "purpose", "otpHash", "status", "expiresAt", "metadata")
+     values ($1, $2, $3, $4, $5, 'SMS', $6, 'RESCHEDULE_APPOINTMENT', $7, 'PENDING', current_timestamp + interval '10 minutes', $8::jsonb)`,
+    [id, input.tenantId, input.conversationId, input.patientId || null, input.appointmentId || null, destinationHash, otpHash, JSON.stringify({ noPhiStored: true, expiresMinutes: 10 })],
+  );
+  const staged = await createPhoneOutboundMessage({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+    patientId: input.patientId,
+    appointmentId: input.appointmentId,
+    channel: "SMS",
+    recipientNumber: input.phone,
+    messageType: "RESCHEDULE_OTP",
+    body: `Your 1DentalAI appointment verification code is ${code}. It expires in 10 minutes. Reply STOP to opt out.`,
+    consentStatus: input.consentAccepted ? "VERIFIED" : "UNKNOWN",
+    linkType: "RESCHEDULE_OTP",
+    linkTargetId: id,
+    linkLabel: "Reschedule verification code",
+  });
+  if (!staged || staged.blockedReason) {
+    await query(`update "PatientCommunicationOtp" set "status" = 'BLOCKED', "lastSentMessageId" = $2, "updatedAt" = current_timestamp where "id" = $1`, [id, staged?.id ?? null]);
+    return { otpId: id, messageId: staged?.id ?? null, deliveryStatus: "BLOCKED", reason: staged?.blockedReason ?? "SMS connector or consent is not ready." };
+  }
+  await updatePhoneOutboundMessageApproval(staged.id, "APPROVED_STAGED", "webchat_otp");
+  await sendApprovedPhoneOutboundMessage(staged.id, "webchat_otp");
+  const status = await query<{ deliveryStatus: string; blockedReason: string | null; providerError: string | null }>(
+    `select "deliveryStatus", "blockedReason", "providerError" from "PhoneOutboundMessage" where "id" = $1`,
+    [staged.id],
+  );
+  const row = status.rows[0];
+  await query(`update "PatientCommunicationOtp" set "lastSentMessageId" = $2, "updatedAt" = current_timestamp where "id" = $1`, [id, staged.id]);
+  return {
+    otpId: id,
+    messageId: staged.id,
+    deliveryStatus: row?.deliveryStatus ?? "UNKNOWN",
+    reason: row?.blockedReason || row?.providerError || null,
+  };
+}
+
+async function hasVerifiedRescheduleOtp(tenantId: string, conversationId: string, phoneDigits: string) {
+  if (!phoneDigits) return false;
+  const result = await query<{ id: string }>(
+    `select "id"
+     from "PatientCommunicationOtp"
+     where "tenantId" = $1
+       and "conversationId" = $2
+       and "purpose" = 'RESCHEDULE_APPOINTMENT'
+       and "destinationHash" = $3
+       and "status" = 'VERIFIED'
+       and "verifiedAt" >= current_timestamp - interval '30 minutes'
+     order by "verifiedAt" desc
+     limit 1`,
+    [tenantId, conversationId, hashLookup(phoneDigits)],
+  );
+  return Boolean(result.rows[0]);
+}
+
+async function verifyRescheduleOtp(tenantId: string, conversationId: string, phoneDigits: string, code: string) {
+  if (!phoneDigits) return { verified: false, reason: "MOBILE_REQUIRED", message: "Please share the mobile number on the appointment first, then I can verify the code." };
+  const result = await query<{ id: string; otpHash: string; attemptCount: number; maxAttempts: number; expiresAt: string }>(
+    `select "id", "otpHash", "attemptCount", "maxAttempts", "expiresAt"::text as "expiresAt"
+     from "PatientCommunicationOtp"
+     where "tenantId" = $1
+       and "conversationId" = $2
+       and "purpose" = 'RESCHEDULE_APPOINTMENT'
+       and "destinationHash" = $3
+       and "status" = 'PENDING'
+     order by "createdAt" desc
+     limit 1`,
+    [tenantId, conversationId, hashLookup(phoneDigits)],
+  );
+  const challenge = result.rows[0];
+  if (!challenge) return { verified: false, reason: "OTP_NOT_FOUND", message: "I don’t see an active verification code. Please ask to reschedule again and I’ll send a fresh code." };
+  if (new Date(challenge.expiresAt).getTime() < Date.now()) {
+    await query(`update "PatientCommunicationOtp" set "status" = 'EXPIRED', "updatedAt" = current_timestamp where "id" = $1`, [challenge.id]);
+    return { verified: false, reason: "OTP_EXPIRED", message: "That code expired. Please ask to reschedule again and I’ll send a fresh code." };
+  }
+  if (challenge.attemptCount >= challenge.maxAttempts) {
+    await query(`update "PatientCommunicationOtp" set "status" = 'LOCKED', "updatedAt" = current_timestamp where "id" = $1`, [challenge.id]);
+    return { verified: false, reason: "OTP_LOCKED", message: "Too many incorrect attempts. I’ve locked this verification for safety. Please contact the front desk." };
+  }
+  const ok = hashOtp(code) === challenge.otpHash;
+  await query(
+    `update "PatientCommunicationOtp"
+     set "attemptCount" = "attemptCount" + 1,
+       "status" = case when $2 then 'VERIFIED' else "status" end,
+       "verifiedAt" = case when $2 then current_timestamp else "verifiedAt" end,
+       "updatedAt" = current_timestamp
+     where "id" = $1`,
+    [challenge.id, ok],
+  );
+  if (!ok) return { verified: false, reason: "OTP_INVALID", message: "That code didn’t match. Please check the text message and try again." };
+  await addWebchatAudit(tenantId, "WEBCHAT_RESCHEDULE_OTP_VERIFIED", conversationId, "ALLOWED", { noPhiLogged: true });
+  return { verified: true, reason: "OTP_VERIFIED", message: "Verified." };
 }
 
 async function bookOfferedSlot(input: {
@@ -1626,26 +1919,18 @@ async function bookOfferedSlot(input: {
     });
   }
 
-  const confirmation = await withTimeout(
-    stageAndSendAppointmentConfirmation({
-      tenantId: input.tenantId,
-      conversationId: input.conversationId,
-      appointmentId: booking.appointmentId,
-      patientId: booking.patientId,
-      phone: contact.visitorPhone,
-      consentAccepted: Boolean(contact.consentAccepted),
-      slot: input.slot,
-      serviceLabel: input.offer.serviceLabel,
-    }),
-    6000,
-    {
-      smsDeliveryStatus: "CONFIRMATION_TIMEOUT",
-      reason: "Appointment was booked, but confirmation delivery did not finish before the webchat response timeout.",
-    },
-  ).catch((error) => ({
-    smsDeliveryStatus: "CONFIRMATION_QUEUE_ERROR",
-    reason: error instanceof Error ? error.message : "Confirmation queue failed after appointment booking.",
-  }));
+  const confirmation = await sendAppointmentConfirmations({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+    appointmentId: booking.appointmentId,
+    patientId: booking.patientId,
+    phone: contact.visitorPhone,
+    email: contact.visitorEmail,
+    consentAccepted: Boolean(contact.consentAccepted),
+    slot: input.slot,
+    serviceLabel: input.offer.serviceLabel,
+    confirmationType: "APPOINTMENT_CONFIRMATION",
+  });
   await query(
     `insert into "PatientWebChatEvent" ("id", "tenantId", "conversationId", "eventType", "payload")
      values ($1, $2, $3, 'APPOINTMENT_BOOKED_FROM_WEBCHAT', $4::jsonb)`,
@@ -1671,6 +1956,45 @@ async function bookOfferedSlot(input: {
       confirmation,
     },
   );
+}
+
+async function sendAppointmentConfirmations(input: {
+  tenantId: string;
+  conversationId: string;
+  appointmentId: string;
+  patientId: string;
+  phone?: string;
+  email?: string;
+  consentAccepted: boolean;
+  slot: PmsOnlineSlot;
+  serviceLabel: string;
+  confirmationType: "APPOINTMENT_CONFIRMATION" | "RESCHEDULE_CONFIRMATION";
+}) {
+  const [sms, email] = await Promise.all([
+    withTimeout(
+      stageAndSendAppointmentConfirmation(input),
+      6000,
+      {
+        smsDeliveryStatus: "CONFIRMATION_TIMEOUT",
+        reason: "Appointment was booked, but SMS confirmation delivery did not finish before the webchat response timeout.",
+      },
+    ).catch((error) => ({
+      smsDeliveryStatus: "CONFIRMATION_QUEUE_ERROR",
+      reason: error instanceof Error ? error.message : "SMS confirmation queue failed after appointment booking.",
+    })),
+    withTimeout(
+      stageAndSendAppointmentEmailConfirmation(input),
+      6000,
+      {
+        emailDeliveryStatus: "CONFIRMATION_TIMEOUT",
+        reason: "Appointment was booked, but email confirmation delivery did not finish before the webchat response timeout.",
+      },
+    ).catch((error) => ({
+      emailDeliveryStatus: "CONFIRMATION_QUEUE_ERROR",
+      reason: error instanceof Error ? error.message : "Email confirmation queue failed after appointment booking.",
+    })),
+  ]);
+  return { sms, email };
 }
 
 async function stageAndSendAppointmentConfirmation(input: {
@@ -1711,6 +2035,141 @@ async function stageAndSendAppointmentConfirmation(input: {
     [staged.id],
   );
   return { smsMessageId: staged.id, ...(result.rows[0] ?? { deliveryStatus: "UNKNOWN" }) };
+}
+
+async function stageAndSendAppointmentEmailConfirmation(input: {
+  tenantId: string;
+  conversationId: string;
+  appointmentId: string;
+  patientId: string;
+  email?: string;
+  slot: PmsOnlineSlot;
+  serviceLabel: string;
+  confirmationType: "APPOINTMENT_CONFIRMATION" | "RESCHEDULE_CONFIRMATION";
+}) {
+  if (!input.email) return { emailDeliveryStatus: "NOT_ATTEMPTED", reason: "No email address provided." };
+  const subject = input.confirmationType === "RESCHEDULE_CONFIRMATION" ? "Your dental appointment was rescheduled" : "Your dental appointment is confirmed";
+  const text = `Your ${input.serviceLabel.toLowerCase()} is confirmed for ${formatSlot(input.slot)}. Reply to the office if you need help changing it.`;
+  const html = `<p>Your ${escapeHtml(input.serviceLabel.toLowerCase())} is confirmed for <strong>${escapeHtml(formatSlot(input.slot))}</strong>.</p><p>Reply to the office if you need help changing it.</p>`;
+  const id = newId("emsg");
+  const provider = getEmailProvider();
+  const readiness = {
+    provider: provider?.provider ?? null,
+    externalSendBlocked: !provider,
+    semantics: "Appointment confirmation email. No pricing or clinical advice is included.",
+  };
+  await query(
+    `insert into "EmailOutboundMessage"
+       ("id", "tenantId", "conversationId", "patientId", "appointmentId", "recipientEmail", "messageType", "subject", "bodyText", "bodyHtml", "deliveryStatus", "connectorStatus", "readiness", "blockedReason", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, current_timestamp)`,
+    [
+      id,
+      input.tenantId,
+      input.conversationId,
+      input.patientId,
+      input.appointmentId,
+      input.email,
+      input.confirmationType,
+      subject,
+      text,
+      html,
+      provider ? "READY_FOR_CONNECTOR" : "BLOCKED_CONNECTOR_REQUIRED",
+      provider ? "READY_FOR_CONNECTOR" : "BLOCKED_CONNECTOR_REQUIRED",
+      JSON.stringify(readiness),
+      provider ? null : "Email provider is not configured. Add RESEND_API_KEY, SENDGRID_API_KEY, or POSTMARK_SERVER_TOKEN.",
+    ],
+  );
+  if (!provider) {
+    await addWebchatAudit(input.tenantId, "WEBCHAT_EMAIL_CONFIRMATION_BLOCKED", id, "BLOCKED", { appointmentId: input.appointmentId, reason: "EMAIL_CONNECTOR_REQUIRED" });
+    return { emailMessageId: id, emailDeliveryStatus: "BLOCKED_CONNECTOR_REQUIRED", reason: "Email provider is not configured." };
+  }
+  try {
+    const sent = await sendProviderEmail(provider, { to: input.email, subject, text, html });
+    await query(
+      `update "EmailOutboundMessage"
+       set "deliveryStatus" = 'SENT_TO_PROVIDER',
+         "provider" = $2,
+         "providerMessageId" = $3,
+         "providerStatus" = $4,
+         "providerError" = null,
+         "lastAttemptAt" = current_timestamp,
+         "sentAt" = current_timestamp,
+         "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('externalSendBlocked', false, 'providerResponse', $5::jsonb),
+         "updatedAt" = current_timestamp
+       where "id" = $1`,
+      [id, provider.provider, sent.providerMessageId, sent.providerStatus, JSON.stringify(sent.raw ?? {})],
+    );
+    await addWebchatAudit(input.tenantId, "WEBCHAT_EMAIL_CONFIRMATION_SENT", id, "ALLOWED", { appointmentId: input.appointmentId, provider: provider.provider });
+    return { emailMessageId: id, emailDeliveryStatus: "SENT_TO_PROVIDER", provider: provider.provider, providerMessageId: sent.providerMessageId };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Email provider rejected the message.";
+    await query(
+      `update "EmailOutboundMessage"
+       set "deliveryStatus" = 'PROVIDER_ERROR',
+         "provider" = $2,
+         "providerError" = $3,
+         "lastAttemptAt" = current_timestamp,
+         "updatedAt" = current_timestamp
+       where "id" = $1`,
+      [id, provider.provider, reason],
+    );
+    await addWebchatAudit(input.tenantId, "WEBCHAT_EMAIL_CONFIRMATION_PROVIDER_ERROR", id, "BLOCKED", { appointmentId: input.appointmentId, provider: provider.provider, reason });
+    return { emailMessageId: id, emailDeliveryStatus: "PROVIDER_ERROR", provider: provider.provider, reason };
+  }
+}
+
+function getEmailProvider() {
+  const from = process.env.EMAIL_FROM || process.env.RESEND_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || process.env.POSTMARK_FROM_EMAIL || "appointments@1dentalai.com";
+  if (process.env.RESEND_API_KEY) return { provider: "RESEND", apiKey: process.env.RESEND_API_KEY, from };
+  if (process.env.SENDGRID_API_KEY) return { provider: "SENDGRID", apiKey: process.env.SENDGRID_API_KEY, from };
+  if (process.env.POSTMARK_SERVER_TOKEN) return { provider: "POSTMARK", apiKey: process.env.POSTMARK_SERVER_TOKEN, from };
+  return null;
+}
+
+async function sendProviderEmail(
+  provider: { provider: string; apiKey: string; from: string },
+  message: { to: string; subject: string; text: string; html: string },
+) {
+  if (provider.provider === "RESEND") {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${provider.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: provider.from, to: [message.to], subject: message.subject, text: message.text, html: message.html }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`Resend rejected email: ${String(data?.message || response.status)}`);
+    return { providerMessageId: String(data?.id || ""), providerStatus: "accepted", raw: data };
+  }
+  if (provider.provider === "SENDGRID") {
+    const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${provider.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: message.to }] }],
+        from: { email: provider.from },
+        subject: message.subject,
+        content: [{ type: "text/plain", value: message.text }, { type: "text/html", value: message.html }],
+      }),
+    });
+    const body = await response.text();
+    if (!response.ok) throw new Error(`SendGrid rejected email: ${body || response.status}`);
+    return { providerMessageId: response.headers.get("x-message-id") ?? "", providerStatus: "accepted", raw: { status: response.status } };
+  }
+  if (provider.provider === "POSTMARK") {
+    const response = await fetch("https://api.postmarkapp.com/email", {
+      method: "POST",
+      headers: { "X-Postmark-Server-Token": provider.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ From: provider.from, To: message.to, Subject: message.subject, TextBody: message.text, HtmlBody: message.html, MessageStream: process.env.POSTMARK_MESSAGE_STREAM || "outbound" }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`Postmark rejected email: ${String(data?.Message || response.status)}`);
+    return { providerMessageId: String(data?.MessageID || ""), providerStatus: String(data?.ErrorCode === 0 ? "accepted" : data?.ErrorCode || "accepted"), raw: data };
+  }
+  throw new Error("Unsupported email provider.");
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[char] ?? char);
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
@@ -2006,6 +2465,28 @@ function splitPatientName(name?: string) {
 
 function digits(value?: string) {
   return value?.replace(/\D/g, "") ?? "";
+}
+
+function extractPhoneFromText(value: string) {
+  const match = value.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/);
+  if (!match) return "";
+  const numeric = digits(match[0]);
+  if (numeric.length === 10) return `+1${numeric}`;
+  if (numeric.length === 11 && numeric.startsWith("1")) return `+${numeric}`;
+  return numeric.length >= 10 ? `+1${numeric.slice(-10)}` : "";
+}
+
+function extractOtp(value: string) {
+  return value.match(/\b(\d{6})\b/)?.[1] ?? null;
+}
+
+function hashLookup(value: string) {
+  return createHash("sha256").update(value.trim().toLowerCase()).digest("hex");
+}
+
+function hashOtp(value: string) {
+  const secret = process.env.OTP_HASH_SECRET || process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "1dentalai-local-otp-secret";
+  return createHash("sha256").update(`${secret}:${value.trim()}`).digest("hex");
 }
 
 function isToday(value: string) {

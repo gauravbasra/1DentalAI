@@ -1,7 +1,7 @@
 # Payer Matrix Schema And Service Slice
 
-Status: Backend schema/service slice implemented  
-Date: 2026-05-23  
+Status: Phase 1 read-only API and DB behavior slice implemented  
+Date: 2026-05-24  
 Owner: Payer Integration Worker
 
 ## Purpose
@@ -10,7 +10,7 @@ Define the first Stedi-style payer matrix slice for 1DentalAI. The public Stedi 
 
 ## Scope
 
-This slice covers payer discovery, route readiness, credential-reference inventory, RPA run logging, and artifact references. It does not submit eligibility, claims, attachments, status checks, prior authorizations, or ERA enrollment yet.
+This slice covers payer discovery, route readiness, credential-reference inventory, RPA run logging, artifact references, read-only payer APIs, a non-PHI fixture, and DB-backed readiness behavior tests. It does not submit eligibility, claims, attachments, status checks, prior authorizations, or ERA enrollment yet.
 
 First supported transaction families:
 
@@ -124,6 +124,7 @@ The gate must fail closed when any of these are missing:
 - Validated `PayerPortalCredentialReference` when `allowPortalRpa` or portal/manual fallbacks are required.
 - `PayerRpaRunLog` and `PayerGeneratedArtifactReference` when bots read payer portal screens, generate EOBs, or create a generated PDF artifact used by staff.
 - Clearinghouse route decision metadata with payer ID and Stedi-style transaction key for electronic routes.
+- Current matrix snapshot; payer entries tied to a matrix snapshot older than 30 days fail closed until the matrix is refreshed.
 
 The gate must not allow `PayerNetworkType.UNKNOWN`, `PayerRouteType.BLOCKED`, stale matrix snapshots, or portal/manual fallbacks to be treated as electronic acknowledgement.
 
@@ -132,12 +133,14 @@ The gate must not allow `PayerNetworkType.UNKNOWN`, `PayerRouteType.BLOCKED`, st
 - `prisma/schema.prisma` now defines the payer registry, aliases, transaction capabilities, network models, route policies, matrix snapshots, RPA credential references, run logs, and generated artifact references.
 - `prisma/migrations/202605230900_payer_network_matrix/migration.sql` creates the same backend tables and indexes.
 - `src/lib/payer-network-repository.ts` provides backend-first services for search, import, route readiness, production-gate enforcement, portal credential references, RPA run logs, artifact references, and coverage metrics.
-- `scripts/validate-payer-matrix-slice.mjs` fails if the slice lacks eligibility, claims, ERA/EOB, prior auth, attachments, portal/RPA status, credential vault references, audit/run-log fields, generated artifact references, concrete schema columns, SQL persistence, or readiness blockers. It also rejects token-only Stedi mapping stubs by requiring per-family `x12Transaction`, `stediTransactionKey`, and proof mapping.
+- `src/app/api/pms/payers/search/route.ts`, `src/app/api/pms/payers/[payerRegistryEntryId]/route-readiness/route.ts`, and `src/app/api/pms/payers/coverage/route.ts` expose authenticated, tenant-scoped read-only payer search, insurance plan payer resolution, route readiness, and matrix coverage.
+- `prisma/fixtures/payer-matrix.sample.json` seeds non-PHI supported, portal-only, enrollment-required, blocked, and stale-snapshot payer route cases.
+- `scripts/validate-payer-matrix-slice.mjs` fails if the slice lacks eligibility, claims, ERA/EOB, prior auth, attachments, portal/RPA status, credential vault references, audit/run-log fields, generated artifact references, concrete schema columns, SQL persistence, read-only APIs, fixture evidence, or readiness blockers. It also rejects token-only Stedi mapping stubs by requiring per-family `x12Transaction`, `stediTransactionKey`, and proof mapping.
+- `scripts/validate-payer-route-readiness-behavior.mjs` uses the non-PHI fixture against a real database when `DATABASE_URL` is configured and verifies supported, unsupported, enrollment-required, portal credential required, and stale-snapshot cases.
 
 ## Next Implementation Checklist
 
-- Add Prisma models only after this slice is approved.
-- Add read-only APIs first: payer search and route readiness.
-- Add a seeded non-PHI payer matrix fixture for local development.
-- Add route-readiness tests for supported, unsupported, enrollment-required, portal-only, stale-snapshot, and blocked-route cases.
-- Wire the production PMS/RCM gate only after read-only matrix behavior passes.
+- Wire `assertPayerProductionGate` into eligibility run creation, claim submission, prior-auth packet submission, attachment submission, claim-status polling, ERA enrollment, and EOB/ERA posting status transitions.
+- Expand the fixture from five route archetypes to a Stedi-network-shaped payer matrix import job with source/version metadata.
+- Add UI search/readiness surfaces on PMS insurance and RCM work queues without allowing external submission from the read-only phase.
+- Add QA browser evidence for payer APIs and insurance screen behavior before calling Phase 1 deployment-ready.

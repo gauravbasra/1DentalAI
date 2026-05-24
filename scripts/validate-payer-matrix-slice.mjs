@@ -9,6 +9,11 @@ const files = {
   migration: "prisma/migrations/202605230900_payer_network_matrix/migration.sql",
   service: "src/lib/payer-network-repository.ts",
   doc: "docs/PAYER_MATRIX_SCHEMA_SERVICE_SLICE.md",
+  searchRoute: "src/app/api/pms/payers/search/route.ts",
+  readinessRoute: "src/app/api/pms/payers/[payerRegistryEntryId]/route-readiness/route.ts",
+  coverageRoute: "src/app/api/pms/payers/coverage/route.ts",
+  fixture: "prisma/fixtures/payer-matrix.sample.json",
+  behavior: "scripts/validate-payer-route-readiness-behavior.mjs",
 };
 
 function read(label) {
@@ -24,6 +29,11 @@ const schema = read("schema");
 const migration = read("migration");
 const service = read("service");
 const doc = read("doc");
+const searchRoute = read("searchRoute");
+const readinessRoute = read("readinessRoute");
+const coverageRoute = read("coverageRoute");
+const fixture = read("fixture");
+const behavior = read("behavior");
 const corpus = `${schema}\n${migration}\n${service}\n${doc}`;
 
 function requireTokens(label, source, tokens) {
@@ -73,6 +83,7 @@ requireTokens("service", service, [
   "PAYER_TRANSACTION_FAMILIES",
   "searchPayerMatrix",
   "getPayerRouteReadiness",
+  "resolveInsurancePlanPayer",
   "importPayerMatrixSnapshot",
   "assertPayerProductionGate",
   "registerPortalCredentialReference",
@@ -82,6 +93,42 @@ requireTokens("service", service, [
   "PayerNetworkType.UNKNOWN is blocked",
   "PayerRouteType.BLOCKED is blocked",
   "Manual-only route cannot satisfy electronic acknowledgement",
+  "Payer matrix snapshot is stale",
+]);
+requireTokens("read-only payer APIs", `${searchRoute}\n${readinessRoute}\n${coverageRoute}`, [
+  "requirePmsApiSession",
+  "auth.session.tenantId",
+  "searchPayerMatrix",
+  "resolveInsurancePlanPayer",
+  "getPayerRouteReadiness",
+  "getPayerMatrixCoverage",
+  "PAYER_TRANSACTION_FAMILIES",
+]);
+requireTokens("payer route readiness fixture", fixture, [
+  "Fixture Dental Preferred",
+  "Fixture Portal Dental",
+  "Fixture Enrollment Required Dental",
+  "Fixture Blocked Dental",
+  "Fixture Stale Matrix Dental",
+  "ELIGIBILITY_270_271",
+  "CLAIM_837D",
+  "ERA_835",
+  "PRIOR_AUTH",
+  "portalRpaProfile",
+  "requiresValidatedCredential",
+]);
+requireTokens("payer route readiness behavior test", behavior, [
+  "DATABASE_URL",
+  "PayerMatrixSnapshot",
+  "PayerRegistryEntry",
+  "PayerTransactionCapability",
+  "PayerNetworkModel",
+  "PayerRoutePolicy",
+  "supported clearinghouse route should be ready",
+  "blocked route did not fail closed",
+  "enrollment-required route did not fail closed",
+  "portal-only route did not require validated credentials",
+  "stale matrix route did not fail closed",
 ]);
 requireTokens("transaction coverage", corpus, requiredTransactions);
 requireTokens("RPA credential/run-log/artifact coverage", corpus, [

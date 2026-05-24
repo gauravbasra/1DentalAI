@@ -141,6 +141,10 @@ type ReadinessRow = {
   payerId: string;
   payerName: string;
   active: boolean;
+  sourceSnapshotId: string | null;
+  sourceUpdatedAt: string | null;
+  snapshotImportedAt: string | null;
+  snapshotImportStatus: string | null;
   transactionFamily: string | null;
   supported: boolean | null;
   capabilityStatus: string | null;
@@ -252,6 +256,8 @@ export async function getPayerRouteReadiness(input: {
   const tenantId = input.tenantId ?? defaultTenantId;
   const result = await query<ReadinessRow>(
     `select p."id" as "payerId", p."payerName", p."active",
+       p."sourceSnapshotId", p."sourceUpdatedAt"::text as "sourceUpdatedAt",
+       s."importedAt"::text as "snapshotImportedAt", s."importStatus" as "snapshotImportStatus",
        c."transactionFamily", c."supported", c."status" as "capabilityStatus",
        c."requiresEnrollment", c."requiresProviderEnrollment", c."requiresLocationEnrollment", c."requiresPayerPortalFallback",
        n."networkType", n."routeType", n."enrollmentStatus", n."manualFallbackAllowed",
@@ -271,6 +277,8 @@ export async function getPayerRouteReadiness(input: {
        on rp."tenantId" = p."tenantId" and rp."payerRegistryEntryId" = p."id" and rp."transactionFamily" = $3
      left join "PayerPortalCredentialReference" cr
        on cr."tenantId" = p."tenantId" and cr."payerRegistryEntryId" = p."id"
+     left join "PayerMatrixSnapshot" s
+       on s."tenantId" = p."tenantId" and s."id" = p."sourceSnapshotId"
      where p."tenantId" = $1 and p."id" = $2
      order by n."lastVerifiedAt" desc nulls last, cr."lastValidatedAt" desc nulls last
      limit 1`,
@@ -315,6 +323,34 @@ export async function assertPayerProductionGate(input: {
     throw new Error(`Payer production gate blocked ${input.transactionFamily}: ${readiness.blockers.join(" ")}`);
   }
   return readiness;
+}
+
+export async function resolveInsurancePlanPayer(input: {
+  payerName: string;
+  payerId?: string | null;
+  tenantId?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const directPayerId = input.payerId?.trim();
+  if (directPayerId) {
+    const direct = await query(
+      `select p.*
+       from "PayerRegistryEntry" p
+       where p."tenantId" = $1 and p."active" = true and p."primaryPayerId" = $2
+       limit 1`,
+      [tenantId, directPayerId],
+    );
+    if (direct.rows[0]) return { matchType: "PAYER_ID", confidence: 100, payer: direct.rows[0] };
+  }
+
+  const matches = await searchPayerMatrix({ tenantId, query: input.payerName, limit: 5 });
+  const best = matches[0] as { matchScore?: number } | undefined;
+  return {
+    matchType: best ? "NAME_OR_ALIAS" : "UNMATCHED",
+    confidence: best?.matchScore ?? 0,
+    payer: best ?? null,
+    candidates: matches,
+  };
 }
 
 export async function importPayerMatrixSnapshot(input: {
@@ -661,8 +697,12 @@ function evaluatePayerReadiness(row: ReadinessRow) {
   const portalRoute = row.preferredRouteType === "PAYER_PORTAL" || row.fallbackRouteType === "PAYER_PORTAL";
   const routeMetadata = (row.routeDecisionMetadata && typeof row.routeDecisionMetadata === "object" ? row.routeDecisionMetadata : {}) as Record<string, unknown>;
   const clearinghouseRoute = row.preferredRouteType === "CLEARINGHOUSE" || row.routeType === "CLEARINGHOUSE";
+  const snapshotImportedAt = row.snapshotImportedAt ? new Date(row.snapshotImportedAt) : null;
+  const snapshotAgeDays = snapshotImportedAt ? Math.floor((Date.now() - snapshotImportedAt.getTime()) / 86_400_000) : null;
   const blockers = [
     row.active ? null : "PayerRegistryEntry is inactive.",
+    row.sourceSnapshotId && row.snapshotImportStatus !== "IMPORTED" ? "Payer matrix snapshot is not imported and cannot be used for production routing." : null,
+    row.sourceSnapshotId && snapshotAgeDays !== null && snapshotAgeDays > 30 ? "Payer matrix snapshot is stale; refresh payer network data before production routing." : null,
     row.supported ? null : "PayerTransactionCapability is missing or unsupported.",
     row.capabilityStatus && ["SUPPORTED", "READY", "ENROLLED", "PORTAL_FALLBACK"].includes(row.capabilityStatus) ? null : "Capability status is not production-ready.",
     row.networkType && row.networkType !== "UNKNOWN" ? null : "PayerNetworkType.UNKNOWN is blocked.",
@@ -701,6 +741,9 @@ function evaluatePayerReadiness(row: ReadinessRow) {
       connectorHealthRequired: row.connectorHealthRequired,
       credentialingStatus: row.credentialingStatus,
       credentialStatus: row.credentialStatus,
+      sourceSnapshotId: row.sourceSnapshotId,
+      snapshotImportedAt: row.snapshotImportedAt,
+      snapshotAgeDays,
     },
     row,
   };

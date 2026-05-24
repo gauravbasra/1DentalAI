@@ -1,0 +1,138 @@
+{
+  "source": "1DentalAI non-PHI payer route readiness fixture",
+  "sourceUrl": "https://www.stedi.com/healthcare/network",
+  "version": "phase-1-route-readiness-2026-05-24",
+  "rows": [
+    {
+      "payerName": "Fixture Dental Preferred",
+      "primaryPayerId": "FDP001",
+      "payerType": "COMMERCIAL",
+      "coverageType": "DENTAL",
+      "aliases": ["Fixture Dental PPO", "FDP Dental"],
+      "capabilities": {
+        "ELIGIBILITY_270_271": { "supported": true, "clearinghouse": "STEDI", "clearinghousePayerId": "FDP001", "supportsRealtime": true, "status": "SUPPORTED" },
+        "CLAIM_837D": { "supported": true, "clearinghouse": "STEDI", "clearinghousePayerId": "FDP001", "status": "SUPPORTED" },
+        "ERA_835": { "supported": true, "clearinghouse": "STEDI", "clearinghousePayerId": "FDP001", "status": "SUPPORTED" }
+      },
+      "network": {
+        "networkType": "CLEARINGHOUSE",
+        "routeType": "CLEARINGHOUSE",
+        "clearinghouse": "STEDI",
+        "clearinghouseRouteKey": "stedi:fixture-dental-preferred",
+        "clearinghousePayerId": "FDP001",
+        "manualFallbackAllowed": false,
+        "enrollmentStatus": "ENROLLED",
+        "credentialingStatus": "ACTIVE"
+      },
+      "routePolicies": {
+        "ELIGIBILITY_270_271": { "preferredRouteType": "CLEARINGHOUSE", "clearinghouseRouteDecision": "PREFERRED" },
+        "CLAIM_837D": { "preferredRouteType": "CLEARINGHOUSE", "clearinghouseRouteDecision": "PREFERRED" },
+        "ERA_835": { "preferredRouteType": "CLEARINGHOUSE", "clearinghouseRouteDecision": "PREFERRED" }
+      }
+    },
+    {
+      "payerName": "Fixture Portal Dental",
+      "primaryPayerId": "FPD002",
+      "payerType": "COMMERCIAL",
+      "coverageType": "DENTAL",
+      "aliases": ["Fixture Portal PPO"],
+      "capabilities": {
+        "ELIGIBILITY_270_271": { "supported": true, "requiresPayerPortalFallback": true, "portalFallbackReason": "Eligibility requires payer portal RPA", "supportsRealtime": true, "status": "PORTAL_FALLBACK" },
+        "CLAIM_STATUS_276_277": { "supported": true, "requiresPayerPortalFallback": true, "portalFallbackReason": "Status lookup requires portal", "status": "PORTAL_FALLBACK" },
+        "PRIOR_AUTH": { "supported": true, "requiresPayerPortalFallback": true, "portalFallbackReason": "Prior auth starts in portal", "status": "PORTAL_FALLBACK" }
+      },
+      "network": {
+        "networkType": "PAYER_PORTAL",
+        "routeType": "PAYER_PORTAL",
+        "portalUrl": "https://portal.fixture-payer.invalid/login",
+        "portalRpaProfile": { "layoutKey": "fixture_portal_v1", "mfaPolicy": "manual_checkpoint" },
+        "manualFallbackAllowed": false,
+        "enrollmentStatus": "ENROLLED",
+        "credentialingStatus": "ACTIVE"
+      },
+      "routePolicies": {
+        "ELIGIBILITY_270_271": { "preferredRouteType": "PAYER_PORTAL", "approvalPolicy": "SCREEN_EVIDENCE_AND_HUMAN_REVIEW", "allowPortalRpa": true, "requiresValidatedCredential": true, "connectorHealthRequired": false, "clearinghouseRouteDecision": "NOT_APPLICABLE" },
+        "CLAIM_STATUS_276_277": { "preferredRouteType": "PAYER_PORTAL", "approvalPolicy": "SCREEN_EVIDENCE_AND_HUMAN_REVIEW", "allowPortalRpa": true, "requiresValidatedCredential": true, "connectorHealthRequired": false, "clearinghouseRouteDecision": "NOT_APPLICABLE" },
+        "PRIOR_AUTH": { "preferredRouteType": "PAYER_PORTAL", "approvalPolicy": "SCREEN_EVIDENCE_AND_HUMAN_REVIEW", "allowPortalRpa": true, "requiresValidatedCredential": true, "connectorHealthRequired": false, "clearinghouseRouteDecision": "NOT_APPLICABLE" }
+      }
+    },
+    {
+      "payerName": "Fixture Enrollment Required Dental",
+      "primaryPayerId": "FER003",
+      "payerType": "COMMERCIAL",
+      "coverageType": "DENTAL",
+      "aliases": ["Fixture Enrollment"],
+      "capabilities": {
+        "ELIGIBILITY_270_271": { "supported": true, "clearinghouse": "STEDI", "clearinghousePayerId": "FER003", "requiresEnrollment": true, "requiresProviderEnrollment": true, "supportsRealtime": true, "status": "SUPPORTED" },
+        "CLAIM_837D": { "supported": true, "clearinghouse": "STEDI", "clearinghousePayerId": "FER003", "requiresEnrollment": true, "requiresProviderEnrollment": true, "status": "SUPPORTED" },
+        "ERA_835": { "supported": true, "clearinghouse": "STEDI", "clearinghousePayerId": "FER003", "requiresEnrollment": true, "status": "SUPPORTED" }
+      },
+      "network": {
+        "networkType": "CLEARINGHOUSE",
+        "routeType": "CLEARINGHOUSE",
+        "clearinghouse": "STEDI",
+        "clearinghouseRouteKey": "stedi:fixture-enrollment",
+        "clearinghousePayerId": "FER003",
+        "manualFallbackAllowed": false,
+        "enrollmentStatus": "PENDING",
+        "credentialingStatus": "PENDING"
+      },
+      "routePolicies": {
+        "ELIGIBILITY_270_271": { "preferredRouteType": "CLEARINGHOUSE", "clearinghouseRouteDecision": "PREFERRED" },
+        "CLAIM_837D": { "preferredRouteType": "CLEARINGHOUSE", "clearinghouseRouteDecision": "PREFERRED" },
+        "ERA_835": { "preferredRouteType": "CLEARINGHOUSE", "clearinghouseRouteDecision": "PREFERRED" }
+      }
+    },
+    {
+      "payerName": "Fixture Blocked Dental",
+      "primaryPayerId": "FBD004",
+      "payerType": "COMMERCIAL",
+      "coverageType": "DENTAL",
+      "aliases": ["Fixture Blocked"],
+      "capabilities": {
+        "ELIGIBILITY_270_271": { "supported": false, "status": "UNSUPPORTED" },
+        "CLAIM_837D": { "supported": false, "status": "UNSUPPORTED" },
+        "ERA_835": { "supported": false, "status": "UNSUPPORTED" }
+      },
+      "network": {
+        "networkType": "UNKNOWN",
+        "routeType": "BLOCKED",
+        "manualFallbackAllowed": false,
+        "enrollmentStatus": "NOT_STARTED",
+        "credentialingStatus": "BLOCKED"
+      },
+      "routePolicies": {
+        "ELIGIBILITY_270_271": { "preferredRouteType": "MANUAL_ONLY", "externalActionBlockedReason": "Fixture payer is intentionally blocked", "clearinghouseRouteDecision": "REJECTED" },
+        "CLAIM_837D": { "preferredRouteType": "MANUAL_ONLY", "externalActionBlockedReason": "Fixture payer is intentionally blocked", "clearinghouseRouteDecision": "REJECTED" },
+        "ERA_835": { "preferredRouteType": "MANUAL_ONLY", "externalActionBlockedReason": "Fixture payer is intentionally blocked", "clearinghouseRouteDecision": "REJECTED" }
+      }
+    },
+    {
+      "payerName": "Fixture Stale Matrix Dental",
+      "primaryPayerId": "FSM005",
+      "payerType": "COMMERCIAL",
+      "coverageType": "DENTAL",
+      "aliases": ["Fixture Stale"],
+      "capabilities": {
+        "ELIGIBILITY_270_271": { "supported": true, "clearinghouse": "STEDI", "clearinghousePayerId": "FSM005", "supportsRealtime": true, "status": "SUPPORTED" },
+        "CLAIM_837D": { "supported": true, "clearinghouse": "STEDI", "clearinghousePayerId": "FSM005", "status": "SUPPORTED" },
+        "ERA_835": { "supported": true, "clearinghouse": "STEDI", "clearinghousePayerId": "FSM005", "status": "SUPPORTED" }
+      },
+      "network": {
+        "networkType": "CLEARINGHOUSE",
+        "routeType": "CLEARINGHOUSE",
+        "clearinghouse": "STEDI",
+        "clearinghouseRouteKey": "stedi:fixture-stale",
+        "clearinghousePayerId": "FSM005",
+        "manualFallbackAllowed": false,
+        "enrollmentStatus": "ENROLLED",
+        "credentialingStatus": "ACTIVE"
+      },
+      "routePolicies": {
+        "ELIGIBILITY_270_271": { "preferredRouteType": "CLEARINGHOUSE", "clearinghouseRouteDecision": "PREFERRED" },
+        "CLAIM_837D": { "preferredRouteType": "CLEARINGHOUSE", "clearinghouseRouteDecision": "PREFERRED" },
+        "ERA_835": { "preferredRouteType": "CLEARINGHOUSE", "clearinghouseRouteDecision": "PREFERRED" }
+      }
+    }
+  ]
+}

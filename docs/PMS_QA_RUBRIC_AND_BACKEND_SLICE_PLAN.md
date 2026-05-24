@@ -116,7 +116,7 @@ QA will run:
 ## Current Repo Gaps
 
 - `src/lib/pms-repository.ts` contains core PMS functions and checkout is now transactional, but payer-facing lifecycle functions remain mostly internal workflow stubs rather than live eligibility/claim/ERA route integrations.
-- `docs/PAYER_MATRIX_SCHEMA_SERVICE_SLICE.md` defines payer matrix direction, but Prisma models and services are not yet implemented.
+- `docs/PAYER_MATRIX_SCHEMA_SERVICE_SLICE.md` now has the Phase 1 payer matrix schema/service/API/fixture behavior slice. The remaining gap is wiring `assertPayerProductionGate` into every payer-facing lifecycle transition for eligibility, claims, prior auth, attachments, claim status, ERA/EOB, and enrollment.
 - `scripts/validate-pms-production-gate.mjs` validates auth/tenant and checkout structural gates, but does not yet validate payer route readiness, EOB/ERA idempotency, prior-auth proof, PDF generation, or clinical AI approval gates.
 - `src/lib/operating-system-repository.ts` contains RCM concepts such as prior auth, denials, ERA posting, and payer follow-ups, but they need PMS-integrated route-readiness gates and QA fixtures.
 - PMS pages under `src/app/app/pms/**` exist, but QA must still click every workflow and prove real database state changes before any go-live claim.
