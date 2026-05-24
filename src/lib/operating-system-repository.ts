@@ -1801,6 +1801,7 @@ export async function sendApprovedPhoneOutboundMessage(id: string, actorRole = "
   const callbackUrl = `${(process.env.ONE_DENTAL_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://app.1dentalai.com").replace(/\/$/, "")}/api/twilio/sms/status`;
   try {
     const twilio = await sendTwilioSms({
+      tenantId: message.tenantId,
       from: fromNumber,
       to: message.recipientNumber!,
       body: message.body,
@@ -1839,6 +1840,7 @@ export async function sendApprovedPhoneOutboundMessage(id: string, actorRole = "
 }
 
 async function getSmsSendBlock(message: {
+  tenantId: string;
   channel: string;
   recipientNumber: string | null;
   body: string;
@@ -1856,7 +1858,8 @@ async function getSmsSendBlock(message: {
   if (message.blockedReason) return message.blockedReason;
   if (!message.recipientNumber) return "Recipient mobile number is missing.";
   if (!message.body.trim()) return "Message body is empty.";
-  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) return "Twilio Account SID/Auth Token are not configured in the production environment.";
+  const credentials = await getTwilioCredentials(message.tenantId);
+  if (!credentials.accountSid || !credentials.authToken) return "Twilio Account SID/Auth Token are not configured in the credential vault or production environment.";
   return null;
 }
 
@@ -1872,19 +1875,19 @@ async function getActiveSmsFromNumber(tenantId: string) {
   return result.rows[0]?.phoneNumber ?? null;
 }
 
-async function sendTwilioSms(input: { from: string; to: string; body: string; statusCallback: string }) {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID!;
-  const authToken = process.env.TWILIO_AUTH_TOKEN!;
+async function sendTwilioSms(input: { tenantId: string; from: string; to: string; body: string; statusCallback: string }) {
+  const credentials = await getTwilioCredentials(input.tenantId);
+  if (!credentials.accountSid || !credentials.authToken) throw new Error("Twilio Account SID/Auth Token are not configured in the credential vault or production environment.");
   const params = new URLSearchParams({
     From: input.from,
     To: input.to,
     Body: input.body,
     StatusCallback: input.statusCallback,
   });
-  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
+  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${credentials.accountSid}/Messages.json`, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+      Authorization: `Basic ${Buffer.from(`${credentials.accountSid}:${credentials.authToken}`).toString("base64")}`,
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: params.toString(),
