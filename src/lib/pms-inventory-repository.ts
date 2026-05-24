@@ -10,7 +10,59 @@ type InventorySummaryRow = {
   marketplaceVendors: string;
   inventoryValueCents: string;
   last30UsageCents: string;
+  periodUsageCents: string;
+  periodReceivedCents: string;
+  periodMovementCount: string;
+  periodRfpCount: string;
 };
+
+export type InventoryReportingFilters = {
+  period?: string;
+  startDate?: string;
+  endDate?: string;
+};
+
+function formatDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+export function resolveInventoryReportingWindow(filters: InventoryReportingFilters = {}) {
+  const today = new Date();
+  const utcToday = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const period = filters.period === "custom" || filters.period === "weekly" || filters.period === "monthly" ? filters.period : "daily";
+  let start = utcToday;
+  let end = addDays(utcToday, 1);
+
+  if (period === "weekly") {
+    const day = utcToday.getUTCDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    start = addDays(utcToday, mondayOffset);
+    end = addDays(start, 7);
+  } else if (period === "monthly") {
+    start = new Date(Date.UTC(utcToday.getUTCFullYear(), utcToday.getUTCMonth(), 1));
+    end = new Date(Date.UTC(utcToday.getUTCFullYear(), utcToday.getUTCMonth() + 1, 1));
+  } else if (period === "custom") {
+    const parsedStart = filters.startDate ? new Date(`${filters.startDate}T00:00:00.000Z`) : null;
+    const parsedEnd = filters.endDate ? new Date(`${filters.endDate}T00:00:00.000Z`) : null;
+    if (parsedStart && !Number.isNaN(parsedStart.getTime())) start = parsedStart;
+    if (parsedEnd && !Number.isNaN(parsedEnd.getTime())) end = addDays(parsedEnd, 1);
+    if (end <= start) end = addDays(start, 1);
+  }
+
+  return {
+    period,
+    startDate: formatDate(start),
+    endDate: formatDate(addDays(end, -1)),
+    startTimestamp: start.toISOString(),
+    endTimestamp: end.toISOString(),
+  };
+}
 
 async function addInventoryAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string, metadata: Record<string, unknown> = {}) {
   await query(
@@ -20,8 +72,9 @@ async function addInventoryAudit(tenantId: string, actorRole: string, eventType:
   );
 }
 
-export async function getInventoryWorkbench(tenantId = defaultTenantId) {
-  const [summary, items, lots, vendors, assets, movements, rfps, bids, benchmarks, locations] = await Promise.all([
+export async function getInventoryWorkbench(tenantId = defaultTenantId, filters: InventoryReportingFilters = {}) {
+  const reportingWindow = resolveInventoryReportingWindow(filters);
+  const [summary, items, lots, vendors, assets, movements, rfps, bids, benchmarks, locations, reportBuckets] = await Promise.all([
     query<InventorySummaryRow>(
       `with stock as (
          select i."id", i."parLevel", i."reorderPoint", coalesce(sum(l."quantityOnHand"), 0) as qty,
@@ -39,8 +92,12 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId) {
         (select count(*) from "PmsInventoryRfp" where "tenantId" = $1 and "status" in ('DRAFT', 'RELEASED', 'EVALUATING'))::text as "openRfps",
         (select count(*) from "PmsInventoryVendor" where "tenantId" = $1 and "marketplaceStatus" = 'MARKETPLACE_VENDOR')::text as "marketplaceVendors",
         coalesce((select sum(value_cents)::bigint from stock), 0)::text as "inventoryValueCents",
-        coalesce((select sum(abs("quantity") * "unitCostCents")::bigint from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" = 'CONSUMED' and "createdAt" >= current_date - interval '30 days'), 0)::text as "last30UsageCents"`,
-      [tenantId],
+        coalesce((select sum(abs("quantity") * "unitCostCents")::bigint from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" = 'CONSUMED' and "createdAt" >= current_date - interval '30 days'), 0)::text as "last30UsageCents",
+        coalesce((select sum(abs("quantity") * "unitCostCents")::bigint from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" = 'CONSUMED' and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp), 0)::text as "periodUsageCents",
+        coalesce((select sum(abs("quantity") * "unitCostCents")::bigint from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" = 'RECEIVED' and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp), 0)::text as "periodReceivedCents",
+        (select count(*) from "PmsInventoryMovement" where "tenantId" = $1 and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp)::text as "periodMovementCount",
+        (select count(*) from "PmsInventoryRfp" where "tenantId" = $1 and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp)::text as "periodRfpCount"`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query(
       `select i.*, v."vendorName",
@@ -91,29 +148,29 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId) {
        from "PmsInventoryMovement" m
        join "PmsInventoryCatalogItem" i on i."id" = m."itemId"
        left join "PmsPatient" p on p."id" = m."patientId"
-       where m."tenantId" = $1
+       where m."tenantId" = $1 and m."createdAt" >= $2::timestamp and m."createdAt" < $3::timestamp
        order by m."createdAt" desc
-       limit 25`,
-      [tenantId],
+       limit 100`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query(
       `select r.*, v."vendorName" as "awardedVendorName", coalesce(count(b."id"), 0)::int as "bidCount"
        from "PmsInventoryRfp" r
        left join "PmsInventoryVendor" v on v."id" = r."awardedVendorId"
        left join "PmsInventoryVendorBid" b on b."rfpId" = r."id"
-       where r."tenantId" = $1
+       where r."tenantId" = $1 and ($2::text = 'all' or (r."createdAt" >= $3::timestamp and r."createdAt" < $4::timestamp))
        group by r."id", v."vendorName"
        order by r."createdAt" desc`,
-      [tenantId],
+      [tenantId, filters.period === "all" ? "all" : "filtered", reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query(
       `select b.*, r."rfpNumber", r."title", v."vendorName", v."reliabilityScore"
        from "PmsInventoryVendorBid" b
        join "PmsInventoryRfp" r on r."id" = b."rfpId"
        join "PmsInventoryVendor" v on v."id" = b."vendorId"
-       where b."tenantId" = $1
+       where b."tenantId" = $1 and ($2::text = 'all' or (b."submittedAt" >= $3::timestamp and b."submittedAt" < $4::timestamp))
        order by b."bidTotalCents" asc, b."leadDays" asc`,
-      [tenantId],
+      [tenantId, filters.period === "all" ? "all" : "filtered", reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
     query(
       `select * from "PmsInventoryBenchmarkSnapshot"
@@ -122,6 +179,17 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId) {
       [tenantId],
     ),
     query(`select * from "PmsInventoryStockLocation" where "tenantId" = $1 and "status" = 'ACTIVE' order by "locationName"`, [tenantId]),
+    query(
+      `select date_trunc('day', "createdAt")::date::text as "bucketDate",
+              "movementType",
+              count(*)::int as "movementCount",
+              coalesce(sum(abs("quantity") * "unitCostCents")::bigint, 0)::text as "valueCents"
+       from "PmsInventoryMovement"
+       where "tenantId" = $1 and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp
+       group by date_trunc('day', "createdAt")::date, "movementType"
+       order by "bucketDate" asc, "movementType"`,
+      [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
+    ),
   ]);
 
   return {
@@ -134,7 +202,12 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId) {
       marketplaceVendors: "0",
       inventoryValueCents: "0",
       last30UsageCents: "0",
+      periodUsageCents: "0",
+      periodReceivedCents: "0",
+      periodMovementCount: "0",
+      periodRfpCount: "0",
     },
+    reportingWindow,
     items: items.rows,
     lots: lots.rows,
     vendors: vendors.rows,
@@ -144,6 +217,7 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId) {
     bids: bids.rows,
     benchmarks: benchmarks.rows,
     locations: locations.rows,
+    reportBuckets: reportBuckets.rows,
   };
 }
 

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { EmptyPmsState, Money, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
@@ -144,12 +145,17 @@ async function createAssetAction(formData: FormData) {
   revalidatePath("/app/pms/inventory");
 }
 
-export default async function InventoryPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
+export default async function InventoryPage({ searchParams }: { searchParams: Promise<{ role?: string; period?: string; startDate?: string; endDate?: string }> }) {
   const params = await searchParams;
   const session = await requireAuth();
   const role = getRole(params.role);
-  const workbench = await getInventoryWorkbench(session.tenantId);
+  const workbench = await getInventoryWorkbench(session.tenantId, {
+    period: params.period,
+    startDate: params.startDate,
+    endDate: params.endDate,
+  });
   const summary = workbench.summary;
+  const reportingWindow = workbench.reportingWindow;
   const items = workbench.items as AnyRow[];
   const vendors = workbench.vendors as AnyRow[];
   const lots = workbench.lots as AnyRow[];
@@ -159,12 +165,48 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
   const bids = workbench.bids as AnyRow[];
   const benchmarks = workbench.benchmarks as AnyRow[];
   const locations = workbench.locations as AnyRow[];
+  const reportBuckets = workbench.reportBuckets as AnyRow[];
+  const roleParam = `role=${role.key}`;
 
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>
       <PageHeader eyebrow="PMS inventory" title="Practice inventory and vendor marketplace" body="Track equipment, chairs, consumables, medicines, injections, lots, expiry, clinical usage, vendors, purchase orders, tenders, RFPs, bids, and peer benchmarks in the PMS operating graph." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/inventory" />
       <PmsSectionNav active="/app/pms/inventory" roleKey={role.key} />
+
+      <section className="mb-6 rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cyan-700">Reporting filters</p>
+            <h2 className="mt-1 text-lg font-semibold text-neutral-950">Inventory reporting window</h2>
+            <p className="mt-1 text-sm text-neutral-600">
+              Showing {reportingWindow.period} reporting from {new Date(`${reportingWindow.startDate}T00:00:00`).toLocaleDateString()} to {new Date(`${reportingWindow.endDate}T00:00:00`).toLocaleDateString()}.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              ["daily", "Daily"],
+              ["weekly", "Weekly"],
+              ["monthly", "Monthly"],
+            ].map(([period, label]) => (
+              <Link
+                key={period}
+                href={`/app/pms/inventory?${roleParam}&period=${period}`}
+                className={`rounded-md border px-3 py-2 text-sm font-semibold ${reportingWindow.period === period ? "border-neutral-950 bg-neutral-950 text-white" : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"}`}
+              >
+                {label}
+              </Link>
+            ))}
+          </div>
+        </div>
+        <form className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]" action="/app/pms/inventory">
+          <input type="hidden" name="role" value={role.key} />
+          <input type="hidden" name="period" value="custom" />
+          <Input name="startDate" label="Start date" type="date" defaultValue={reportingWindow.startDate} />
+          <Input name="endDate" label="End date" type="date" defaultValue={reportingWindow.endDate} />
+          <button className="self-end rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800">Apply calendar range</button>
+        </form>
+      </section>
 
       <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
         <Metric label="Items" value={summary.activeItems} />
@@ -174,7 +216,8 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         <Metric label="Open RFPs" value={summary.openRfps} />
         <Metric label="Vendors" value={summary.marketplaceVendors} />
         <Metric label="Stock value" value={<Money cents={Number(summary.inventoryValueCents)} />} />
-        <Metric label="30d usage" value={<Money cents={Number(summary.last30UsageCents)} />} />
+        <Metric label="Period used" value={<Money cents={Number(summary.periodUsageCents)} />} />
+        <Metric label="Period received" value={<Money cents={Number(summary.periodReceivedCents)} />} />
       </section>
 
       <section className="mt-6 grid gap-6 2xl:grid-cols-[1.4fr_0.95fr]">
@@ -360,6 +403,11 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         </PmsCard>
 
         <PmsCard title="Usage ledger" eyebrow="Chairside consumption and patient trace">
+          <div className="mb-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-3">
+            <Mini label="Movements" value={summary.periodMovementCount} />
+            <Mini label="RFPs" value={summary.periodRfpCount} />
+            <Mini label="30d usage" value={<Money cents={Number(summary.last30UsageCents)} />} />
+          </div>
           <div className="grid gap-3">
             {movements.map((movement) => (
               <div key={String(movement.id)} className="rounded-lg bg-neutral-50 p-3 text-sm">
@@ -376,6 +424,12 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
 
         <PmsCard title="Benchmarks and bid analytics" eyebrow="Peer comparison">
           <div className="grid gap-3">
+            {reportBuckets.map((bucket) => (
+              <div key={`${bucket.bucketDate}-${bucket.movementType}`} className="rounded-lg border border-neutral-200 bg-white p-3 text-sm">
+                <p className="font-semibold text-neutral-950">{new Date(`${bucket.bucketDate}T00:00:00`).toLocaleDateString()} · {String(bucket.movementType).replaceAll("_", " ")}</p>
+                <p className="mt-1 text-neutral-600">{bucket.movementCount} movements · <Money cents={Number(bucket.valueCents ?? 0)} /></p>
+              </div>
+            ))}
             {benchmarks.map((benchmark) => (
               <div key={String(benchmark.id)} className="rounded-lg bg-neutral-50 p-3 text-sm">
                 <p className="font-semibold text-neutral-950">{String(benchmark.itemCategory).replaceAll("_", " ")} · {String(benchmark.metricName).replaceAll("_", " ")}</p>

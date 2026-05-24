@@ -217,7 +217,7 @@ for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addT
   }
 }
 
-for (const token of ["PmsInventoryVendor", "PmsInventoryCatalogItem", "PmsInventoryLot", "PmsInventoryMovement", "PmsInventoryAsset", "PmsInventoryRfp", "PmsInventoryVendorBid", "getInventoryWorkbench", "receiveInventoryStock", "consumeInventoryStock", "createInventoryRfp", "Practice inventory and vendor marketplace"]) {
+for (const token of ["PmsInventoryVendor", "PmsInventoryCatalogItem", "PmsInventoryLot", "PmsInventoryMovement", "PmsInventoryAsset", "PmsInventoryRfp", "PmsInventoryVendorBid", "getInventoryWorkbench", "receiveInventoryStock", "consumeInventoryStock", "createInventoryRfp", "resolveInventoryReportingWindow", "Reporting filters", "Apply calendar range", "periodUsageCents", "reportBuckets", "Practice inventory and vendor marketplace"]) {
   const haystack = `${schema}\n${inventoryPage}\n${fs.readFileSync("src/lib/pms-inventory-repository.ts", "utf8")}\n${fs.readFileSync("src/app/api/pms/inventory/route.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS inventory marketplace token missing: ${token}`);

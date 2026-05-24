@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { requirePmsApiSession } from "@/lib/pms-api-auth";
 import {
   consumeInventoryStock,
@@ -20,10 +21,16 @@ function number(value: unknown) {
   return Number(value || 0);
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const auth = await requirePmsApiSession();
   if (auth.response) return auth.response;
-  return NextResponse.json({ data: await getInventoryWorkbench(auth.session.tenantId) });
+  return NextResponse.json({
+    data: await getInventoryWorkbench(auth.session.tenantId, {
+      period: request.nextUrl.searchParams.get("period") ?? undefined,
+      startDate: request.nextUrl.searchParams.get("startDate") ?? undefined,
+      endDate: request.nextUrl.searchParams.get("endDate") ?? undefined,
+    }),
+  });
 }
 
 export async function POST(request: Request) {
