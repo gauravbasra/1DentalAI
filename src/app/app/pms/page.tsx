@@ -317,6 +317,7 @@ function PmsGlobalRail({ roleKey }: { roleKey: string }) {
     ["Ledger", "$", `/app/pms/ledger?role=${roleKey}`],
     ["Insure", "▣", `/app/pms/insurance?role=${roleKey}`],
     ["Labs", "□", `/app/pms/labs?role=${roleKey}`],
+    ["Map", "◎", `/app/pms/patient-map?role=${roleKey}`],
     ["Reports", "▥", `/app/pms/reports?role=${roleKey}`],
   ];
 
@@ -351,6 +352,7 @@ function PmsProductRail({
     ["Insurance", "Eligibility and claims", `/app/pms/insurance?role=${roleKey}`],
     ["Ledger", "Balances and payments", `/app/pms/ledger?role=${roleKey}`],
     ["Documents", "Forms, EOBs, referrals", `/app/pms/documents?role=${roleKey}`],
+    ["Patient Map", "Geographic demand", `/app/pms/patient-map?role=${roleKey}`],
     ["Reports", "Production analytics", `/app/pms/reports?role=${roleKey}`],
   ];
 
@@ -397,6 +399,7 @@ function MobilePmsDock({ roleKey }: { roleKey: string }) {
     ["Treat", `/app/pms/treatment-plans?role=${roleKey}`],
     ["Insurance", `/app/pms/insurance?role=${roleKey}`],
     ["Ledger", `/app/pms/ledger?role=${roleKey}`],
+    ["Map", `/app/pms/patient-map?role=${roleKey}`],
     ["Reports", `/app/pms/reports?role=${roleKey}`],
   ];
 

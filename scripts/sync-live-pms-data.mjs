@@ -150,6 +150,7 @@ async function loadOpenDental() {
 function normalizeNexHealthPatient(item) {
   const firstName = text(item.first_name) || text(item.name).split(" ")[0] || "Unknown";
   const lastName = text(item.last_name) || text(item.name).split(" ").slice(1).join(" ") || "Patient";
+  const address = item.bio?.address || item.address || {};
   return {
     sourceId: String(item.id),
     chartNumber: text(item.foreign_id, `NH${item.id}`),
@@ -159,6 +160,11 @@ function normalizeNexHealthPatient(item) {
     phone: item.bio?.phone_number || item.bio?.verified_mobile || null,
     email: item.email || null,
     sex: item.bio?.gender || null,
+    addressLine1: address.address_line_1 || address.line1 || item.bio?.address_line_1 || item.address_line_1 || null,
+    addressLine2: address.address_line_2 || address.line2 || item.bio?.address_line_2 || item.address_line_2 || null,
+    city: address.city || item.bio?.city || item.city || null,
+    state: address.state || item.bio?.state || item.state || null,
+    postalCode: address.zip_code || address.postal_code || address.zip || item.bio?.zip_code || item.bio?.postal_code || item.zip_code || item.postal_code || null,
     note: `Imported from NexHealth${item.foreign_id_type ? ` (${item.foreign_id_type})` : ""}.`,
   };
 }
@@ -173,6 +179,11 @@ function normalizeOpenDentalPatient(item) {
     phone: item.WirelessPhone || item.HmPhone || item.WkPhone || null,
     email: item.Email || null,
     sex: item.Gender || null,
+    addressLine1: item.Address || null,
+    addressLine2: item.Address2 || null,
+    city: item.City || null,
+    state: item.State || null,
+    postalCode: item.Zip || null,
     note: `Imported from Open Dental PatNum ${item.PatNum}.`,
   };
 }
@@ -219,14 +230,19 @@ async function upsertPatient(row, sourceName) {
   const patientId = hashId(`pat_${sourceName.toLowerCase()}`, row.sourceId);
   const familyId = hashId(`fam_${sourceName.toLowerCase()}`, row.sourceId);
   await client.query(
-    `insert into "PmsFamilyAccount" ("id", "tenantId", "accountNumber", "displayName", "guarantorPatientId", "billingType", "billingStatus", "phone", "email", "createdAt", "updatedAt")
-     values ($1, $2, $3, $4, $5, 'STANDARD', 'CURRENT', $6, $7, current_timestamp, current_timestamp)
+    `insert into "PmsFamilyAccount" ("id", "tenantId", "accountNumber", "displayName", "guarantorPatientId", "billingType", "billingStatus", "addressLine1", "addressLine2", "city", "state", "postalCode", "phone", "email", "createdAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, 'STANDARD', 'CURRENT', $6, $7, $8, $9, $10, $11, $12, current_timestamp, current_timestamp)
      on conflict ("tenantId", "accountNumber") do update set
        "displayName" = excluded."displayName",
+       "addressLine1" = coalesce(excluded."addressLine1", "PmsFamilyAccount"."addressLine1"),
+       "addressLine2" = coalesce(excluded."addressLine2", "PmsFamilyAccount"."addressLine2"),
+       "city" = coalesce(excluded."city", "PmsFamilyAccount"."city"),
+       "state" = coalesce(excluded."state", "PmsFamilyAccount"."state"),
+       "postalCode" = coalesce(excluded."postalCode", "PmsFamilyAccount"."postalCode"),
        "phone" = excluded."phone",
        "email" = excluded."email",
        "updatedAt" = current_timestamp`,
-    [familyId, tenantId, `${sourceName}-${row.sourceId}`, `${row.lastName} family`, patientId, row.phone, row.email],
+    [familyId, tenantId, `${sourceName}-${row.sourceId}`, `${row.lastName} family`, patientId, row.addressLine1, row.addressLine2, row.city, row.state, row.postalCode, row.phone, row.email],
   );
   await client.query(
     `insert into "PmsPatient"

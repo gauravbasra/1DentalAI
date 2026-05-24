@@ -395,6 +395,27 @@ model PmsFamilyAccount {
   @@index([tenantId, billingStatus])
 }
 
+model PmsPatientGeoCoordinate {
+  id              String    @id @default(cuid())
+  tenantId        String
+  familyAccountId String
+  addressHash     String
+  formattedAddress String?
+  latitude        Decimal?  @db.Decimal(10, 7)
+  longitude       Decimal?  @db.Decimal(10, 7)
+  precision       String?
+  status          String    @default("PENDING")
+  source          String    @default("GOOGLE_GEOCODING")
+  failureReason   String?
+  geocodedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([tenantId, familyAccountId])
+  @@index([tenantId, status])
+  @@index([latitude, longitude])
+}
+
 model PmsPatient {
   id              String    @id @default(cuid())
   tenantId        String

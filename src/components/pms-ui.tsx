@@ -14,6 +14,7 @@ export const pmsNav = [
   { href: "/app/pms/insurance", label: "Insurance" },
   { href: "/app/pms/labs", label: "Labs" },
   { href: "/app/pms/documents", label: "Documents" },
+  { href: "/app/pms/patient-map", label: "Patient Map" },
   { href: "/app/pms/reports", label: "Reports" },
   { href: "/app/pms/tasks", label: "Tasks" },
 ];
