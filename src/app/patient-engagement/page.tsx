@@ -205,7 +205,7 @@ export default async function PatientEngagementHome({
               <Link href="/patient-engagement" className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-700">Back to messages</Link>
               <Link href="/logout" className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Sign out</Link>
             </header>
-            <div className="min-h-0 flex-1 overflow-y-auto p-6">
+            <div className="min-h-0 flex-1 overflow-hidden p-3">
               <PhonePanel conversation={selectedConversation} patient={patient} metrics={metrics} activeCalls={activeCalls} controls={controls} numbers={numbers} extensions={extensions} providers={providers} routes={routes} videoSessions={videoSessions} />
             </div>
           </section>
