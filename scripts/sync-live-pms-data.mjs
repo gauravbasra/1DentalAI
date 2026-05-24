@@ -321,8 +321,8 @@ async function upsertCoverage(item, sourceName, patientMap) {
 
 async function cleanupSamplePmsData() {
   const statements = [
-    `delete from "PmsTreatmentCoverageAnalysis" where "patientId" like 'pat_sample_%'`,
-    `delete from "PmsPayerCasePacket" where "patientId" like 'pat_sample_%'`,
+    `delete from "PmsTreatmentCoverageAnalysis" where "treatmentPlanId" like 'txp_sample_%' or "treatmentPlanItemId" like 'txi_sample_%' or "patientInsuranceId" like 'pins_sample_%'`,
+    `delete from "PmsPayerCasePacket" where "treatmentPlanId" like 'txp_sample_%' or "patientInsuranceId" like 'pins_sample_%'`,
     `delete from "PmsBenefitRule" where "patientInsuranceId" like 'pins_sample_%'`,
     `delete from "PmsBenefitFact" where "patientInsuranceId" like 'pins_sample_%'`,
     `delete from "PmsBenefitSummary" where "patientInsuranceId" like 'pins_sample_%'`,
