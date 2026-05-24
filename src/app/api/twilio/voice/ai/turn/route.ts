@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     }));
   } catch (error) {
     console.error("Voice AI turn failed", { error });
-    return twiml(`<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech dtmf" timeout="5" speechTimeout="auto"><Say voice="alice">I am sorry, I had trouble processing that. I can still collect your request for the front desk. Please say appointment, billing, or staff.</Say></Gather><Say voice="alice">Thank you. A team member will follow up if needed. Goodbye.</Say></Response>`);
+    return twiml(`<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech dtmf" timeout="5" speechTimeout="auto"><Say voice="Polly.Joanna-Neural">I am sorry, I had trouble processing that. I can still collect your request for the front desk. Please say appointment, billing, or staff.</Say></Gather><Say voice="Polly.Joanna-Neural">Thank you. A team member will follow up if needed. Goodbye.</Say></Response>`);
   }
 }
 

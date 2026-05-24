@@ -183,7 +183,7 @@ export async function redirectLiveCallToVoiceAi(input: {
 
 async function buildGatherTwiML(input: { tenantId: string; conversationId: string; scenario: VoiceScenario; text: string }) {
   const origin = defaultOrigin();
-  const eventId = await createVoicePromptEvent({
+  await createVoicePromptEvent({
     tenantId: input.tenantId,
     conversationId: input.conversationId,
     scenario: input.scenario,
@@ -193,7 +193,7 @@ async function buildGatherTwiML(input: { tenantId: string; conversationId: strin
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather input="speech dtmf" action="${twilioXmlEscape(action)}" method="POST" speechTimeout="auto" timeout="6" language="en-US">
-    <Play>${twilioXmlEscape(`${origin}/api/twilio/voice/ai/audio/${eventId}`)}</Play>
+    <Say voice="Polly.Joanna-Neural">${twilioXmlEscape(input.text)}</Say>
   </Gather>
   <Redirect method="POST">${twilioXmlEscape(`${action}&noInput=1`)}</Redirect>
 </Response>`;
