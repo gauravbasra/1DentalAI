@@ -2943,7 +2943,7 @@ export async function getPerio(patientId: string, tenantId = defaultTenantId) {
   return { patient: await getPatient(patientId, tenantId), exam: examRow, measures: measures.rows };
 }
 
-export async function addPerioMeasure(patientId: string, input: { tooth: string; site: string; probingDepth: number; bleeding?: boolean; recession?: number; actorRole?: string }, tenantId = defaultTenantId) {
+export async function addPerioMeasure(patientId: string, input: { tooth: string; site: string; probingDepth: number; bleeding?: boolean; recession?: number; mobility?: string; furcation?: string; actorRole?: string }, tenantId = defaultTenantId) {
   const patient = await getPatient(patientId, tenantId);
   if (!patient) return null;
 
@@ -2956,23 +2956,105 @@ export async function addPerioMeasure(patientId: string, input: { tooth: string;
   )).rows[0];
   if (!exam) {
     const created = await query<{ id: string }>(
-      `insert into "PmsPerioExam" ("id", "patientId", "status", "updatedAt") values ($1, $2, 'IN_PROGRESS', current_timestamp) returning "id"`,
-      [newId("perio"), patientId],
+      `insert into "PmsPerioExam" ("id", "patientId", "providerId", "status", "updatedAt") values ($1, $2, $3, 'IN_PROGRESS', current_timestamp) returning "id"`,
+      [newId("perio"), patientId, null],
     );
     exam = created.rows[0];
   }
 
+  const safeTooth = input.tooth.trim();
+  const safeSite = input.site.trim().toUpperCase();
+  if (!safeTooth || !safeSite || Number(input.probingDepth) < 1 || Number(input.probingDepth) > 15) {
+    throw new Error("Perio measurement requires tooth, site, and probing depth between 1 and 15 mm.");
+  }
+
   const id = newId("pm");
   const result = await query(
-    `insert into "PmsPerioMeasure" ("id", "perioExamId", "tooth", "site", "probingDepth", "bleeding", "recession")
-     values ($1, $2, $3, $4, $5, $6, $7)
+    `insert into "PmsPerioMeasure" ("id", "perioExamId", "tooth", "site", "probingDepth", "bleeding", "recession", "mobility", "furcation")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      on conflict ("perioExamId", "tooth", "site") do update set
-       "probingDepth" = excluded."probingDepth", "bleeding" = excluded."bleeding", "recession" = excluded."recession"
+       "probingDepth" = excluded."probingDepth",
+       "bleeding" = excluded."bleeding",
+       "recession" = excluded."recession",
+       "mobility" = excluded."mobility",
+       "furcation" = excluded."furcation"
      returning *`,
-    [id, exam.id, input.tooth, input.site, input.probingDepth, Boolean(input.bleeding), input.recession ?? null],
+    [
+      id,
+      exam.id,
+      safeTooth,
+      safeSite,
+      Number(input.probingDepth),
+      Boolean(input.bleeding),
+      input.recession === undefined ? null : Number(input.recession),
+      input.mobility?.trim() || null,
+      input.furcation?.trim() || null,
+    ],
+  );
+  await query(
+    `update "PmsPerioExam" pe
+     set "bleedingScore" = stats.bleeding_count,
+         "updatedAt" = current_timestamp
+     from (
+       select "perioExamId", count(*) filter (where "bleeding" = true)::int as bleeding_count
+       from "PmsPerioMeasure"
+       where "perioExamId" = $1
+       group by "perioExamId"
+     ) stats
+     where pe."id" = stats."perioExamId"`,
+    [exam.id],
   );
   await addAudit(tenantId, input.actorRole ?? "rdh", "PERIO_MEASURE_RECORDED", "PmsPerioMeasure", result.rows[0].id, "ALLOWED");
   return result.rows[0];
+}
+
+export async function completePerioExam(patientId: string, input: { diagnosis: string; providerId?: string; actorRole?: string }, tenantId = defaultTenantId) {
+  const patient = await getPatient(patientId, tenantId);
+  if (!patient) return null;
+
+  const exam = (await query<{ id: string }>(
+    `select pe."id" from "PmsPerioExam" pe
+     join "PmsPatient" p on p."id" = pe."patientId"
+     where pe."patientId" = $1 and p."tenantId" = $2 and pe."status" = 'IN_PROGRESS'
+     order by pe."examDate" desc limit 1`,
+    [patientId, tenantId],
+  )).rows[0];
+  if (!exam) throw new Error("No in-progress perio exam is available to complete.");
+
+  const measureCount = Number((await query<{ count: string }>(
+    `select count(*)::text from "PmsPerioMeasure" where "perioExamId" = $1`,
+    [exam.id],
+  )).rows[0]?.count ?? 0);
+  if (measureCount < 6) throw new Error("At least six perio sites are required before exam closeout.");
+
+  const diagnosis = input.diagnosis.trim();
+  if (diagnosis.length < 3) throw new Error("Perio diagnosis or assessment is required before closeout.");
+
+  const result = await query(
+    `update "PmsPerioExam" pe
+     set "status" = 'COMPLETED',
+         "diagnosis" = $3,
+         "providerId" = coalesce($4, pe."providerId"),
+         "bleedingScore" = stats.bleeding_count,
+         "updatedAt" = current_timestamp
+     from (
+       select "perioExamId", count(*) filter (where "bleeding" = true)::int as bleeding_count
+       from "PmsPerioMeasure"
+       where "perioExamId" = $1
+       group by "perioExamId"
+     ) stats
+     where pe."id" = stats."perioExamId"
+       and pe."id" = $1
+       and pe."patientId" = $2
+     returning pe.*`,
+    [exam.id, patientId, diagnosis, input.providerId ?? null],
+  );
+  await addAudit(tenantId, input.actorRole ?? "rdh", "PERIO_EXAM_COMPLETED", "PmsPerioExam", exam.id, "ALLOWED", {
+    patientId,
+    measureCount,
+    bleedingScore: result.rows[0]?.bleedingScore ?? null,
+  });
+  return result.rows[0] ?? null;
 }
 
 export async function listTreatmentPlans(tenantId = defaultTenantId) {

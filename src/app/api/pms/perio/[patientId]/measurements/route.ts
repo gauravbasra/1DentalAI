@@ -18,6 +18,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ pat
     probingDepth: Number(body.probingDepth),
     bleeding: Boolean(body.bleeding),
     recession: body.recession ? Number(body.recession) : undefined,
+    mobility: body.mobility ? String(body.mobility) : undefined,
+    furcation: body.furcation ? String(body.furcation) : undefined,
+    actorRole: auth.session.roleKey,
   }, auth.session.tenantId);
   if (!measure) return NextResponse.json({ error: "Patient not found" }, { status: 404 });
   return NextResponse.json({ data: measure }, { status: 201 });

@@ -199,9 +199,18 @@ export async function saveApprovedScribePackage(input: {
 
     const noteId = newId("note");
     await client.query(
-      `insert into "PmsClinicalNote" ("id", "patientId", "providerId", "noteType", "body", "status", "updatedAt")
-       values ($1, $2, $3, $4, $5, 'DRAFT', current_timestamp)`,
-      [noteId, input.patientId, input.session.userId, input.noteType.trim() || "PROGRESS", input.noteBody.trim()],
+      `insert into "PmsClinicalNote"
+         ("id", "tenantId", "patientId", "providerId", "noteType", "noteTemplateKey", "body", "status", "sourceModule", "sourceRecordId", "updatedAt")
+       values ($1, $2, $3, $4, $5, 'ai_scribe', $6, 'DRAFT', 'scribe', $7, current_timestamp)`,
+      [
+        noteId,
+        input.session.tenantId,
+        input.patientId,
+        input.session.userId,
+        input.noteType.trim() || "PROGRESS",
+        input.noteBody.trim(),
+        String(input.generation?.source ?? "rules_fallback"),
+      ],
     );
 
     const procedureCodes = (await client.query<{ id: string; code: string; defaultFeeCents: number }>(

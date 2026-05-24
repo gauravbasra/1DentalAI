@@ -33,9 +33,15 @@ const requiredFiles = [
   "src/app/api/pms/chart/[patientId]/route.ts",
   "src/app/api/pms/perio/[patientId]/route.ts",
   "src/app/api/pms/clinical-workflows/route.ts",
+  "src/app/api/pms/perio/[patientId]/complete/route.ts",
+  "src/app/api/pms/scribe/generate/route.ts",
+  "src/app/api/pms/scribe/save/route.ts",
+  "src/app/api/pms/scribe/transcribe/route.ts",
   "src/lib/pms-repository.ts",
   "src/lib/pms-clinical-workflows.ts",
   "scripts/validate-pms-clinical-workflows.mjs",
+  "scripts/validate-pms-scribe-go-live.mjs",
+  "scripts/validate-pms-scribe-perio-e2e.mjs",
   "prisma/migrations/202605210001_pms_core/migration.sql",
   "prisma/migrations/202605232130_pms_clinical_process_workflows/migration.sql",
 ];
@@ -124,6 +130,7 @@ execFileSync(process.execPath, ["scripts/validate-pms-eligibility-rpa.mjs"], { s
 execFileSync(process.execPath, ["scripts/validate-pms-eligibility-artifacts.mjs"], { stdio: "inherit" });
 execFileSync(process.execPath, ["scripts/validate-payer-portal-browser-runner.mjs"], { stdio: "inherit" });
 execFileSync(process.execPath, ["scripts/validate-rcm-payer-artifacts.mjs"], { stdio: "inherit" });
+execFileSync(process.execPath, ["scripts/validate-pms-scribe-go-live.mjs"], { stdio: "inherit" });
 
 const schema = fs.readFileSync("prisma/schema.prisma", "utf8");
 const missingModels = requiredSchemaModels.filter((model) => !schema.includes(`model ${model}`));
