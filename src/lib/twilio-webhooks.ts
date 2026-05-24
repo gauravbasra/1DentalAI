@@ -36,7 +36,15 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
   const transcription = `<Start><Transcription name="onedentalai-live-${xmlEscape(input.conversationId)}" statusCallbackUrl="${xmlEscape(transcriptionUrl)}" track="both_tracks" languageCode="en-US" /></Start>`;
   const practiceBridgeNumber = resolvePracticeBridgeNumber(route);
   const callerNumber = normalizePhoneNumber(input.payload.From || "");
-  if (practiceBridgeNumber && callerNumber !== practiceBridgeNumber) {
+  if (practiceBridgeNumber && callerNumber === practiceBridgeNumber) {
+    await markInboundCallForAiTakeover(input.conversationId);
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  ${transcription}
+  <Redirect method="POST">${xmlEscape(aiStartUrl)}</Redirect>
+</Response>`;
+  }
+  if (practiceBridgeNumber) {
     await query(
       `update "PhoneActiveCall"
        set "callControlMode" = 'TWILIO_DIRECT_DIAL',
@@ -61,6 +69,16 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
 
 function conferenceNameForConversation(conversationId: string) {
   return `onedentalai-${conversationId}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
+}
+
+async function markInboundCallForAiTakeover(conversationId: string) {
+  await query(
+    `update "PhoneActiveCall"
+     set "callControlMode" = 'AI_VOICE_TAKEOVER',
+       "updatedAt" = current_timestamp
+     where "tenantId" = $1 and "conversationId" = $2`,
+    [defaultTenantId, conversationId],
+  );
 }
 
 function voicemailTwiML(recordingUrl: string, transcriptionUrl: string, transcription: string, greeting: string) {
