@@ -192,11 +192,11 @@ export default async function PatientEngagementHome({
 
   if (params.panel === "phone") {
     return (
-      <main className="pe-shell min-h-screen bg-[#f4f6f7] text-neutral-950">
-        <div className="flex min-h-screen">
+      <main className="pe-shell h-screen overflow-hidden bg-[#f4f6f7] text-neutral-950">
+        <div className="flex h-screen min-h-0">
           <GlobalRail />
-          <section className="flex min-w-0 flex-1 flex-col">
-            <header className="sticky top-0 z-20 flex h-20 items-center gap-5 border-b border-neutral-200 bg-white px-6">
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <header className="z-20 flex h-20 shrink-0 items-center gap-5 border-b border-neutral-200 bg-white px-6">
               <Link href="/wrapper" className="text-2xl font-black tracking-tight">1DentalAI</Link>
               <div className="relative max-w-2xl flex-1">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">⌕</span>
