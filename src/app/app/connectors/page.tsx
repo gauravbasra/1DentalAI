@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth";
 import {
   createConnectorRouteDecision,
   getConnectorControlCenter,
+  getElevenLabsVoiceConfig,
   getOpenAiWebchatConfig,
   recordConnectorHealthCheck,
   updateConnectorInstallation,
@@ -122,9 +123,10 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
   const session = await requireAuth();
   const role = getRole(params.role) ?? getRole(session.roleKey) ?? getRole("owner_dentist");
   const activeView = connectorViews.some((view) => view.key === params.view) ? params.view as ConnectorView : "overview";
-  const [data, openAiConfig, payerPortalDirectory] = await Promise.all([
+  const [data, openAiConfig, elevenLabsConfig, payerPortalDirectory] = await Promise.all([
     getConnectorControlCenter(session.tenantId),
     getOpenAiWebchatConfig(session.tenantId),
+    getElevenLabsVoiceConfig(session.tenantId),
     getPayerPortalDirectory(session.tenantId),
   ]);
   const openAiInstallation = data.installations.find((installation) => installation.category === "AI_LLM" || /openai/i.test(String(installation.definitionName)));
@@ -214,6 +216,7 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="space-y-4">
         <OpenAiCredentialCard config={openAiConfig} installation={openAiInstallation} roleKey={role.key as RoleKey} />
+        <ElevenLabsCredentialCard config={elevenLabsConfig} installation={openAiInstallation} roleKey={role.key as RoleKey} />
         <PmsCard title="Shared credential vault" eyebrow="Credential vault intake">
           <LatestCredentialActivity credentials={data.credentialVault} />
           <form action="/app/connectors/credentials" method="post" className="mt-3 grid gap-3">
@@ -636,6 +639,61 @@ function OpenAiCredentialCard({
         </p>
         <button disabled={!canStore} className="mt-3 rounded-md bg-sky-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300">
           Validate OpenAI key
+        </button>
+      </form>
+    </PmsCard>
+  );
+}
+
+function ElevenLabsCredentialCard({
+  config,
+  installation,
+  roleKey,
+}: {
+  config: Awaited<ReturnType<typeof getElevenLabsVoiceConfig>>;
+  installation: Awaited<ReturnType<typeof getConnectorControlCenter>>["installations"][number] | undefined;
+  roleKey: RoleKey;
+}) {
+  const canStore = Boolean(installation?.id);
+  const readiness = config.ready ? "READY" : config.hasVaultKey || config.hasEnvironmentKey ? "SETUP_REQUIRED" : "MISSING";
+  return (
+    <PmsCard title="ElevenLabs voice key" eyebrow="AI voice, webchat speech, and call handoff connector">
+      <div className="grid gap-3 md:grid-cols-3">
+        <ContextCard label="Runtime source" value={config.source} detail={config.ready ? "The app has an ElevenLabs credential available for voice runtime wiring." : config.blockedReason ?? "ElevenLabs is not ready."} />
+        <ContextCard label="Vault key" value={config.hasVaultKey ? "stored" : "missing"} detail={config.hasVaultKey ? "Stored encrypted in the connector vault. Raw key is never displayed." : "Store or rotate the ElevenLabs key below."} />
+        <ContextCard label="Environment key" value={config.hasEnvironmentKey ? "present" : "not set"} detail="Production can also read ELEVENLABS_API_KEY from deployment secrets; the editable path is this vault." />
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <StatusTile label="Credential" value={config.credentialStatus} />
+        <StatusTile label="Approval" value={config.approvalStatus} />
+        <StatusTile label="Health" value={config.healthStatus} />
+        <StatusTile label="Runtime" value={readiness} />
+      </div>
+      {config.secretError ? (
+        <p className="mt-3 rounded-md bg-red-50 p-3 text-xs leading-5 text-red-900">{config.secretError}</p>
+      ) : null}
+      <form action="/app/connectors/credentials" method="post" className="mt-4 grid gap-3">
+        <input type="hidden" name="actorRole" value={roleKey} />
+        <input type="hidden" name="installationId" value={installation?.id ?? ""} />
+        <input type="hidden" name="providerKey" value="ELEVENLABS" />
+        <input type="hidden" name="credentialLabel" value="api_key" />
+        <input type="hidden" name="credentialType" value="API_KEY" />
+        <label className="block text-xs font-semibold text-neutral-600">
+          Rotate ElevenLabs API key
+          <input name="secretValue" type="password" autoComplete="off" required disabled={!canStore} placeholder="Paste ElevenLabs API key" className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-100" />
+        </label>
+        <button disabled={!canStore} className="w-fit rounded-md bg-neutral-950 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300">
+          Store/rotate ElevenLabs key
+        </button>
+      </form>
+      <form action="/app/connectors/credentials/validate-elevenlabs" method="post" className="mt-3 rounded-lg border border-violet-200 bg-violet-50 p-3">
+        <input type="hidden" name="actorRole" value={roleKey} />
+        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-violet-800">ElevenLabs smoke test</p>
+        <p className="mt-1 text-xs leading-5 text-violet-900">
+          Runs a non-PHI subscription endpoint check against the stored or deployment ElevenLabs key. Voice prompts, voices, consent, and retention behavior stay in the patient engagement runtime.
+        </p>
+        <button disabled={!canStore} className="mt-3 rounded-md bg-violet-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300">
+          Validate ElevenLabs key
         </button>
       </form>
     </PmsCard>

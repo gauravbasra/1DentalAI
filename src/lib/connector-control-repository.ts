@@ -607,6 +607,62 @@ export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
   };
 }
 
+export async function getElevenLabsVoiceConfig(tenantId = defaultTenantId) {
+  const installation = await query<{
+    id: string;
+    credentialStatus: string;
+    approvalStatus: string;
+    healthStatus: string;
+    status: string;
+  }>(
+    `select i."id", i."credentialStatus", i."approvalStatus", i."healthStatus", i."status"
+     from "ConnectorInstallation" i
+     join "ConnectorDefinition" d on d."id" = i."definitionId"
+     where i."tenantId" = $1 and d."category" = 'AI_LLM'
+     order by i."createdAt" desc
+     limit 1`,
+    [tenantId],
+  );
+  const install = installation.rows[0];
+  let secret: Awaited<ReturnType<typeof getConnectorSecret>> = null;
+  let secretError: string | null = null;
+  if (install) {
+    try {
+      secret = await getConnectorSecret({ tenantId, providerKey: "ELEVENLABS", credentialLabel: "api_key", installationId: install.id, requireValidated: false });
+      secret ??= await getConnectorSecret({ tenantId, providerKey: "ELEVENLABS", credentialLabel: "api_key", requireValidated: false });
+    } catch (error) {
+      secretError = error instanceof Error ? error.message : "ElevenLabs credential could not be decrypted.";
+    }
+  }
+  const envKey = process.env.ELEVENLABS_API_KEY || "";
+  const vaultApproved = Boolean(
+    install?.credentialStatus === "VALIDATED" &&
+    install.approvalStatus === "APPROVED" &&
+    install.healthStatus === "PASS",
+  );
+  const vaultAllowed = Boolean(secret?.value && vaultApproved);
+  const envAllowed = Boolean(envKey);
+  return {
+    apiKey: vaultAllowed ? secret!.value : envAllowed ? envKey : null,
+    ready: Boolean(vaultAllowed || envAllowed),
+    source: vaultAllowed ? "credential_vault" : envAllowed ? "environment" : "blocked",
+    blockedReason: secretError
+      ? `ElevenLabs credential is stored but cannot be used: ${secretError}`
+      : vaultAllowed || envAllowed
+      ? null
+      : secret?.value
+      ? `ElevenLabs credential is stored but blocked until credential status is VALIDATED, approval status is APPROVED, and health status is PASS. Current credential=${install?.credentialStatus ?? "MISSING"}, approval=${install?.approvalStatus ?? "MISSING"}, health=${install?.healthStatus ?? "MISSING"}.`
+      : "ElevenLabs is blocked until an API key is stored in the encrypted connector vault or deployment environment.",
+    installationId: install?.id ?? null,
+    credentialStatus: install?.credentialStatus ?? "MISSING",
+    approvalStatus: install?.approvalStatus ?? "MISSING",
+    healthStatus: install?.healthStatus ?? "MISSING",
+    hasVaultKey: Boolean(secret?.value),
+    hasEnvironmentKey: Boolean(envKey),
+    secretError,
+  };
+}
+
 export type OpenAiModelCatalog = {
   status: "READY" | "NO_KEY" | "ERROR";
   source: string;
@@ -776,6 +832,98 @@ export async function validateOpenAiCredential(input: { tenantId?: string; actor
     requiresBaaBeforePhi: true,
   });
   return { ok: true, latencyMs, model };
+}
+
+export async function validateElevenLabsCredential(input: { tenantId?: string; actorRole?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const installation = await query<{ id: string; definitionId: string }>(
+    `select i."id", i."definitionId"
+     from "ConnectorInstallation" i
+     join "ConnectorDefinition" d on d."id" = i."definitionId"
+     where i."tenantId" = $1 and d."category" = 'AI_LLM'
+     order by i."createdAt" desc
+     limit 1`,
+    [tenantId],
+  );
+  const install = installation.rows[0];
+  if (!install) throw new Error("AI/LLM connector installation not found.");
+  const secret = await getConnectorSecret({
+    tenantId,
+    providerKey: "ELEVENLABS",
+    credentialLabel: "api_key",
+    installationId: install.id,
+    requireValidated: false,
+  }) ?? await getConnectorSecret({
+    tenantId,
+    providerKey: "ELEVENLABS",
+    credentialLabel: "api_key",
+    requireValidated: false,
+  });
+  const apiKey = secret?.value || process.env.ELEVENLABS_API_KEY || "";
+  if (!apiKey) throw new Error("ElevenLabs API key is not stored in the credential vault or deployment environment.");
+
+  const started = Date.now();
+  const response = await fetch("https://api.elevenlabs.io/v1/user/subscription", {
+    headers: { "xi-api-key": apiKey },
+    cache: "no-store",
+  });
+  const latencyMs = Date.now() - started;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const reason = typeof data?.detail?.message === "string" ? data.detail.message : `ElevenLabs smoke test failed with HTTP ${response.status}.`;
+    await query(
+      `insert into "ConnectorHealthCheck" ("id", "tenantId", "definitionId", "installationId", "checkType", "status", "resultSummary", "latencyMs", "checkedAt")
+       values ($1, $2, $3, $4, 'CREDENTIAL_VAULT_ELEVENLABS', 'FAIL', $5, $6, current_timestamp)
+       on conflict ("id") do update set "status" = 'FAIL', "resultSummary" = excluded."resultSummary", "latencyMs" = excluded."latencyMs", "checkedAt" = current_timestamp`,
+      ["conn_health_elevenlabs_credential_vault", tenantId, install.definitionId, install.id, reason, latencyMs],
+    );
+    await addAudit(tenantId, input.actorRole ?? "support_admin", "ELEVENLABS_CREDENTIAL_SMOKE_TEST_FAILED", "ConnectorInstallation", install.id, "BLOCKED", {
+      provider: "ELEVENLABS",
+      latencyMs,
+      reason,
+      noPhiSent: true,
+    });
+    throw new Error(reason);
+  }
+
+  await query(
+    `update "ConnectorCredentialVault"
+     set "status" = 'VALIDATED', "updatedAt" = current_timestamp
+     where "tenantId" = $1 and "installationId" = $2 and "providerKey" = 'ELEVENLABS' and "credentialLabel" = 'api_key'`,
+    [tenantId, install.id],
+  );
+  await query(
+    `update "ConnectorInstallation"
+     set "credentialStatus" = 'VALIDATED',
+       "healthStatus" = 'PASS',
+       "status" = case when "approvalStatus" = 'APPROVED' and "webhookStatus" in ('VERIFIED','NOT_REQUIRED') then 'ACTIVE' else 'READY_FOR_APPROVAL' end,
+       "lastHealthyAt" = current_timestamp,
+       "nextAction" = 'ElevenLabs API key validated with non-PHI subscription smoke test. Approve voice retention, consent, and recording policy before production patient voice use.',
+       "updatedAt" = current_timestamp
+     where "id" = $1`,
+    [install.id],
+  );
+  await query(
+    `insert into "ConnectorHealthCheck" ("id", "tenantId", "definitionId", "installationId", "checkType", "status", "resultSummary", "latencyMs", "checkedAt")
+     values ($1, $2, $3, $4, 'CREDENTIAL_VAULT_ELEVENLABS', 'PASS', $5, $6, current_timestamp)
+     on conflict ("id") do update set "status" = 'PASS', "resultSummary" = excluded."resultSummary", "latencyMs" = excluded."latencyMs", "checkedAt" = current_timestamp`,
+    [
+      "conn_health_elevenlabs_credential_vault",
+      tenantId,
+      install.definitionId,
+      install.id,
+      `ElevenLabs credential validated against subscription endpoint. Tier=${String(data?.tier ?? "unknown")}; no PHI was sent.`,
+      latencyMs,
+    ],
+  );
+  await addAudit(tenantId, input.actorRole ?? "support_admin", "ELEVENLABS_CREDENTIAL_VALIDATED", "ConnectorInstallation", install.id, "ALLOWED", {
+    provider: "ELEVENLABS",
+    latencyMs,
+    noPhiSent: true,
+    tier: typeof data?.tier === "string" ? data.tier : "unknown",
+    characterLimit: typeof data?.character_limit === "number" ? data.character_limit : null,
+  });
+  return { ok: true, latencyMs, tier: typeof data?.tier === "string" ? data.tier : "unknown" };
 }
 
 function normalizeProviderKey(value: string) {
