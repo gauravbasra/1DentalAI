@@ -3333,7 +3333,7 @@ export async function listInsurancePlans(tenantId = defaultTenantId) {
 }
 
 export async function getInsuranceBoard(tenantId = defaultTenantId) {
-  const [coverage, plans, claims, readyProcedures, coverageGaps] = await Promise.all([
+  const [coverage, plans, claims, readyProcedures, coverageGaps, benefitUtilization] = await Promise.all([
     listInsurance(tenantId),
     listInsurancePlans(tenantId),
     query(
@@ -3375,9 +3375,79 @@ export async function getInsuranceBoard(tenantId = defaultTenantId) {
        limit 40`,
       [tenantId],
     ),
+    getBenefitUtilizationLedger(tenantId),
   ]);
 
-  return { coverage, plans, claims: claims.rows, readyProcedures, coverageGaps: coverageGaps.rows };
+  return { coverage, plans, claims: claims.rows, readyProcedures, coverageGaps: coverageGaps.rows, benefitUtilization };
+}
+
+export async function getBenefitUtilizationLedger(tenantId = defaultTenantId) {
+  return (await query(
+    `select pi."id" as "patientInsuranceId",
+       p."id" as "patientId",
+       p."firstName",
+       p."lastName",
+       p."chartNumber",
+       ip."payerName",
+       ip."planName",
+       coalesce(bs."benefitYear", extract(year from current_date)::int) as "benefitYear",
+       coalesce(bs."annualMaxCents", 0)::int as "annualMaxCents",
+       coalesce(bs."annualUsedCents", 0)::int as "payerReportedAnnualUsedCents",
+       coalesce(bs."deductibleCents", 0)::int as "deductibleCents",
+       coalesce(bs."deductibleMetCents", 0)::int as "deductibleMetCents",
+       coalesce(claims."postedPaidCents", 0)::int as "postedPaidCents",
+       coalesce(claims."postedAllowedCents", 0)::int as "postedAllowedCents",
+       coalesce(claims."pendingBilledCents", 0)::int as "pendingBilledCents",
+       coalesce(claims."openClaimCount", 0)::int as "openClaimCount",
+       greatest(coalesce(bs."annualUsedCents", 0), coalesce(claims."postedPaidCents", 0))::int as "effectiveUsedCents",
+       case
+         when coalesce(bs."annualMaxCents", 0) <= 0 then 0
+         else greatest(coalesce(bs."annualMaxCents", 0) - greatest(coalesce(bs."annualUsedCents", 0), coalesce(claims."postedPaidCents", 0)) - coalesce(claims."pendingBilledCents", 0), 0)
+       end::int as "estimatedRemainingCents",
+       case
+         when pi."eligibilityStatus" <> 'ACTIVE' then 'ELIGIBILITY_NOT_ACTIVE'
+         when bs."id" is null then 'BENEFIT_SUMMARY_MISSING'
+         when coalesce(bs."annualMaxCents", 0) <= 0 then 'ANNUAL_MAX_UNKNOWN'
+         when greatest(coalesce(bs."annualMaxCents", 0) - greatest(coalesce(bs."annualUsedCents", 0), coalesce(claims."postedPaidCents", 0)) - coalesce(claims."pendingBilledCents", 0), 0) <= 0 then 'BENEFITS_EXHAUSTED'
+         when coalesce(claims."pendingBilledCents", 0) > 0 then 'PENDING_CLAIMS_REDUCE_REMAINING'
+         else 'BENEFITS_AVAILABLE'
+       end as "benefitGate"
+     from "PmsPatientInsurance" pi
+     join "PmsPatient" p on p."id" = pi."patientId" and p."tenantId" = pi."tenantId"
+     join "PmsInsurancePlan" ip on ip."id" = pi."planId" and ip."tenantId" = pi."tenantId"
+     left join lateral (
+       select bs.*
+       from "PmsBenefitSummary" bs
+       where bs."tenantId" = pi."tenantId"
+         and bs."patientInsuranceId" = pi."id"
+       order by case when bs."benefitYear" = extract(year from current_date)::int then 0 else 1 end, bs."benefitYear" desc
+       limit 1
+     ) bs on true
+     left join lateral (
+       select
+         coalesce(sum(c."paidCents") filter (where c."status" in ('PAID','PARTIAL','CLOSED')), 0) as "postedPaidCents",
+         coalesce(sum(c."allowedCents") filter (where c."status" in ('PAID','PARTIAL','CLOSED')), 0) as "postedAllowedCents",
+         coalesce(sum(c."billedCents") filter (where c."status" not in ('PAID','CLOSED','VOID','DENIED','REJECTED')), 0) as "pendingBilledCents",
+         count(*) filter (where c."status" not in ('PAID','CLOSED','VOID','DENIED','REJECTED')) as "openClaimCount"
+       from "PmsClaim" c
+       where c."tenantId" = pi."tenantId"
+         and c."patientInsuranceId" = pi."id"
+         and extract(year from coalesce(c."submittedAt", c."createdAt"))::int = coalesce(bs."benefitYear", extract(year from current_date)::int)
+     ) claims on true
+     where pi."tenantId" = $1
+     order by
+       case
+         when pi."eligibilityStatus" <> 'ACTIVE' then 0
+         when bs."id" is null then 1
+         when coalesce(bs."annualMaxCents", 0) <= 0 then 2
+         when greatest(coalesce(bs."annualMaxCents", 0) - greatest(coalesce(bs."annualUsedCents", 0), coalesce(claims."postedPaidCents", 0)) - coalesce(claims."pendingBilledCents", 0), 0) <= 0 then 3
+         else 4
+       end,
+       p."lastName",
+       p."firstName"
+     limit 100`,
+    [tenantId],
+  )).rows;
 }
 
 export async function createInsurancePlan(input: {
@@ -3564,6 +3634,81 @@ function claimProcedureReadinessBlockers(procedure: ClaimReadyProcedure) {
   ].filter(Boolean) as string[];
 }
 
+async function evaluateBenefitCapacityForClaim(input: {
+  tenantId: string;
+  patientInsuranceId: string;
+  proposedBilledCents: number;
+}) {
+  const ledger = (await query<{
+    annualMaxCents: number;
+    payerReportedAnnualUsedCents: number;
+    postedPaidCents: number;
+    pendingBilledCents: number;
+    estimatedRemainingCents: number;
+    benefitGate: string;
+  }>(
+    `select * from (
+       select coalesce(bs."annualMaxCents", 0)::int as "annualMaxCents",
+         coalesce(bs."annualUsedCents", 0)::int as "payerReportedAnnualUsedCents",
+         coalesce(claims."postedPaidCents", 0)::int as "postedPaidCents",
+         coalesce(claims."pendingBilledCents", 0)::int as "pendingBilledCents",
+         case
+           when coalesce(bs."annualMaxCents", 0) <= 0 then 0
+           else greatest(coalesce(bs."annualMaxCents", 0) - greatest(coalesce(bs."annualUsedCents", 0), coalesce(claims."postedPaidCents", 0)) - coalesce(claims."pendingBilledCents", 0), 0)
+         end::int as "estimatedRemainingCents",
+         case
+           when bs."id" is null then 'BENEFIT_SUMMARY_MISSING'
+           when coalesce(bs."annualMaxCents", 0) <= 0 then 'ANNUAL_MAX_UNKNOWN'
+           when greatest(coalesce(bs."annualMaxCents", 0) - greatest(coalesce(bs."annualUsedCents", 0), coalesce(claims."postedPaidCents", 0)) - coalesce(claims."pendingBilledCents", 0), 0) <= 0 then 'BENEFITS_EXHAUSTED'
+           when coalesce(claims."pendingBilledCents", 0) > 0 then 'PENDING_CLAIMS_REDUCE_REMAINING'
+           else 'BENEFITS_AVAILABLE'
+         end as "benefitGate"
+       from "PmsPatientInsurance" pi
+       left join lateral (
+         select bs.*
+         from "PmsBenefitSummary" bs
+         where bs."tenantId" = pi."tenantId" and bs."patientInsuranceId" = pi."id"
+         order by case when bs."benefitYear" = extract(year from current_date)::int then 0 else 1 end, bs."benefitYear" desc
+         limit 1
+       ) bs on true
+       left join lateral (
+         select
+           coalesce(sum(c."paidCents") filter (where c."status" in ('PAID','PARTIAL','CLOSED')), 0) as "postedPaidCents",
+           coalesce(sum(c."billedCents") filter (where c."status" not in ('PAID','CLOSED','VOID','DENIED','REJECTED')), 0) as "pendingBilledCents"
+         from "PmsClaim" c
+         where c."tenantId" = pi."tenantId"
+           and c."patientInsuranceId" = pi."id"
+           and extract(year from coalesce(c."submittedAt", c."createdAt"))::int = coalesce(bs."benefitYear", extract(year from current_date)::int)
+       ) claims on true
+       where pi."tenantId" = $1 and pi."id" = $2
+     ) capacity`,
+    [input.tenantId, input.patientInsuranceId],
+  )).rows[0];
+  if (!ledger) {
+    return {
+      ready: false,
+      blockers: ["Benefit capacity cannot be evaluated because the selected coverage was not found."],
+      ledger: null,
+    };
+  }
+  const remainingAfterProposed = Math.max(Number(ledger.estimatedRemainingCents ?? 0) - input.proposedBilledCents, 0);
+  const blockers = [
+    ledger.benefitGate === "BENEFIT_SUMMARY_MISSING" ? "Benefit summary is missing; active eligibility alone is not enough to create a trusted claim estimate." : null,
+    ledger.benefitGate === "ANNUAL_MAX_UNKNOWN" ? "Annual maximum is unknown; verify benefits before claim creation." : null,
+    ledger.benefitGate === "BENEFITS_EXHAUSTED" ? "Annual maximum appears exhausted after payer-reported usage, posted claims, and pending claims." : null,
+    ledger.benefitGate === "PENDING_CLAIMS_REDUCE_REMAINING" && remainingAfterProposed <= 0 ? "Pending claims consume the estimated remaining annual benefit for this proposed claim." : null,
+  ].filter(Boolean) as string[];
+  return {
+    ready: blockers.length === 0,
+    blockers,
+    ledger: {
+      ...ledger,
+      proposedBilledCents: input.proposedBilledCents,
+      remainingAfterProposedCents: remainingAfterProposed,
+    },
+  };
+}
+
 async function getClaimReadyProceduresOrThrow(input: { tenantId: string; patientId: string; patientInsuranceId: string; procedureIds: string[]; actorRole: string }) {
   const procedures = (await query<ClaimReadyProcedure>(
     `select pl."id", pl."procedureCodeId", pl."tooth", pl."surface", pl."feeCents", pl."serviceDate"::text as "serviceDate",
@@ -3647,6 +3792,19 @@ export async function createClaimFromProcedures(input: { tenantId?: string; acto
 
   const billedCents = procedures.reduce((sum, procedure) => sum + Number(procedure.feeCents ?? 0), 0);
   if (billedCents <= 0) throw new Error("Claim billed amount must be greater than zero.");
+  const benefitCapacity = await evaluateBenefitCapacityForClaim({ tenantId, patientInsuranceId: input.patientInsuranceId, proposedBilledCents: billedCents });
+  if (!benefitCapacity.ready) {
+    await addAudit(
+      tenantId,
+      actorRole,
+      "CLAIM_CREATED_FROM_PROCEDURES_BLOCKED_BENEFIT_CAPACITY",
+      "PmsPatientInsurance",
+      input.patientInsuranceId,
+      "BLOCKED",
+      { patientId: input.patientId, patientInsuranceId: input.patientInsuranceId, procedureIds, blockers: benefitCapacity.blockers, benefitCapacity: benefitCapacity.ledger },
+    );
+    throw new Error(`Benefit capacity blocked: ${benefitCapacity.blockers.join(" ")}`);
+  }
   const claimId = newId("claim");
   const claimNumber = `CLM-${new Date().getFullYear()}-${claimId.slice(-6).toUpperCase()}`;
   await query(

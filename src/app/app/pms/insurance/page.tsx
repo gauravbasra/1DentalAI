@@ -73,6 +73,23 @@ type CoverageGapRow = {
   coverageGate: string;
 };
 
+type BenefitUtilizationRow = {
+  patientInsuranceId: string;
+  firstName: string;
+  lastName: string;
+  chartNumber: string;
+  payerName: string;
+  planName: string;
+  benefitYear: number;
+  annualMaxCents: number;
+  payerReportedAnnualUsedCents: number;
+  postedPaidCents: number;
+  pendingBilledCents: number;
+  openClaimCount: number;
+  estimatedRemainingCents: number;
+  benefitGate: string;
+};
+
 function moneyToCents(value: FormDataEntryValue | null) {
   const normalized = String(value ?? "0").replace(/[^0-9.-]/g, "");
   return Math.round(Number(normalized || "0") * 100);
@@ -148,6 +165,7 @@ export default async function InsurancePage({ searchParams }: { searchParams: Pr
   const claims = board.claims as ClaimRow[];
   const readyProcedures = board.readyProcedures as ReadyProcedureRow[];
   const coverageGaps = board.coverageGaps as CoverageGapRow[];
+  const benefitUtilization = board.benefitUtilization as BenefitUtilizationRow[];
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>
       <PageHeader eyebrow="PMS insurance" title="Insurance and claim readiness" body="Maintain payer plans, attach patient coverage, track verified benefits, and build clean claims from posted clinical procedures." />
@@ -234,6 +252,30 @@ export default async function InsurancePage({ searchParams }: { searchParams: Pr
                 <p className="mt-3 text-sm text-neutral-700">{gap.coverageCount ? "Verify eligibility or update the attached coverage before claim creation." : "Attach a plan, subscriber ID, relationship, and eligibility status before estimate or claim work."}</p>
               </div>
             )) : <EmptyPmsState title="No coverage onboarding gaps" body="Every active patient has active coverage or is ready for self-pay claim and estimate workflows." />}
+          </PmsCard>
+
+          <PmsCard title="Benefit consumption ledger" eyebrow="Claims and remaining max">
+            {benefitUtilization.length ? benefitUtilization.map((row) => (
+              <div key={row.patientInsuranceId} className="mb-3 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-neutral-950">{row.lastName}, {row.firstName} · {row.payerName}</p>
+                    <p className="mt-1 text-sm text-neutral-600">{row.chartNumber} · {row.planName} · benefit year {row.benefitYear}</p>
+                  </div>
+                  <StatusFor value={row.benefitGate} />
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-5">
+                  <Metric label="Annual max" value={<Money cents={row.annualMaxCents} />} />
+                  <Metric label="Payer used" value={<Money cents={row.payerReportedAnnualUsedCents} />} />
+                  <Metric label="Posted paid" value={<Money cents={row.postedPaidCents} />} />
+                  <Metric label="Pending claims" value={<><Money cents={row.pendingBilledCents} /> · {row.openClaimCount}</>} />
+                  <Metric label="Remaining" value={<Money cents={row.estimatedRemainingCents} />} />
+                </div>
+                <p className="mt-3 text-xs leading-5 text-neutral-600">
+                  Remaining uses the greater of payer-reported used and posted paid claims, then reserves open pending claim exposure. Active eligibility alone does not clear a treatment estimate.
+                </p>
+              </div>
+            )) : <EmptyPmsState title="No benefit utilization records" body="Attach insurance and verify benefits before claims or treatment estimates rely on remaining annual maximum." />}
           </PmsCard>
 
           <PmsCard title="Payer plan library" eyebrow="Contract inventory">

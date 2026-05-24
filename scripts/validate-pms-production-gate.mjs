@@ -323,11 +323,18 @@ const createClaimBody = functionBody(repositorySource, "createClaimFromProcedure
 for (const pattern of [
   /eligibilityStatus[\s\S]*ACTIVE/,
   /getClaimReadyProceduresOrThrow/,
+  /evaluateBenefitCapacityForClaim/,
+  /CLAIM_CREATED_FROM_PROCEDURES_BLOCKED_BENEFIT_CAPACITY/,
   /procedures\.length === input\.procedureIds\.length/,
   /billedCents <= 0/,
 ]) {
   if (!pattern.test(createClaimBody + repositorySource.match(/async function getClaimReadyProceduresOrThrow[\s\S]*?\n}/)?.[0])) {
     failures.push(`src/lib/pms-repository.ts: createClaimFromProcedures must enforce claim readiness pattern ${pattern}.`);
+  }
+}
+for (const token of ["getBenefitUtilizationLedger", "payerReportedAnnualUsedCents", "postedPaidCents", "pendingBilledCents", "estimatedRemainingCents", "BENEFITS_EXHAUSTED", "PENDING_CLAIMS_REDUCE_REMAINING", "Annual maximum appears exhausted", "Pending claims consume the estimated remaining annual benefit"]) {
+  if (!repositorySource.includes(token)) {
+    failures.push(`src/lib/pms-repository.ts: missing benefit consumption ledger token ${token}.`);
   }
 }
 for (const token of ["getFormAssignmentDetail(assignmentId: string, tenantId = defaultTenantId)", "recordFormResponse(input: {", "tenantId?: string;", "reviewProfileChangeRequest(input: {", "applyProfileChange(change.patientId, change.targetModel, change.targetField, change.proposedValue, tenantId)", "updateDocumentStatus(documentId: string, status: string, actorRole = \"front_desk\", tenantId = defaultTenantId)", "updateLabCaseStatus(labCaseId: string, status: string, actorRole = \"dental_assistant\", tenantId = defaultTenantId)"]) {
