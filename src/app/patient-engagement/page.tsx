@@ -705,7 +705,7 @@ function FlowOverlay({
 
   return (
     <div className="fixed inset-0 z-50 bg-neutral-950/30 backdrop-blur-[1px]">
-      <div className="absolute inset-y-0 right-0 flex w-full max-w-[760px] flex-col border-l border-neutral-200 bg-white shadow-2xl">
+      <div className={panel === "phone" ? "absolute inset-0 flex flex-col bg-white shadow-2xl" : "absolute inset-y-0 right-0 flex w-full max-w-[760px] flex-col border-l border-neutral-200 bg-white shadow-2xl"}>
         <div className="flex h-20 items-center justify-between border-b border-neutral-200 px-7">
           <div className="flex items-center gap-3">
             <Link href={closeHref} className="grid h-10 w-10 place-items-center rounded-full border border-neutral-200 text-xl" aria-label="Back">‹</Link>
@@ -717,7 +717,7 @@ function FlowOverlay({
           <Link href={closeHref} className="grid h-11 w-11 place-items-center rounded-full border border-neutral-200 text-2xl" aria-label="Close">×</Link>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto bg-[#f7f8f8] p-7">
+        <div className={panel === "phone" ? "min-h-0 flex-1 overflow-hidden bg-[#f7f8f8] p-3" : "min-h-0 flex-1 overflow-y-auto bg-[#f7f8f8] p-7"}>
           {panel === "filters" ? <FiltersPanel metrics={metrics} selectedConversation={selectedConversation} /> : null}
           {panel === "patient" ? <PatientPanel patient={patient} family={family} nextAppointments={nextAppointments} procedures={procedures} /> : null}
           {panel === "call" ? <CallInsightsPanel conversation={selectedConversation} callAi={callAi} callTranscript={callTranscript} tasks={tasks} /> : null}
@@ -770,240 +770,230 @@ function PhonePanel({
   const activeNumberOptions = numbers.filter((number) => String(number.status) === "ACTIVE" && String(number.voiceStatus) === "ACTIVE");
   const selectedVideoSession = videoSessions.find((session) => String(session.conversationId) === String(conversation?.id)) ?? videoSessions[0];
   const dialKeys = ["1", "2 ABC", "3 DEF", "4 GHI", "5 JKL", "6 MNO", "7 PQRS", "8 TUV", "9 WXYZ", "*", "0 +", "#"];
+  const hasConferenceBridge = Boolean(selectedActiveCall?.providerConferenceName || selectedActiveCall?.providerConferenceId);
+  const liveControlActions = [
+    { action: "HOLD", label: "Hold", icon: "Ⅱ", conferenceRequired: true },
+    { action: "RESUME", label: "Resume", icon: "▶", conferenceRequired: true },
+    { action: "CALL_PARK", label: "Park", icon: "⌗", conferenceRequired: true, targetParkSlot: "front-desk-1" },
+    { action: "AI_VOICE_TAKEOVER", label: "AI", icon: "AI", conferenceRequired: false },
+    { action: "END_CALL", label: "End", icon: "☎", conferenceRequired: false },
+  ];
   return (
-    <div className="overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-sm">
-      <div className="flex h-14 items-center justify-between bg-gradient-to-r from-sky-500 via-blue-600 to-violet-600 px-5 text-white">
+    <div className="flex h-[calc(100vh-150px)] min-h-[640px] overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-sm">
+      <nav className="flex w-16 shrink-0 flex-col items-center border-r border-neutral-200 bg-white py-4 text-[10px] font-semibold text-neutral-500">
+        {[
+          ["Keypad", "⠿", "#phone-dialer"],
+          ["Video", "▣", "#phone-stage"],
+          ["Recents", "☏", "#phone-calls"],
+          ["Chats", "◌", panelHref("sms", conversation?.id)],
+          ["Numbers", "#", "#phone-setup"],
+          ["Settings", "⚙", panelHref("settings", conversation?.id)],
+        ].map(([label, icon, href]) => (
+          <a key={label} href={href} className="flex w-full flex-col items-center gap-1 border-l-4 border-transparent px-1 py-3 text-center hover:border-blue-600 hover:text-blue-700">
+            <span className="text-lg">{icon}</span>
+            {label}
+          </a>
+        ))}
+      </nav>
+
+      <aside id="phone-dialer" className="flex w-[304px] shrink-0 flex-col border-r border-neutral-200 bg-[#fbfcff]">
+        <div className="border-b border-neutral-200 p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Active calls</h3>
+            <form action={refreshCarrierStatusAction}>
+              <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
+              <button className="rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold">Refresh</button>
+            </form>
+          </div>
+          <div id="phone-calls" className="mt-3 space-y-2">
+            {activeCalls.slice(0, 2).map((call, index) => (
+              <div key={String(call.id)} className={`flex items-center gap-2 rounded-xl px-3 py-2 ${String(call.id) === String(selectedActiveCall?.id) ? "bg-blue-50" : "bg-white"}`}>
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-sky-500 text-xs font-bold text-white">{initials(null, null, String(call.callerName ?? call.fromNumber ?? "Call"))}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{String(call.callerName ?? call.fromNumber ?? `Call ${index + 1}`)}</p>
+                  <p className="truncate text-[11px] text-neutral-500">{clean(call.callState)} · {String(call.toNumber ?? "")}</p>
+                </div>
+                <SmallTag tone={statusTone(call.callState)}>{clean(call.callState ?? "OPEN")}</SmallTag>
+              </div>
+            ))}
+            {!activeCalls.length ? <p className="rounded-xl border border-dashed border-neutral-200 bg-white p-3 text-xs leading-5 text-neutral-500">No live calls. Incoming Twilio webhooks and outbound call attempts populate this list.</p> : null}
+          </div>
+        </div>
+
+        <form action={softphoneDialAction} className="flex flex-1 flex-col gap-3 p-4">
+          <select name="fromNumberId" className="h-9 rounded-full border border-neutral-200 bg-white px-3 text-xs font-semibold text-violet-700">
+            <option value="">Caller ID · default</option>
+            {activeNumberOptions.map((number) => (
+              <option key={String(number.id)} value={String(number.id)}>{String(number.label)} · {String(number.phoneNumber)}</option>
+            ))}
+          </select>
+          <input name="targetNumber" required defaultValue={conversation?.callerNumber ?? ""} className="h-10 rounded-xl border border-neutral-200 bg-white px-3 text-center text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Patient number" />
+          <input name="operatorNumber" className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-center text-xs outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Your phone for bridge calls" />
+          <div className="grid grid-cols-3 gap-2">
+            {dialKeys.map((key) => {
+              const [digit, letters] = key.split(" ");
+              return (
+                <button key={key} type="button" className="h-10 rounded-full bg-neutral-100 text-base font-semibold text-neutral-950">
+                  {digit}<span className="block text-[7px] font-bold text-neutral-500">{letters ?? ""}</span>
+                </button>
+              );
+            })}
+          </div>
+          <input type="hidden" name="conversationId" value={conversation?.id ?? String(selectedActiveCall?.conversationId ?? "")} />
+          <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
+          <div className="mt-auto grid grid-cols-2 gap-2">
+            <button name="mode" value="VOICE_AI" className="h-11 rounded-full bg-emerald-600 text-sm font-semibold text-white shadow-sm">Voice AI call</button>
+            <button name="mode" value="OPERATOR_BRIDGE" className="h-11 rounded-full bg-blue-600 text-sm font-semibold text-white shadow-sm">Bridge call</button>
+          </div>
+          <button formAction={createVideoSessionAction} formNoValidate className="h-10 rounded-full border border-neutral-200 bg-white text-sm font-semibold">Create Zoom video</button>
+          <p className="text-[11px] leading-4 text-neutral-500">Voice AI dials the patient directly. Bridge calls require your callback number so Twilio can connect you first.</p>
+        </form>
+
+        <div className="grid grid-cols-3 gap-2 border-t border-neutral-200 p-4 text-center">
+          <MetricTile label="Open" value={metrics.openCalls ?? "0"} />
+          <MetricTile label="Missed" value={metrics.missedCalls ?? "0"} />
+          <MetricTile label="VM" value={metrics.newVoicemails ?? "0"} />
+        </div>
+      </aside>
+
+      <section id="phone-stage" className="flex min-w-0 flex-1 flex-col bg-white">
+        <div className="flex h-12 shrink-0 items-center justify-between bg-gradient-to-r from-sky-500 via-blue-600 to-violet-600 px-4 text-white">
         <div className="flex items-center gap-3">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/15 text-xl font-black">1D</span>
+          <span className="grid h-8 w-8 place-items-center rounded-xl bg-white/15 text-lg font-black">1D</span>
           <span className="text-sm font-semibold">Phone console</span>
         </div>
-        <div className="flex items-center gap-5 text-xs font-semibold">
+        <div className="flex items-center gap-4 text-[11px] font-semibold">
           <span className="flex items-center gap-2">Auto answer <span className="h-5 w-10 rounded-full bg-emerald-400 p-0.5"><span className="block h-4 w-4 translate-x-5 rounded-full bg-white" /></span></span>
           <span className="flex items-center gap-2">DND <span className="h-5 w-10 rounded-full bg-orange-500 p-0.5"><span className="block h-4 w-4 translate-x-5 rounded-full bg-white" /></span></span>
           <span>Front desk · REGISTERED</span>
         </div>
       </div>
 
-      <div className="grid min-h-[760px] grid-cols-[72px_350px_minmax(0,1fr)]">
-        <nav className="border-r border-neutral-200 bg-white py-5 text-[11px] font-semibold text-neutral-500">
-          {[
-            ["Keypad", "⠿"],
-            ["Video", "▣"],
-            ["Recents", "☏"],
-            ["Contacts", "♙"],
-            ["Chats", "◌"],
-            ["Messages", "▤"],
-            ["Numbers", "#"],
-            ["Settings", "⚙"],
-          ].map(([label, icon]) => (
-            <a key={label} href={label === "Settings" ? panelHref("settings", conversation?.id) : "#phone-dialer"} className="flex flex-col items-center gap-1 border-l-4 border-transparent px-2 py-3 text-center hover:border-blue-600 hover:text-blue-700">
-              <span className="text-xl">{icon}</span>
-              {label}
-            </a>
-          ))}
-        </nav>
-
-        <aside id="phone-dialer" className="border-r border-neutral-200 bg-[#fbfcff] p-4">
-          <div className="flex items-center justify-between border-b border-neutral-200 pb-4">
-            <h3 className="text-lg font-semibold">Active calls</h3>
-            <span className="text-neutral-400">⌄</span>
-          </div>
-          <div className="mt-3 space-y-2">
-            {activeCalls.slice(0, 3).map((call, index) => (
-              <div key={String(call.id)} className={`flex items-center gap-3 rounded-xl px-3 py-2 ${String(call.id) === String(selectedActiveCall?.id) ? "bg-blue-50" : "bg-white"}`}>
-                <span className="grid h-9 w-9 place-items-center rounded-full bg-sky-500 text-sm font-bold text-white">{initials(null, null, String(call.callerName ?? call.fromNumber ?? "Call"))}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{String(call.callerName ?? call.fromNumber ?? `Call ${index + 1}`)}</p>
-                  <p className="text-xs text-neutral-500">{clean(call.callState)} · {String(call.toNumber ?? "")}</p>
-                </div>
-                <form action={callControlAction}>
-                  <input type="hidden" name="activeCallId" value={String(call.id)} />
-                  <input type="hidden" name="conversationId" value={String(call.conversationId ?? "")} />
-                  <input type="hidden" name="actionType" value="HOLD" />
-                  <button className="grid h-9 w-9 place-items-center rounded-full bg-white text-sm shadow-sm">Ⅱ</button>
-                </form>
-                <form action={callControlAction}>
-                  <input type="hidden" name="activeCallId" value={String(call.id)} />
-                  <input type="hidden" name="conversationId" value={String(call.conversationId ?? "")} />
-                  <input type="hidden" name="actionType" value="END_CALL" />
-                  <button className="grid h-9 w-9 place-items-center rounded-full bg-rose-500 text-sm text-white">☎</button>
-                </form>
-              </div>
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-200 px-5">
+          <div className="flex items-center gap-5 text-sm font-semibold">
+            <Link href="/patient-engagement" className="text-3xl leading-none">‹</Link>
+            {["Favorites", "Active Call", "Recent", "Missed Call"].map((tab) => (
+              <span key={tab} className={tab === "Active Call" ? "rounded-full bg-slate-100 px-4 py-2 text-blue-700" : "text-neutral-600"}>{tab}</span>
             ))}
-            {!activeCalls.length ? <p className="rounded-xl border border-dashed border-neutral-200 bg-white p-4 text-sm text-neutral-500">No live calls right now. Incoming Twilio webhooks populate this list.</p> : null}
           </div>
+          <div className="flex items-center gap-2">
+            <SmallTag tone={hasConferenceBridge ? "green" : "amber"}>{hasConferenceBridge ? "conference controls ready" : "direct call controls limited"}</SmallTag>
+            <SmallTag tone={statusTone(selectedActiveCall?.callState)}>{clean(selectedActiveCall?.callState ?? "NO_CALL")}</SmallTag>
+          </div>
+        </div>
 
-          <form action={softphoneDialAction} className="mt-8 space-y-4">
-            <select name="fromNumberId" className="mx-auto block h-9 rounded-full border border-neutral-200 bg-white px-4 text-xs font-semibold text-violet-700">
-              <option value="">Caller ID · default</option>
-              {activeNumberOptions.map((number) => (
-                <option key={String(number.id)} value={String(number.id)}>{String(number.label)} · {String(number.phoneNumber)}</option>
-              ))}
-            </select>
-            <input name="targetNumber" required defaultValue={conversation?.callerNumber ?? ""} className="h-11 w-full rounded-xl border border-transparent bg-transparent px-4 text-center text-sm outline-none focus:border-blue-300 focus:bg-white" placeholder="Enter number or patient name" />
-            <input name="operatorNumber" className="h-10 w-full rounded-xl border border-neutral-200 bg-white px-4 text-center text-xs outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Operator bridge phone" />
-            <div className="grid grid-cols-3 gap-4">
-              {dialKeys.map((key) => {
-                const [digit, letters] = key.split(" ");
-                return (
-                  <button key={key} type="button" className="h-12 rounded-full bg-neutral-100 text-lg font-semibold text-neutral-950">
-                    {digit}<span className="block text-[8px] font-bold text-neutral-500">{letters ?? ""}</span>
-                  </button>
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px]">
+          <main className="min-w-0 overflow-hidden p-5">
+            <h2 className="text-center text-2xl font-semibold">{conversation?.callerName ?? patient.name ?? "Phone workspace"}</h2>
+            <div className="mt-4 overflow-hidden rounded-2xl bg-neutral-900 shadow-sm">
+              <div className="relative h-[clamp(240px,38vh,390px)] bg-[radial-gradient(circle_at_45%_35%,#64748b,#111827_58%,#020617)]">
+                <div className="absolute inset-0 grid place-items-center text-center text-white">
+                  <div>
+                    <p className="text-6xl font-black">{initials(null, null, conversation?.callerName ?? patient.name ?? "Video")}</p>
+                    <p className="mt-2 text-sm text-white/70">{selectedVideoSession ? "Zoom video session ready" : "Create Zoom video when the caller needs face-to-face help"}</p>
+                    {selectedVideoSession ? <a href={String(selectedVideoSession.joinUrl)} target="_blank" className="mt-3 inline-flex rounded-full bg-white px-5 py-2 text-sm font-semibold text-neutral-950">Open Zoom</a> : null}
+                  </div>
+                </div>
+                <div className="absolute bottom-4 right-4 w-40 overflow-hidden rounded-xl border border-white/20 bg-black/40 p-3 text-white shadow-2xl">
+                  <p className="text-xs font-semibold">You</p>
+                  <div className="mt-2 grid aspect-video place-items-center rounded-lg bg-slate-800 text-2xl">☺</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <span className="rounded-md bg-emerald-500 px-2 py-1 text-sm font-bold text-white">02:00</span>
+              {liveControlActions.map((control) => {
+                const disabled = !selectedActiveCall || (control.conferenceRequired && !hasConferenceBridge);
+                const buttonClass = `grid h-12 min-w-12 place-items-center rounded-full px-3 text-xs font-bold ${control.action === "END_CALL" ? "bg-rose-500 text-white" : disabled ? "bg-neutral-100 text-neutral-400" : "bg-neutral-100 text-neutral-700"}`;
+                return disabled ? (
+                  <button key={control.action} type="button" disabled className={buttonClass} title={control.conferenceRequired ? "Hold, resume, and park require a conference-backed WebRTC call." : "No active call selected."}>{control.icon}<span className="sr-only">{control.label}</span></button>
+                ) : (
+                  <form key={control.action} action={callControlAction}>
+                    <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
+                    <input type="hidden" name="conversationId" value={conversation?.id ?? String(selectedActiveCall?.conversationId ?? "")} />
+                    <input type="hidden" name="actionType" value={control.action} />
+                    {control.targetParkSlot ? <input type="hidden" name="targetParkSlot" value={control.targetParkSlot} /> : null}
+                    <button className={buttonClass}>{control.icon}<span className="sr-only">{control.label}</span></button>
+                  </form>
                 );
               })}
             </div>
-            <select name="mode" className="h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-xs font-semibold">
-              <option value="OPERATOR_BRIDGE">Operator bridge</option>
-              <option value="VOICE_AI">Voice AI direct</option>
-            </select>
-            <div className="flex justify-center">
-              <div className="inline-flex overflow-hidden rounded-full bg-emerald-600 shadow-lg">
-                <button className="h-12 px-8 text-xl text-white">☎</button>
-                <button formAction={createVideoSessionAction} formNoValidate className="h-12 border-l border-emerald-500 px-8 text-xl text-white">▣</button>
-              </div>
-            </div>
-            <input type="hidden" name="conversationId" value={conversation?.id ?? String(selectedActiveCall?.conversationId ?? "")} />
-            <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
-          </form>
 
-          <div className="mt-6 grid grid-cols-3 gap-2 text-center">
-            <MetricTile label="Open" value={metrics.openCalls ?? "0"} />
-            <MetricTile label="Missed" value={metrics.missedCalls ?? "0"} />
-            <MetricTile label="VM" value={metrics.newVoicemails ?? "0"} />
-          </div>
-        </aside>
-
-        <section className="flex min-w-0 flex-col bg-white">
-          <div className="flex h-16 items-center justify-between border-b border-neutral-200 px-6">
-            <div className="flex items-center gap-6 text-sm font-semibold">
-              <Link href="/patient-engagement" className="text-3xl leading-none">‹</Link>
-              {["Favorites", "Active Call", "Recent", "Missed Call"].map((tab) => (
-                <span key={tab} className={tab === "Active Call" ? "rounded-full bg-slate-100 px-4 py-2 text-blue-700" : "text-neutral-600"}>{tab}</span>
-              ))}
-            </div>
-            <form action={refreshCarrierStatusAction}>
-              <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
-              <button className="rounded-xl border border-neutral-200 px-4 py-2 text-sm font-semibold">Refresh carrier status</button>
-            </form>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto p-6">
-            <h2 className="text-center text-3xl font-semibold">{conversation?.callerName ?? patient.name ?? "Phone workspace"}</h2>
-            <div className="mt-5 overflow-hidden rounded-2xl bg-neutral-900 shadow-sm">
-              <div className="relative aspect-video bg-[radial-gradient(circle_at_45%_35%,#64748b,#111827_58%,#020617)]">
-                <div className="absolute inset-0 grid place-items-center text-center text-white">
-                  <div>
-                    <p className="text-7xl font-black">{initials(null, null, conversation?.callerName ?? patient.name ?? "Video")}</p>
-                    <p className="mt-3 text-sm text-white/70">{selectedVideoSession ? "Zoom video session ready" : "Create Zoom video when the caller needs face-to-face help"}</p>
-                    {selectedVideoSession ? <a href={String(selectedVideoSession.joinUrl)} target="_blank" className="mt-4 inline-flex rounded-full bg-white px-5 py-2 text-sm font-semibold text-neutral-950">Open Zoom</a> : null}
-                  </div>
-                </div>
-                <div className="absolute bottom-5 right-5 w-48 overflow-hidden rounded-xl border border-white/20 bg-black/40 p-4 text-white shadow-2xl">
-                  <p className="text-xs font-semibold">You</p>
-                  <div className="mt-3 grid aspect-video place-items-center rounded-lg bg-slate-800 text-3xl">☺</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-6 flex items-center justify-center gap-5">
-              <span className="rounded-md bg-emerald-500 px-2 py-1 text-sm font-bold text-white">02:00</span>
-              {[
-                ["HOLD", "Ⅱ", ""],
-                ["RESUME", "▶", ""],
-                ["CALL_PARK", "⠿", "front-desk-1"],
-                ["AI_VOICE_TAKEOVER", "AI", ""],
-                ["END_CALL", "☎", ""],
-              ].map(([action, label, parkSlot]) => (
-                <form key={action} action={callControlAction}>
-                  <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
-                  <input type="hidden" name="conversationId" value={conversation?.id ?? String(selectedActiveCall?.conversationId ?? "")} />
-                  <input type="hidden" name="actionType" value={action} />
-                  {parkSlot ? <input type="hidden" name="targetParkSlot" value={parkSlot} /> : null}
-                  <button className={`grid h-14 w-14 place-items-center rounded-full text-sm font-bold ${action === "END_CALL" ? "bg-rose-500 text-white" : "bg-neutral-100 text-neutral-700"}`}>{label}</button>
-                </form>
-              ))}
-            </div>
-
-            <div className="mt-7 grid gap-4 xl:grid-cols-2">
-              <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              <section className="rounded-2xl border border-neutral-200 bg-white p-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xl font-semibold">Carrier result</h3>
+                  <h3 className="text-base font-semibold">Carrier result</h3>
                   <SmallTag tone={statusTone(selectedActiveCall?.callState)}>{clean(selectedActiveCall?.callState ?? "NO_CALL")}</SmallTag>
                 </div>
-                <p className="mt-2 text-sm text-neutral-500">Provider SID: {String(selectedActiveCall?.providerCallId ?? "not assigned")}</p>
-                <div className="mt-4 space-y-2">
-                  {controls.slice(0, 4).map((control) => (
-                    <div key={String(control.id)} className="rounded-xl bg-neutral-50 p-3">
+                <p className="mt-1 truncate text-xs text-neutral-500">Provider SID: {String(selectedActiveCall?.providerCallId ?? "not assigned")}</p>
+                <div className="mt-3 max-h-32 space-y-2 overflow-y-auto">
+                  {controls.slice(0, 3).map((control) => (
+                    <div key={String(control.id)} className="rounded-xl bg-neutral-50 p-2">
                       <p className="text-sm font-semibold">{clean(control.actionType)}</p>
-                      <p className="mt-1 text-xs leading-5 text-neutral-500">{String(control.resultSummary ?? "No provider result recorded.")}</p>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-neutral-500">{String(control.resultSummary ?? "No provider result recorded.")}</p>
                     </div>
                   ))}
                 </div>
               </section>
-              <section className="rounded-2xl border border-neutral-200 bg-white p-5">
-                <h3 className="text-xl font-semibold">Patient call pop</h3>
-                <div className="mt-4 flex items-center gap-4">
-                  <span className="grid h-14 w-14 place-items-center rounded-full bg-amber-100 text-lg font-black">{initials(null, null, patient.name ?? conversation?.callerName ?? "Patient")}</span>
+              <section className="rounded-2xl border border-neutral-200 bg-white p-4">
+                <h3 className="text-base font-semibold">Patient call pop</h3>
+                <div className="mt-3 flex items-center gap-3">
+                  <span className="grid h-12 w-12 place-items-center rounded-full bg-amber-100 text-base font-black">{initials(null, null, patient.name ?? conversation?.callerName ?? "Patient")}</span>
                   <div>
-                    <p className="text-lg font-semibold">{patient.name ?? conversation?.callerName ?? "Unknown caller"}</p>
+                    <p className="text-base font-semibold">{patient.name ?? conversation?.callerName ?? "Unknown caller"}</p>
                     <p className="text-sm text-neutral-500">{String(conversation?.callerNumber ?? selectedActiveCall?.fromNumber ?? "No phone number")}</p>
                   </div>
                 </div>
-                <div className="mt-4 grid grid-cols-3 gap-2">
+                <div className="mt-3 grid grid-cols-3 gap-2">
                   <Link href={panelHref("patient", conversation?.id)} className="rounded-xl border border-neutral-200 px-3 py-2 text-center text-sm font-semibold">Patient</Link>
                   <Link href={panelHref("payment", conversation?.id)} className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm font-semibold">{money(patient.openBalanceCents ?? 0)}</Link>
                   <Link href={panelHref("insurance", conversation?.id)} className="rounded-xl border border-neutral-200 px-3 py-2 text-center text-sm font-semibold">Insurance</Link>
                 </div>
               </section>
             </div>
-          </div>
-        </section>
-      </div>
+          </main>
 
-      <div className="border-t border-neutral-200 bg-[#f8fafc] p-5">
-        <div className="grid gap-4 lg:grid-cols-3">
-          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <h3 className="text-lg font-semibold">Provision numbers</h3>
-            <form action={provisionPhoneNumberAction} className="mt-4 grid gap-3">
-              <input name="label" required className="h-11 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="Main line / Marketing DID" />
-              <input name="phoneNumber" required className="h-11 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="+13035234562" />
-              <div className="grid grid-cols-2 gap-2">
-                <select name="numberType" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="MAIN">Main</option><option value="BILLING">Billing</option><option value="MARKETING">Marketing DID</option><option value="HYGIENE">Hygiene</option></select>
-                <select name="voiceStatus" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="ACTIVE">Voice active</option><option value="NOT_CONFIGURED">Voice missing</option></select>
-                <select name="smsStatus" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="ACTIVE">SMS active</option><option value="NOT_CONFIGURED">SMS missing</option></select>
-                <select name="e911Status" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="ACTIVE">E911 active</option><option value="VALIDATED">E911 validated</option><option value="NOT_CONFIGURED">E911 missing</option></select>
-              </div>
-              <input type="hidden" name="provider" value="TWILIO" />
-              <input type="hidden" name="recordingPolicy" value="CONSENT_REQUIRED" />
-              <button className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Save number</button>
-            </form>
-          </section>
-
-          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <h3 className="text-lg font-semibold">Provision extensions</h3>
-            <form action={provisionPhoneExtensionAction} className="mt-4 grid gap-3">
-              <input name="extensionNumber" required className="h-11 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="101" />
-              <input name="displayName" required className="h-11 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="Front desk" />
-              <div className="grid grid-cols-2 gap-2">
-                <select name="ownerRoleKey" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="front_desk">Front desk</option><option value="billing">Billing</option><option value="office_manager">Office manager</option><option value="provider">Provider</option></select>
-                <select name="extensionType" className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="USER">User</option><option value="QUEUE">Queue</option><option value="ROOM">Room</option><option value="AI_AGENT">AI agent</option></select>
-              </div>
-              <input type="hidden" name="voicemailEnabled" value="true" />
-              <button className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm font-semibold">Save extension</button>
-            </form>
-          </section>
-
-          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <h3 className="text-lg font-semibold">Setup inventory</h3>
-            <div className="mt-4 space-y-3">
+          <aside id="phone-setup" className="min-h-0 overflow-y-auto border-l border-neutral-200 bg-[#f8fafc] p-4">
+            <section className="rounded-2xl border border-neutral-200 bg-white p-4">
+              <h3 className="text-base font-semibold">Setup inventory</h3>
+              <div className="mt-3 space-y-2">
               {numbers.slice(0, 3).map((number) => <RecordLine key={String(number.id)} title={`${String(number.label)} · ${String(number.phoneNumber)}`} meta={`voice ${clean(number.voiceStatus)} · sms ${clean(number.smsStatus)} · E911 ${clean(number.e911Status)}`} />)}
               {extensions.slice(0, 3).map((extension) => <RecordLine key={String(extension.id)} title={`Ext ${String(extension.extensionNumber)} · ${String(extension.displayName)}`} meta={`${clean(extension.ownerRoleKey)} · ${clean(extension.extensionType)}`} />)}
               {routes.slice(0, 2).map((route) => <RecordLine key={String(route.id)} title={`Route: ${String(route.name)}`} meta={`${clean(route.triggerType)} → ${clean(route.destinationType)} · ${clean(route.status)}`} />)}
               {providers.slice(0, 2).map((provider) => <RecordLine key={String(provider.id)} title={`${String(provider.name)} · ${String(provider.providerType)}`} meta={`credentials ${clean(provider.credentialStatus)} · webhook ${clean(provider.webhookStatus)}`} />)}
-            </div>
-          </section>
+              </div>
+            </section>
+
+            <details className="mt-3 rounded-2xl border border-neutral-200 bg-white p-4">
+              <summary className="cursor-pointer text-sm font-semibold">Provision number</summary>
+              <form action={provisionPhoneNumberAction} className="mt-3 grid gap-2">
+                <input name="label" required className="h-9 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="Main line / Marketing DID" />
+                <input name="phoneNumber" required className="h-9 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="+13035234562" />
+                <select name="numberType" className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="MAIN">Main</option><option value="BILLING">Billing</option><option value="MARKETING">Marketing DID</option><option value="HYGIENE">Hygiene</option></select>
+                <input type="hidden" name="provider" value="TWILIO" />
+                <input type="hidden" name="voiceStatus" value="ACTIVE" />
+                <input type="hidden" name="smsStatus" value="ACTIVE" />
+                <input type="hidden" name="e911Status" value="ACTIVE" />
+                <input type="hidden" name="recordingPolicy" value="CONSENT_REQUIRED" />
+                <button className="rounded-xl bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white">Save number</button>
+              </form>
+            </details>
+
+            <details className="mt-3 rounded-2xl border border-neutral-200 bg-white p-4">
+              <summary className="cursor-pointer text-sm font-semibold">Provision extension</summary>
+              <form action={provisionPhoneExtensionAction} className="mt-3 grid gap-2">
+                <input name="extensionNumber" required className="h-9 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="101" />
+                <input name="displayName" required className="h-9 rounded-xl border border-neutral-200 px-3 text-sm" placeholder="Front desk" />
+                <select name="ownerRoleKey" className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold"><option value="front_desk">Front desk</option><option value="billing">Billing</option><option value="office_manager">Office manager</option><option value="provider">Provider</option></select>
+                <input type="hidden" name="extensionType" value="USER" />
+                <input type="hidden" name="voicemailEnabled" value="true" />
+                <button className="rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm font-semibold">Save extension</button>
+              </form>
+            </details>
+          </aside>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
