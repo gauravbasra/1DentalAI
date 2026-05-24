@@ -1721,7 +1721,7 @@ export async function updatePhoneOutboundMessageApproval(id: string, approvalSta
          when $2 = 'APPROVED_STAGED' and "consentStatus" <> 'VERIFIED' then 'Cannot approve outbound message until patient channel consent is verified.'
          else "blockedReason"
        end,
-       "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('approvedByRole', $3, 'approvedAt', current_timestamp, 'externalSendBlocked', "connectorStatus" <> 'READY_FOR_CONNECTOR'),
+       "readiness" = coalesce("readiness", '{}'::jsonb) || jsonb_build_object('approvedByRole', $3::text, 'approvedAt', current_timestamp, 'externalSendBlocked', "connectorStatus" <> 'READY_FOR_CONNECTOR'),
        "updatedAt" = current_timestamp
      where "id" = $1
      returning "tenantId", "approvalStatus" as "appliedStatus", "deliveryStatus", "connectorStatus", "blockedReason"`,
