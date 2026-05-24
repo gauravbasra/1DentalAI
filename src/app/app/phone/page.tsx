@@ -659,6 +659,7 @@ export default async function PhonePage({ searchParams }: { searchParams: Promis
                 <p className="mt-2 text-xs leading-5 text-neutral-500">{list("Keywords", call.keywords)} {list("Risks", call.riskFlags)}</p>
                 <div className="mt-3 grid gap-2 md:grid-cols-4">
                   <StatusButton id={call.id} status="OPEN" followUpStatus="READY_FOR_APPROVAL" label="Ready follow-up" />
+                  <StatusButton id={call.id} status="OPEN" followUpStatus="SCHEDULING_HANDOFF" label="Scheduling handoff" />
                   <StatusButton id={call.id} status="OPEN" followUpStatus="BLOCKED_RCM_REVIEW" label="Send to RCM" />
                   <StatusButton id={call.id} status="OPEN" followUpStatus="PATIENT_FINDER" label="Patient Finder" />
                   <StatusButton id={call.id} status="OPEN" followUpStatus="CHART_NOTE_REVIEW" label="Chart review" />

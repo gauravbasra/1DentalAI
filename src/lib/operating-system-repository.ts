@@ -1450,7 +1450,7 @@ function buildPhoneSetupReadiness(input: { providers: Record<string, unknown>[];
     { label: "STIR/SHAKEN and carrier compliance", status: complianceReadyNumbers.length && readySipProviders.length ? "READY" : "SETUP_REQUIRED", nextAction: complianceReadyNumbers.length && readySipProviders.length ? "Carrier compliance readiness is tied to active voice numbers and trunk identity." : "Confirm STIR/SHAKEN attestation, CNAM/caller ID policy, acceptable use, call recording disclosure, and carrier compliance through the selected SIP trunk/provider." },
     { label: "Extensions", status: provisionedExtensions.length ? "READY" : "SETUP_REQUIRED", nextAction: provisionedExtensions.length ? "Extensions exist for role routing and voicemail." : "Create extensions for front desk, billing, clinical triage, and AI receptionist fallback." },
     { label: "Queues, IVR, voicemail, recording", status: readyPbxProviders.length && provisionedExtensions.length ? "READY" : "SETUP_REQUIRED", nextAction: readyPbxProviders.length && provisionedExtensions.length ? "PBX services can be mapped to queues, IVR, voicemail, recording, and conference/transfer workflows." : "Map FreeSWITCH dialplan, mod_callcenter queues, IVR menus, voicemail, recordings, conference/transfer rules, and retention controls." },
-    { label: "Event ingestion seam", status: readyPbxProviders.length ? "READY" : "BLOCKED_CONNECTOR_REQUIRED", nextAction: readyPbxProviders.length ? "FreeSWITCH events can be normalized into 1DentalAI call state and audit records." : "Build and verify Event Socket/webhook ingestion for channel events, SIP registrations, queue events, voicemail, recordings, IVR, conference, and Verto webphone events." },
+    { label: "Event ingestion seam", status: readyPbxProviders.length ? "READY" : "BLOCKED_CONNECTOR_REQUIRED", nextAction: readyPbxProviders.length ? "FreeSWITCH events can be normalized into 1DentalAI call state and audit records." : "No live phone go-live until there is a deployed FreeSWITCH/PBX media layer with verified Event Socket or webhook bridge for channel events, SIP registrations, queue events, voicemail, recordings, IVR, conference, and Verto webphone events." },
     { label: "MAC provisioning", status: deskPhonesWithMac.length || !input.devices.some((row) => row.deviceType === "DESK_PHONE") ? "READY" : "SETUP_REQUIRED", nextAction: deskPhonesWithMac.length ? "Desk phone MAC addresses are captured for provisioning." : "Capture MAC addresses for physical desk phones before zero-touch provisioning or manual SIP setup." },
     { label: "SIP device credentials", status: sipCredentialedDevices.length ? "READY" : "SETUP_REQUIRED", nextAction: sipCredentialedDevices.length ? "At least one desk phone or softphone has SIP/WebRTC identity staged." : "Assign SIP usernames/softphone identities and confirm registration secrets are stored in the vault." },
     { label: "Desk phones and softphones", status: registeredDevices.length ? "READY" : "SETUP_REQUIRED", nextAction: registeredDevices.length ? "At least one provisioned device is registered." : "Assign devices, capture MAC/SIP credentials, and confirm online registration." },
@@ -1608,6 +1608,14 @@ function classifyPhoneHandoff(followUpStatus: string) {
     dueIn: "4 hours",
     title: (intent: string) => `Approve staged phone follow-up: ${intent}`,
     nextAction: () => "Review consent, quiet hours, connector readiness, and PMS context before approving any outbound message.",
+  };
+  if (followUpStatus === "SCHEDULING_HANDOFF") return {
+    ownerRoleKey: "front_desk",
+    taskType: "PHONE_SCHEDULING_HANDOFF",
+    priority: "HIGH",
+    dueIn: "30 minutes",
+    title: (intent: string) => `Phone scheduling handoff: ${intent}`,
+    nextAction: () => "Use PMS schedule, recall, treatment-plan, and online-booking context to book or route the patient request; do not mark booked until a PMS appointment/request exists.",
   };
   return null;
 }

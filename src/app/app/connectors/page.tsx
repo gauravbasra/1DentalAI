@@ -214,7 +214,7 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="space-y-4">
         <OpenAiCredentialCard config={openAiConfig} installation={openAiInstallation} roleKey={role.key as RoleKey} />
-        <PmsCard title="Shared credential vault" eyebrow="All provider secrets live here">
+        <PmsCard title="Shared credential vault" eyebrow="Credential vault intake">
           <LatestCredentialActivity credentials={data.credentialVault} />
           <form action="/app/connectors/credentials" method="post" className="mt-3 grid gap-3">
             <input type="hidden" name="actorRole" value={role.key} />
