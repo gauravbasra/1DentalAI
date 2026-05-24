@@ -1626,16 +1626,23 @@ async function bookOfferedSlot(input: {
     });
   }
 
-  const confirmation = await stageAndSendAppointmentConfirmation({
-    tenantId: input.tenantId,
-    conversationId: input.conversationId,
-    appointmentId: booking.appointmentId,
-    patientId: booking.patientId,
-    phone: contact.visitorPhone,
-    consentAccepted: Boolean(contact.consentAccepted),
-    slot: input.slot,
-    serviceLabel: input.offer.serviceLabel,
-  }).catch((error) => ({
+  const confirmation = await withTimeout(
+    stageAndSendAppointmentConfirmation({
+      tenantId: input.tenantId,
+      conversationId: input.conversationId,
+      appointmentId: booking.appointmentId,
+      patientId: booking.patientId,
+      phone: contact.visitorPhone,
+      consentAccepted: Boolean(contact.consentAccepted),
+      slot: input.slot,
+      serviceLabel: input.offer.serviceLabel,
+    }),
+    6000,
+    {
+      smsDeliveryStatus: "CONFIRMATION_TIMEOUT",
+      reason: "Appointment was booked, but confirmation delivery did not finish before the webchat response timeout.",
+    },
+  ).catch((error) => ({
     smsDeliveryStatus: "CONFIRMATION_QUEUE_ERROR",
     reason: error instanceof Error ? error.message : "Confirmation queue failed after appointment booking.",
   }));
@@ -1704,6 +1711,21 @@ async function stageAndSendAppointmentConfirmation(input: {
     [staged.id],
   );
   return { smsMessageId: staged.id, ...(result.rows[0] ?? { deliveryStatus: "UNKNOWN" }) };
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => resolve(fallback), timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+  });
 }
 
 function schedulingDecision(body: string, actionStatus: string, providerStatus: string, metadata: Record<string, unknown>): WebchatAiDecision {
