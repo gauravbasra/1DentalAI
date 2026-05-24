@@ -6,19 +6,37 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const url = new URL(request.url);
   const payload = await formPayload(request);
-  return twiml(await buildVoiceAiStartTwiML({
-    conversationId: url.searchParams.get("conversationId"),
-    scenario: url.searchParams.get("scenario"),
-    reason: url.searchParams.get("reason"),
-    payload,
-  }));
+  try {
+    return twiml(await buildVoiceAiStartTwiML({
+      conversationId: url.searchParams.get("conversationId"),
+      scenario: cleanScenario(url.searchParams.get("scenario")),
+      reason: url.searchParams.get("reason"),
+      payload,
+    }));
+  } catch (error) {
+    console.error("Voice AI start failed", { error });
+    return twiml(fallbackVoiceTwiML());
+  }
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  return twiml(await buildVoiceAiStartTwiML({
-    conversationId: url.searchParams.get("conversationId"),
-    scenario: url.searchParams.get("scenario"),
-    reason: url.searchParams.get("reason"),
-  }));
+  try {
+    return twiml(await buildVoiceAiStartTwiML({
+      conversationId: url.searchParams.get("conversationId"),
+      scenario: cleanScenario(url.searchParams.get("scenario")),
+      reason: url.searchParams.get("reason"),
+    }));
+  } catch (error) {
+    console.error("Voice AI start failed", { error });
+    return twiml(fallbackVoiceTwiML());
+  }
+}
+
+function cleanScenario(value: string | null) {
+  return value?.split("&")[0] ?? null;
+}
+
+function fallbackVoiceTwiML() {
+  return `<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech dtmf" timeout="5" speechTimeout="auto"><Say voice="alice">Hi, this is one dental AI. I can help with appointments, reminders, and follow up requests. How can I help today?</Say></Gather><Say voice="alice">I did not catch that. A team member will follow up if you still need help. Goodbye.</Say></Response>`;
 }
