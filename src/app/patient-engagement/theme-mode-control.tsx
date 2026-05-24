@@ -77,18 +77,16 @@ export function ThemeModeControl() {
           border-color: #2b313a;
         }
       `}</style>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="inline-flex rounded-xl border border-neutral-200 bg-white p-1 shadow-sm">
         {(["light", "dark", "system"] as ThemeMode[]).map((option) => (
           <button
             key={option}
             type="button"
             onClick={() => choose(option)}
-            className={`rounded-2xl border px-5 py-4 text-left shadow-sm ${mode === option ? "border-blue-600 bg-blue-50 text-blue-800" : "border-neutral-200 bg-white text-neutral-700"}`}
+            className={`h-10 rounded-lg px-3 text-xs font-semibold capitalize ${mode === option ? "bg-blue-600 text-white" : "text-neutral-600 hover:bg-neutral-100"}`}
+            title={option === "system" ? "Follow device appearance" : `${option} console theme`}
           >
-            <span className="block text-base font-semibold capitalize">{option}</span>
-            <span className="mt-1 block text-xs text-neutral-500">
-              {option === "system" ? "Follow device appearance" : `${option} console theme`}
-            </span>
+            {option}
           </button>
         ))}
       </div>
