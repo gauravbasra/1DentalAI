@@ -3,8 +3,11 @@ import { revalidatePath } from "next/cache";
 import { StateBadge } from "@/components/products/product-app-shell";
 import { clean, money } from "@/components/products/patient-engagement-shell";
 import {
+  createPhoneExtensionProvisioning,
+  createPhoneNumberProvisioning,
   createPhoneCallControlAction,
   createPhoneOutboundMessage,
+  createSoftphoneOutboundDial,
   getPhoneOperatingCenter,
   sendApprovedPhoneOutboundMessage,
   updatePhoneConversationStatus,
@@ -75,6 +78,46 @@ async function voiceAiTestCallAction(formData: FormData) {
     toNumber: String(formData.get("toNumber") ?? ""),
     scenario: String(formData.get("scenario") ?? "event_greeting"),
     actorRole: "front_desk",
+  });
+  revalidatePath("/patient-engagement");
+}
+
+async function softphoneDialAction(formData: FormData) {
+  "use server";
+  await createSoftphoneOutboundDial({
+    targetNumber: String(formData.get("targetNumber") ?? ""),
+    operatorNumber: String(formData.get("operatorNumber") ?? "") || undefined,
+    fromNumberId: String(formData.get("fromNumberId") ?? "") || undefined,
+    mode: String(formData.get("mode") ?? "OPERATOR_BRIDGE") === "VOICE_AI" ? "VOICE_AI" : "OPERATOR_BRIDGE",
+    requestedByRole: "front_desk",
+  });
+  revalidatePath("/patient-engagement");
+}
+
+async function provisionPhoneNumberAction(formData: FormData) {
+  "use server";
+  await createPhoneNumberProvisioning({
+    phoneNumber: String(formData.get("phoneNumber") ?? ""),
+    label: String(formData.get("label") ?? ""),
+    numberType: String(formData.get("numberType") ?? "MAIN"),
+    provider: String(formData.get("provider") ?? "TWILIO"),
+    voiceStatus: String(formData.get("voiceStatus") ?? "ACTIVE"),
+    smsStatus: String(formData.get("smsStatus") ?? "ACTIVE"),
+    e911Status: String(formData.get("e911Status") ?? "ACTIVE"),
+    recordingPolicy: String(formData.get("recordingPolicy") ?? "CONSENT_REQUIRED"),
+  });
+  revalidatePath("/patient-engagement");
+}
+
+async function provisionPhoneExtensionAction(formData: FormData) {
+  "use server";
+  await createPhoneExtensionProvisioning({
+    extensionNumber: String(formData.get("extensionNumber") ?? ""),
+    displayName: String(formData.get("displayName") ?? ""),
+    ownerRoleKey: String(formData.get("ownerRoleKey") ?? "front_desk"),
+    extensionType: String(formData.get("extensionType") ?? "USER"),
+    voicemailEnabled: String(formData.get("voicemailEnabled") ?? "true") === "true",
+    directDialNumberId: String(formData.get("directDialNumberId") ?? "") || undefined,
   });
   revalidatePath("/patient-engagement");
 }
@@ -207,6 +250,7 @@ export default async function PatientEngagementHome({
           </div>
         </section>
       </div>
+      <IncomingCallPop activeCalls={activeCalls} conversations={conversations} screenPops={screenPops} />
       <FlowOverlay
         panel={params.panel}
         selectedConversation={selectedConversation}
@@ -269,6 +313,54 @@ function GlobalRail() {
           </Link>
         ))}
       </nav>
+    </aside>
+  );
+}
+
+function IncomingCallPop({
+  activeCalls,
+  conversations,
+  screenPops,
+}: {
+  activeCalls: Record<string, unknown>[];
+  conversations: ConversationRow[];
+  screenPops: ScreenPopRow[];
+}) {
+  const ringing = activeCalls.find((call) => String(call.direction) === "INBOUND" && ["RINGING", "QUEUED"].includes(String(call.callState)));
+  if (!ringing) return null;
+  const conversation = conversations.find((row) => row.id === String(ringing.conversationId));
+  const screenPop = screenPops.find((row) => row.activeCallId === String(ringing.id) || row.conversationId === String(ringing.conversationId));
+  const snapshot = objectValue(screenPop?.snapshotJson);
+  const patient = buildPatientContext(conversation ?? null, screenPop, snapshot);
+  const isMatched = Boolean(screenPop?.patientId || conversation?.patientId);
+  return (
+    <aside className="fixed right-5 top-24 z-[60] w-[420px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl bg-neutral-950 text-white shadow-2xl">
+      <div className="border-b border-white/15 px-5 py-4">
+        <p className="text-sm font-semibold">Incoming call</p>
+        <p className="mt-1 text-xs text-white/70">via {String(ringing.extensionName ?? ringing.toNumber ?? "main line")}</p>
+      </div>
+      <div className="flex items-start gap-4 px-5 py-5">
+        <Avatar label={patient.initials} tone="peach" />
+        <div className="min-w-0 flex-1">
+          <Link href={`/patient-engagement?conversationId=${String(ringing.conversationId ?? "")}&panel=phone`} className="truncate text-xl font-semibold text-blue-300 underline">
+            {patient.name}
+          </Link>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className={`rounded-md px-2 py-1 text-xs font-bold ${isMatched ? "bg-emerald-300 text-emerald-950" : "bg-amber-300 text-amber-950"}`}>{isMatched ? "Matched patient" : "Unmatched caller"}</span>
+            {patient.familyCount ? <span className="rounded-md bg-yellow-300 px-2 py-1 text-xs font-bold text-neutral-950">Household {patient.familyCount}</span> : null}
+          </div>
+          <p className="mt-3 text-sm text-white/80">{String(ringing.fromNumber ?? patient.phone ?? "unknown caller")}</p>
+          <div className="mt-4 flex gap-2">
+            <Link href={`/patient-engagement?conversationId=${String(ringing.conversationId ?? "")}&panel=phone`} className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-neutral-950">Open pop</Link>
+            <form action={callControlAction}>
+              <input type="hidden" name="activeCallId" value={String(ringing.id ?? "")} />
+              <input type="hidden" name="conversationId" value={String(ringing.conversationId ?? "")} />
+              <input type="hidden" name="actionType" value="AI_VOICE_TAKEOVER" />
+              <button className="rounded-xl border border-white/20 px-3 py-2 text-xs font-semibold">Send to AI</button>
+            </form>
+          </div>
+        </div>
+      </div>
     </aside>
   );
 }
@@ -385,12 +477,7 @@ function ThreadToolbar({ conversation }: { conversation: ConversationRow | null;
         <span># {conversation?.practiceNumber || "Main Line"}</span>
       </div>
       <div className="flex gap-2">
-        <form action={callControlAction}>
-          <input type="hidden" name="conversationId" value={conversation?.id ?? ""} />
-          <input type="hidden" name="actionType" value="OUTBOUND_DIAL" />
-          <input type="hidden" name="targetNumber" value={conversation?.callerNumber ?? ""} />
-          <button className="grid h-9 w-9 place-items-center rounded-xl border border-neutral-200">☎</button>
-        </form>
+        <Link href={panelHref("phone", conversation?.id)} className="grid h-9 w-9 place-items-center rounded-xl border border-neutral-200">☎</Link>
         <Link href={panelHref("call", conversation?.id)} className="grid h-9 w-9 place-items-center rounded-xl border border-neutral-200" title="Call insights">▤</Link>
         <Link href={panelHref("forms", conversation?.id)} className="grid h-9 w-9 place-items-center rounded-xl border border-neutral-200" title="Forms">⋯</Link>
       </div>
@@ -647,20 +734,56 @@ function PhonePanel({
   tasks: TaskRow[];
 }) {
   const selectedActiveCall = activeCalls.find((call) => String(call.conversationId) === conversation?.id) ?? activeCalls[0];
+  const activeNumberOptions = numbers.filter((number) => String(number.status) === "ACTIVE" && String(number.voiceStatus) === "ACTIVE");
   return (
     <div className="space-y-5">
+      <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+        <div className="border-b border-neutral-100 px-6 py-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-3xl font-semibold">Softphone dialer</h3>
+              <p className="mt-2 text-sm text-neutral-500">Outbound calls start from an active practice DID, write a conversation, create an active call row, and send the real request to Twilio. Operator bridge rings your staff phone first; Voice AI calls the patient directly.</p>
+            </div>
+            <SmallTag tone="green">Live Twilio path</SmallTag>
+          </div>
+        </div>
+        <form action={softphoneDialAction} className="grid gap-4 p-6 md:grid-cols-2">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">Call from</p>
+            <select name="fromNumberId" className="mt-2 h-12 w-full rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+              <option value="">Default active Twilio number</option>
+              {activeNumberOptions.map((number) => (
+                <option key={String(number.id)} value={String(number.id)}>{String(number.label)} · {String(number.phoneNumber)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">Target patient number</p>
+            <input name="targetNumber" required defaultValue={conversation?.callerNumber ?? ""} className="mt-2 h-12 w-full rounded-xl border border-neutral-200 px-4 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="+17206954333" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">Operator callback number</p>
+            <input name="operatorNumber" defaultValue="" className="mt-2 h-12 w-full rounded-xl border border-neutral-200 px-4 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Your desk or mobile number" />
+            <p className="mt-2 text-xs leading-5 text-neutral-500">Required for operator bridge. This is how Twilio connects the browser dial request to a human until Twilio Voice SDK browser identity is configured.</p>
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">Mode</p>
+            <select name="mode" className="mt-2 h-12 w-full rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+              <option value="OPERATOR_BRIDGE">Operator bridge</option>
+              <option value="VOICE_AI">Voice AI direct</option>
+            </select>
+          </div>
+          <div className="md:col-span-2 flex justify-end">
+            <button className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">Dial now</button>
+          </div>
+        </form>
+      </section>
       <section className="rounded-2xl border border-neutral-200 bg-white p-6">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h3 className="text-3xl font-semibold">Soft phone</h3>
-            <p className="mt-2 text-sm text-neutral-500">Live call controls are written to PhoneCallControlAction and executed through Twilio only when the call leg and connector are ready.</p>
+            <h3 className="text-2xl font-semibold">Live call controls</h3>
+            <p className="mt-2 text-sm text-neutral-500">Controls execute only against a live Twilio call leg. Incoming calls populate this panel from webhooks and show matched patient context.</p>
           </div>
-          <form action={callControlAction}>
-            <input type="hidden" name="conversationId" value={conversation?.id ?? ""} />
-            <input type="hidden" name="actionType" value="OUTBOUND_DIAL" />
-            <input type="hidden" name="targetNumber" value={conversation?.callerNumber ?? ""} />
-            <button className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">Call patient</button>
-          </form>
         </div>
         <div className="mt-6 grid gap-3 sm:grid-cols-4">
           {[
@@ -734,6 +857,44 @@ function PhonePanel({
         {devices.slice(0, 4).map((device) => <RecordLine key={String(device.id)} title={`${String(device.label)} · ${String(device.deviceType)}`} meta={`${clean(device.provisioningStatus)} · ${clean(device.registrationStatus)} · ${String(device.deskLocation ?? "no desk")}`} />)}
         {providers.slice(0, 4).map((provider) => <RecordLine key={String(provider.id)} title={`${String(provider.name)} · ${String(provider.providerType)}`} meta={`credentials ${clean(provider.credentialStatus)} · webhook ${clean(provider.webhookStatus)} · ${String(provider.nextAction ?? "")}`} />)}
       </ActionCard>
+      <section className="rounded-2xl border border-neutral-200 bg-white p-6">
+        <h3 className="text-2xl font-semibold">Provision numbers and extensions</h3>
+        <p className="mt-2 text-sm text-neutral-500">Add practice DIDs, campaign DIDs, billing lines, and internal extensions. These records drive routing, caller ID, SMS, E911 readiness, and screen pop ownership.</p>
+        <form action={provisionPhoneNumberAction} className="mt-5 grid gap-3 md:grid-cols-3">
+          <input name="label" required className="h-12 rounded-xl border border-neutral-200 px-4 text-sm" placeholder="Main line / Marketing DID" />
+          <input name="phoneNumber" required className="h-12 rounded-xl border border-neutral-200 px-4 text-sm" placeholder="+13035234562" />
+          <select name="numberType" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold">
+            <option value="MAIN">Main</option>
+            <option value="BILLING">Billing</option>
+            <option value="MARKETING">Marketing DID</option>
+            <option value="HYGIENE">Hygiene</option>
+          </select>
+          <select name="voiceStatus" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold"><option value="ACTIVE">Voice active</option><option value="NOT_CONFIGURED">Voice not configured</option></select>
+          <select name="smsStatus" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold"><option value="ACTIVE">SMS active</option><option value="NOT_CONFIGURED">SMS not configured</option></select>
+          <select name="e911Status" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold"><option value="ACTIVE">E911 active</option><option value="VALIDATED">E911 validated</option><option value="NOT_CONFIGURED">E911 missing</option></select>
+          <input type="hidden" name="provider" value="TWILIO" />
+          <input type="hidden" name="recordingPolicy" value="CONSENT_REQUIRED" />
+          <button className="md:col-span-3 rounded-xl bg-neutral-950 px-5 py-3 text-sm font-semibold text-white">Save number</button>
+        </form>
+        <form action={provisionPhoneExtensionAction} className="mt-5 grid gap-3 md:grid-cols-4">
+          <input name="extensionNumber" required className="h-12 rounded-xl border border-neutral-200 px-4 text-sm" placeholder="101" />
+          <input name="displayName" required className="h-12 rounded-xl border border-neutral-200 px-4 text-sm" placeholder="Front desk" />
+          <select name="ownerRoleKey" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold">
+            <option value="front_desk">Front desk</option>
+            <option value="billing">Billing</option>
+            <option value="office_manager">Office manager</option>
+            <option value="provider">Provider</option>
+          </select>
+          <select name="extensionType" className="h-12 rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold">
+            <option value="USER">User</option>
+            <option value="QUEUE">Queue</option>
+            <option value="ROOM">Room</option>
+            <option value="AI_AGENT">AI agent</option>
+          </select>
+          <input type="hidden" name="voicemailEnabled" value="true" />
+          <button className="md:col-span-4 rounded-xl border border-neutral-200 bg-white px-5 py-3 text-sm font-semibold">Save extension</button>
+        </form>
+      </section>
       <ActionCard title="Voicemail and phone tasks" empty="No voicemail or phone work items.">
         {voicemails.slice(0, 5).map((vm) => <RecordLine key={String(vm.id)} title={`${String(vm.callerName ?? vm.callerNumber ?? "Voicemail")} · ${String(vm.extensionName ?? "queue")}`} meta={`${clean(vm.status)} · ${String(vm.transcription ?? "no transcript yet")}`} />)}
         {tasks.slice(0, 5).map((task) => <RecordLine key={task.id} title={task.nextAction || task.taskType} meta={`${clean(task.priority)} · ${clean(task.status)} · ${clean(task.ownerRoleKey)}`} />)}
@@ -1560,6 +1721,7 @@ type TaskRow = {
 type ScreenPopRow = {
   id: string;
   conversationId: string;
+  activeCallId?: string | null;
   patientId: string | null;
   callerNumber: string | null;
   matchStatus: string;

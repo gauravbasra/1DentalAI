@@ -2119,6 +2119,237 @@ export async function createPhoneCallControlAction(input: {
   return { id, providerStatus, blockedReason, resultSummary };
 }
 
+export async function createSoftphoneOutboundDial(input: {
+  tenantId?: string;
+  targetNumber: string;
+  operatorNumber?: string;
+  fromNumber?: string;
+  fromNumberId?: string;
+  requestedByRole?: string;
+  mode?: "OPERATOR_BRIDGE" | "VOICE_AI";
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const targetNumber = normalizePhoneNumber(input.targetNumber);
+  const operatorNumber = input.operatorNumber ? normalizePhoneNumber(input.operatorNumber) : null;
+  const fromNumber = input.fromNumber ? normalizePhoneNumber(input.fromNumber) : await getActiveVoiceFromNumber(tenantId, input.fromNumberId);
+  const mode = input.mode ?? "OPERATOR_BRIDGE";
+  const id = newId("pctrl");
+  const conversationId = newId("phone");
+  const activeCallId = newId("pcall");
+  const patientMatch = await findPatientByPhone(tenantId, targetNumber);
+  const credentials = await getTwilioCredentials(tenantId);
+  const missing = [
+    !credentials.accountSid || !credentials.authToken ? "Twilio Account SID/Auth Token" : null,
+    !fromNumber ? "active outbound voice number" : null,
+    !targetNumber ? "target phone number" : null,
+    mode === "OPERATOR_BRIDGE" && !operatorNumber ? "operator callback number" : null,
+  ].filter(Boolean) as string[];
+
+  await query(
+    `insert into "PhoneConversation"
+       ("id", "tenantId", "patientId", "direction", "channel", "status", "callerNumber", "practiceNumber", "callerName", "aiIntent", "aiSentiment", "transcriptSummary", "followUpStatus", "outcome", "updatedAt")
+     values ($1, $2, $3, 'OUTBOUND', 'VOICE', 'OPEN', $4, $5, $6, $7, 'NEEDS_REVIEW', $8, 'NEEDS_REVIEW', 'SOFTPHONE_DIAL_CREATED', current_timestamp)`,
+    [
+      conversationId,
+      tenantId,
+      patientMatch?.id ?? null,
+      targetNumber || null,
+      fromNumber || null,
+      patientMatch ? `${patientMatch.firstName ?? ""} ${patientMatch.lastName ?? ""}`.trim() : targetNumber,
+      mode === "VOICE_AI" ? "VOICE_AI_OUTBOUND" : "SOFTPHONE_OUTBOUND",
+      mode === "VOICE_AI"
+        ? `Voice AI outbound call requested to ${targetNumber}.`
+        : `Softphone bridge requested. Twilio calls the operator first, then bridges to ${targetNumber} with recording, status callbacks, and transcript hooks.`,
+    ],
+  );
+
+  await query(
+    `insert into "PhoneActiveCall"
+       ("id", "tenantId", "conversationId", "phoneNumberId", "fromNumber", "toNumber", "direction", "callState", "callControlMode", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'OUTBOUND', $7, $8, current_timestamp)`,
+    [activeCallId, tenantId, conversationId, input.fromNumberId || null, fromNumber || "unknown", targetNumber || "unknown", missing.length ? "BLOCKED" : "QUEUED", mode === "VOICE_AI" ? "TWILIO_VOICE_AI" : "TWILIO_OPERATOR_BRIDGE"],
+  );
+
+  let providerStatus = missing.length ? "BLOCKED_CONNECTOR_REQUIRED" : "READY_FOR_PROVIDER";
+  let blockedReason = missing.length ? `Softphone dial is blocked until ${missing.join(", ")} are configured.` : null;
+  let resultSummary = missing.length ? "Outbound dial recorded but not sent to Twilio." : "Outbound dial ready for Twilio.";
+  let providerRequest: Record<string, unknown> | null = null;
+  let providerResponse: Record<string, unknown> | null = null;
+  let providerCallId: string | null = null;
+  let executedAt: Date | null = null;
+
+  if (!missing.length && fromNumber) {
+    const origin = process.env.ONE_DENTAL_PUBLIC_APP_URL || "https://app.1dentalai.com";
+    const statusCallback = `${origin}/api/twilio/voice/status`;
+    const recordingUrl = `${origin}/api/twilio/voice/recording`;
+    const transcriptionUrl = `${origin}/api/twilio/voice/transcription`;
+    const aiUrl = `${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(conversationId)}&scenario=event_greeting&reason=softphone_voice_ai`;
+    const twiml = mode === "VOICE_AI"
+      ? `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${twilioXmlEscape(aiUrl)}</Redirect></Response>`
+      : `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">1DentalAI is connecting your outbound call now.</Say><Dial callerId="${twilioXmlEscape(fromNumber)}" record="record-from-answer-dual" recordingStatusCallback="${twilioXmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST"><Number statusCallback="${twilioXmlEscape(statusCallback)}" statusCallbackMethod="POST">${twilioXmlEscape(targetNumber)}</Number></Dial><Say voice="alice">The call has ended.</Say><Record maxLength="120" playBeep="false" transcribe="true" transcribeCallback="${twilioXmlEscape(transcriptionUrl)}" /></Response>`;
+    providerRequest = {
+      provider: "TWILIO",
+      mode,
+      operation: "Calls.create",
+      from: fromNumber,
+      to: mode === "VOICE_AI" ? targetNumber : operatorNumber,
+      finalTarget: targetNumber,
+    };
+    const result = await createTwilioCall({
+      tenantId,
+      from: fromNumber,
+      to: mode === "VOICE_AI" ? targetNumber : operatorNumber!,
+      statusCallback,
+      twiml,
+    });
+    providerStatus = result.providerStatus;
+    blockedReason = result.ok ? null : result.error ?? "Twilio provider execution failed.";
+    resultSummary = result.ok
+      ? `Twilio accepted ${mode === "VOICE_AI" ? "Voice AI outbound call" : "operator bridge softphone call"} with status ${result.status}.`
+      : `Twilio rejected softphone dial: ${result.error}`;
+    providerResponse = result.data ?? { sid: result.sid, status: result.status, error: result.error };
+    providerCallId = result.sid ?? null;
+    executedAt = result.ok ? new Date() : null;
+    await query(
+      `update "PhoneActiveCall"
+       set "providerCallId" = $3,
+         "callState" = $4,
+         "updatedAt" = current_timestamp
+       where "tenantId" = $1 and "id" = $2`,
+      [tenantId, activeCallId, providerCallId, result.ok ? "QUEUED" : "PROVIDER_ERROR"],
+    );
+  }
+
+  await query(
+    `insert into "PhoneCallControlAction"
+       ("id", "tenantId", "activeCallId", "conversationId", "actionType", "requestedByRole", "targetNumber", "providerStatus", "blockedReason", "resultSummary", "providerRequest", "providerResponse", "executedAt", "updatedAt")
+     values ($1, $2, $3, $4, 'OUTBOUND_DIAL', $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, current_timestamp)`,
+    [id, tenantId, activeCallId, conversationId, input.requestedByRole || "front_desk", targetNumber || null, providerStatus, blockedReason, resultSummary, providerRequest ? JSON.stringify(providerRequest) : null, providerResponse ? JSON.stringify(providerResponse) : null, executedAt],
+  );
+  await addAudit(tenantId, input.requestedByRole || "front_desk", "PHONE_SOFTPHONE_DIAL", "PhoneConversation", conversationId, providerStatus === "PROVIDER_ACCEPTED" ? "ALLOWED" : "BLOCKED", {
+    activeCallId,
+    targetNumber,
+    operatorNumber,
+    fromNumber,
+    mode,
+    providerStatus,
+    blockedReason,
+    providerRequest,
+    providerResponse,
+  });
+  return { conversationId, activeCallId, providerStatus, blockedReason, resultSummary, providerCallId };
+}
+
+export async function createPhoneNumberProvisioning(input: {
+  tenantId?: string;
+  phoneNumber: string;
+  label: string;
+  numberType?: string;
+  provider?: string;
+  voiceStatus?: string;
+  smsStatus?: string;
+  e911Status?: string;
+  recordingPolicy?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("pnum");
+  const result = await query<{ id: string }>(
+    `insert into "PhoneNumber"
+       ("id", "tenantId", "phoneNumber", "label", "numberType", "provider", "portStatus", "e911Status", "smsStatus", "voiceStatus", "recordingPolicy", "status", "lastVerifiedAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'PROVIDER_OWNED', $7, $8, $9, $10, $11, case when $11 = 'ACTIVE' then current_timestamp else null end, current_timestamp)
+     on conflict ("tenantId", "phoneNumber") do update
+       set "label" = excluded."label",
+         "numberType" = excluded."numberType",
+         "provider" = excluded."provider",
+         "e911Status" = excluded."e911Status",
+         "smsStatus" = excluded."smsStatus",
+         "voiceStatus" = excluded."voiceStatus",
+         "recordingPolicy" = excluded."recordingPolicy",
+         "status" = excluded."status",
+         "updatedAt" = current_timestamp
+     returning "id"`,
+    [
+      id,
+      tenantId,
+      normalizePhoneNumber(input.phoneNumber),
+      input.label.trim() || "Practice number",
+      input.numberType || "MAIN",
+      input.provider || "TWILIO",
+      input.e911Status || "ACTIVE",
+      input.smsStatus || "ACTIVE",
+      input.voiceStatus || "ACTIVE",
+      input.recordingPolicy || "CONSENT_REQUIRED",
+      input.voiceStatus === "ACTIVE" || input.smsStatus === "ACTIVE" ? "ACTIVE" : "SETUP_REQUIRED",
+    ],
+  );
+  const phoneNumberId = result.rows[0]?.id ?? id;
+  await addAudit(tenantId, "practice_manager", "PHONE_NUMBER_PROVISIONED", "PhoneNumber", phoneNumberId, "ALLOWED", { phoneNumber: normalizePhoneNumber(input.phoneNumber), label: input.label, provider: input.provider || "TWILIO" });
+  return { id: phoneNumberId };
+}
+
+export async function createPhoneExtensionProvisioning(input: {
+  tenantId?: string;
+  extensionNumber: string;
+  displayName: string;
+  ownerRoleKey?: string;
+  extensionType?: string;
+  voicemailEnabled?: boolean;
+  directDialNumberId?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const id = newId("pext");
+  const result = await query<{ id: string }>(
+    `insert into "PhoneExtension"
+       ("id", "tenantId", "extensionNumber", "displayName", "ownerRoleKey", "extensionType", "voicemailEnabled", "directDialNumberId", "status", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''), 'ACTIVE', current_timestamp)
+     on conflict ("tenantId", "extensionNumber") do update
+       set "displayName" = excluded."displayName",
+         "ownerRoleKey" = excluded."ownerRoleKey",
+         "extensionType" = excluded."extensionType",
+         "voicemailEnabled" = excluded."voicemailEnabled",
+         "directDialNumberId" = excluded."directDialNumberId",
+         "status" = 'ACTIVE',
+         "updatedAt" = current_timestamp
+     returning "id"`,
+    [id, tenantId, input.extensionNumber.trim(), input.displayName.trim(), input.ownerRoleKey || "front_desk", input.extensionType || "USER", input.voicemailEnabled ?? true, input.directDialNumberId || ""],
+  );
+  const extensionId = result.rows[0]?.id ?? id;
+  await addAudit(tenantId, "practice_manager", "PHONE_EXTENSION_PROVISIONED", "PhoneExtension", extensionId, "ALLOWED", { extensionNumber: input.extensionNumber, displayName: input.displayName });
+  return { id: extensionId };
+}
+
+async function getActiveVoiceFromNumber(tenantId: string, id?: string) {
+  if (id) {
+    const byId = await query<{ phoneNumber: string }>(
+      `select "phoneNumber" from "PhoneNumber" where "tenantId" = $1 and "id" = $2 and "voiceStatus" = 'ACTIVE' and "status" = 'ACTIVE' limit 1`,
+      [tenantId, id],
+    );
+    if (byId.rows[0]?.phoneNumber) return normalizePhoneNumber(byId.rows[0].phoneNumber);
+  }
+  if (process.env.TWILIO_FROM_NUMBER?.trim()) return normalizePhoneNumber(process.env.TWILIO_FROM_NUMBER);
+  const result = await query<{ phoneNumber: string }>(
+    `select "phoneNumber"
+     from "PhoneNumber"
+     where "tenantId" = $1 and "voiceStatus" = 'ACTIVE' and "status" = 'ACTIVE'
+     order by case when "numberType" = 'MAIN' then 0 else 1 end, "createdAt" desc
+     limit 1`,
+    [tenantId],
+  );
+  return result.rows[0]?.phoneNumber ? normalizePhoneNumber(result.rows[0].phoneNumber) : null;
+}
+
+async function findPatientByPhone(tenantId: string, phone: string) {
+  const result = await query<{ id: string; firstName: string | null; lastName: string | null }>(
+    `select "id", "firstName", "lastName"
+     from "PmsPatient"
+     where "tenantId" = $1
+       and regexp_replace(coalesce("phone", ''), '[^0-9]', '', 'g') = regexp_replace($2, '[^0-9]', '', 'g')
+     limit 1`,
+    [tenantId, phone],
+  );
+  return result.rows[0] ?? null;
+}
+
 function missingCallControlRequirements(actionType: string, input: { activeCallId?: string; providerCallId?: string | null; providerConferenceName?: string | null; targetExtensionId?: string; targetNumber?: string; targetParkSlot?: string }) {
   const needsActiveCall = new Set(["ANSWER", "HOLD", "RESUME", "WARM_TRANSFER", "BLIND_TRANSFER", "CALL_PARK", "SEND_TO_VOICEMAIL", "END_CALL", "AI_VOICE_TAKEOVER"]);
   const missing = [
