@@ -10,6 +10,7 @@ import {
   updatePhoneConversationStatus,
   updatePhoneOutboundMessageApproval,
 } from "@/lib/operating-system-repository";
+import { createVoiceAiTestCall } from "@/lib/voice-ai-repository";
 import { ThemeModeControl } from "./theme-mode-control";
 
 export const dynamic = "force-dynamic";
@@ -65,6 +66,16 @@ async function approveOutboundMessageAction(formData: FormData) {
 async function sendOutboundMessageAction(formData: FormData) {
   "use server";
   await sendApprovedPhoneOutboundMessage(String(formData.get("messageId") ?? ""), "front_desk");
+  revalidatePath("/patient-engagement");
+}
+
+async function voiceAiTestCallAction(formData: FormData) {
+  "use server";
+  await createVoiceAiTestCall({
+    toNumber: String(formData.get("toNumber") ?? ""),
+    scenario: String(formData.get("scenario") ?? "event_greeting"),
+    actorRole: "front_desk",
+  });
   revalidatePath("/patient-engagement");
 }
 
@@ -670,6 +681,27 @@ function PhonePanel({
             </form>
           ))}
         </div>
+      </section>
+      <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6">
+        <div className="flex items-start justify-between gap-5">
+          <div>
+            <h3 className="text-2xl font-semibold">Voice AI live test</h3>
+            <p className="mt-2 text-sm leading-6 text-emerald-950/70">Places a real Twilio outbound call and answers with ElevenLabs voice. The call writes to PhoneConversation, PhoneActiveCall, transcript events, AI assist events, tasks, and audit logs.</p>
+          </div>
+          <SmallTag tone="green">Twilio + ElevenLabs</SmallTag>
+        </div>
+        <form action={voiceAiTestCallAction} className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px_auto]">
+          <input name="toNumber" required defaultValue={conversation?.callerNumber ?? ""} className="h-12 rounded-xl border border-emerald-200 bg-white px-4 text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100" placeholder="+13035550199" />
+          <select name="scenario" className="h-12 rounded-xl border border-emerald-200 bg-white px-4 text-sm font-semibold outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100">
+            <option value="event_greeting">Event greeting</option>
+            <option value="appointment_reminder">Appointment reminder</option>
+            <option value="recall">Recall</option>
+            <option value="reactivation">Reactivation</option>
+            <option value="inbound_takeover">Inbound takeover</option>
+          </select>
+          <button className="h-12 rounded-xl bg-emerald-700 px-5 text-sm font-semibold text-white">Call now</button>
+        </form>
+        <p className="mt-3 text-xs leading-5 text-emerald-900/70">If Twilio rejects the configured From number, the action is recorded as a provider error instead of fake success.</p>
       </section>
       <section className="grid gap-4 sm:grid-cols-3">
         <MetricTile label="Open calls" value={metrics.openCalls ?? "0"} />

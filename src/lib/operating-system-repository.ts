@@ -3,6 +3,7 @@ import { defaultTenantId } from "@/lib/pms-repository";
 import { recordPayerGeneratedArtifact } from "@/lib/payer-network-repository";
 import { buildEobPdfArtifactPayload, buildPriorAuthPdfArtifactPayload } from "@/lib/rcm-payer-artifacts";
 import { createTwilioCall, findTwilioConferenceSid, getTwilioCredentials, updateTwilioCall, updateTwilioConferenceParticipant, twilioXmlEscape } from "@/lib/twilio-provider";
+import { redirectLiveCallToVoiceAi } from "@/lib/voice-ai-repository";
 
 async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string | null, outcome = "ALLOWED", metadata?: unknown) {
   await query(
@@ -2189,8 +2190,13 @@ async function executeTwilioCallControl(input: {
       twiml: `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="${input.actionType === "BLIND_TRANSFER" ? "true" : "false"}">${twilioXmlEscape(input.providerConferenceName)}</Conference></Dial></Response>`,
     });
   } else if (input.actionType === "AI_VOICE_TAKEOVER") {
-    providerRequest.operation = "Conference AI takeover requested";
-    return blockedTwilioExecution("AI voice takeover needs the realtime voice agent media bridge before it can join a live call.", providerRequest);
+    providerRequest.operation = "Calls.update(Twiml=Voice AI Redirect)";
+    result = await redirectLiveCallToVoiceAi({
+      tenantId: input.tenantId,
+      callSid: input.activeCallProviderId,
+      conversationId: input.conversationId,
+      scenario: "inbound_takeover",
+    });
   } else {
     return blockedTwilioExecution(`${input.actionType} is not mapped to a Twilio provider operation yet.`, providerRequest);
   }

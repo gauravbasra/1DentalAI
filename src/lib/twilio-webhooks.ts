@@ -1,7 +1,8 @@
 import { newId, query } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
 import { ingestSmsIntoAiConversation } from "@/lib/webchat/repository";
-import { createTwilioCall, getTwilioCredentials, getTwilioSecret } from "@/lib/twilio-provider";
+import { getTwilioCredentials, getTwilioSecret } from "@/lib/twilio-provider";
+import { getVoiceAiReceptionPolicy } from "@/lib/voice-ai-repository";
 import { createHmac, timingSafeEqual } from "crypto";
 
 type TwilioPayload = Record<string, string>;
@@ -30,31 +31,24 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
   const transcriptionUrl = `${origin}/api/twilio/voice/transcription`;
   const statusUrl = `${origin}/api/twilio/voice/status`;
   const route = await getInboundVoiceRoute(defaultTenantId, input.payload.To);
+  const aiPolicy = await getVoiceAiReceptionPolicy(defaultTenantId);
+  const aiStartUrl = `${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(input.conversationId)}&scenario=inbound_takeover&reason=no_answer`;
   const transcription = `<Start><Transcription name="onedentalai-live-${xmlEscape(input.conversationId)}" statusCallbackUrl="${xmlEscape(transcriptionUrl)}" track="both_tracks" languageCode="en-US" /></Start>`;
   if (route?.destinationType === "PHONE_NUMBER" && route.destination) {
-    const conferenceName = conferenceNameForConversation(input.conversationId);
-    const agentBridge = await createTwilioCall({
-      from: input.payload.To || route.callerId || "",
-      to: route.destination,
-      statusCallback: statusUrl,
-      twiml: `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="true">${xmlEscape(conferenceName)}</Conference></Dial></Response>`,
-    });
     await query(
       `update "PhoneActiveCall"
-       set "providerConferenceName" = $3,
-         "bridgeCallSid" = coalesce($4, "bridgeCallSid"),
-         "callControlMode" = 'TWILIO_CONFERENCE',
+       set "callControlMode" = 'TWILIO_DIRECT_DIAL',
          "updatedAt" = current_timestamp
        where "tenantId" = $1 and "conversationId" = $2`,
-      [defaultTenantId, input.conversationId, conferenceName, agentBridge.sid || null],
+      [defaultTenantId, input.conversationId],
     );
     return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   ${transcription}
-  <Dial action="${xmlEscape(statusUrl)}" method="POST" record="record-from-answer-dual" recordingStatusCallback="${xmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST">
-    <Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="false" waitUrl="http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical">${xmlEscape(conferenceName)}</Conference>
+  <Dial action="${xmlEscape(aiStartUrl)}" method="POST" timeout="${aiPolicy.ringThreshold * 5}" record="record-from-answer-dual" recordingStatusCallback="${xmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST">
+    <Number statusCallback="${xmlEscape(statusUrl)}" statusCallbackMethod="POST">${xmlEscape(route.destination)}</Number>
   </Dial>
-  <Record maxLength="180" playBeep="true" recordingStatusCallback="${xmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST" transcribe="true" transcribeCallback="${xmlEscape(transcriptionUrl)}" />
+  <Redirect method="POST">${xmlEscape(aiStartUrl)}</Redirect>
 </Response>`;
   }
   if (route?.destinationType === "VOICEMAIL") {
