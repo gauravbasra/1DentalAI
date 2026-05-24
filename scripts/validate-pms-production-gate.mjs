@@ -392,6 +392,13 @@ for (const token of ["currentSession", "401", "403", "pmsApiRoles", "roleKey"]) 
   }
 }
 
+const databaseHealthRoute = fs.readFileSync(path.join(root, "src/app/api/database/health/route.ts"), "utf8");
+for (const token of ["PmsBenefitFact", "PmsBenefitRule", "PmsTreatmentCoverageAnalysis", "PmsPayerCasePacket"]) {
+  if (!databaseHealthRoute.includes(token)) {
+    failures.push(`src/app/api/database/health/route.ts: production database health must require Phase 3 benefit case table ${token}.`);
+  }
+}
+
 const phase3 = fs.readFileSync(path.join(root, "scripts/validate-phase3-pms.mjs"), "utf8");
 if (!phase3.includes("validate-pms-production-gate")) {
   failures.push("scripts/validate-phase3-pms.mjs must run the production gate so token-only PMS validation cannot pass alone.");
