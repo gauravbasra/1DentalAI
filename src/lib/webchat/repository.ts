@@ -78,8 +78,14 @@ type SchedulingIntake = {
   patientStatus: string | null;
   urgencyStatus: string | null;
   insuranceStatus: string | null;
+  insurancePlanName: string | null;
   preferredWindow: string | null;
   missing: Array<"procedure" | "patientStatus" | "urgencyStatus" | "insuranceStatus" | "preferredWindow">;
+};
+
+type SchedulingAskContext = {
+  askFor: SchedulingIntake["missing"][number] | null;
+  assistantBody: string;
 };
 
 export type WebchatTeamMember = {
@@ -1759,19 +1765,26 @@ function inferSchedulingProcedure(body: string, serviceLine?: string) {
   const negatedUrgency = /(no pain|no swelling|no bleeding|not urgent|routine|without pain|without swelling)/.test(text);
   if (!negatedUrgency && /(emergency|pain|swelling|broken|trauma|toothache|bleeding)/.test(text)) return { slug: "emergency-exam", label: "Emergency exam" };
   if (/(cleaning|hygiene|recall|recare|prophy)/.test(text)) return { slug: "hygiene-recare", label: "Hygiene cleaning" };
-  if (/(implant|aligner|invisalign|whitening|cosmetic|consult|crown|filling|root canal|exam|new patient|checkup)/.test(text)) return { slug: "new-patient-exam", label: text.includes("implant") ? "Implant consultation" : "New patient exam" };
+  if (/(implant|aligner|invisalign|whitening|veneer|veneers|cosmetic|consult|crown|filling|root canal|exam|new patient|checkup)/.test(text)) {
+    if (text.includes("implant")) return { slug: "new-patient-exam", label: "Implant consultation" };
+    if (/(veneer|veneers|whitening|cosmetic)/.test(text)) return { slug: "new-patient-exam", label: "Cosmetic consultation" };
+    return { slug: "new-patient-exam", label: "New patient exam" };
+  }
   return null;
 }
 
 async function buildSchedulingIntake(tenantId: string, conversationId: string, body: string, leadCapture: LeadCapture): Promise<SchedulingIntake> {
-  const result = await query<{ body: string; senderType: string }>(
-    `select "body", "senderType"
-     from "PatientWebChatMessage"
-     where "tenantId" = $1 and "conversationId" = $2
-     order by "createdAt" desc
-     limit 20`,
-    [tenantId, conversationId],
-  );
+  const [result, askContext] = await Promise.all([
+    query<{ body: string; senderType: string }>(
+      `select "body", "senderType"
+       from "PatientWebChatMessage"
+       where "tenantId" = $1 and "conversationId" = $2
+       order by "createdAt" desc
+       limit 20`,
+      [tenantId, conversationId],
+    ),
+    getLatestSchedulingAskContext(tenantId, conversationId),
+  ]);
   const visitorTranscript = result.rows
     .filter((row) => row.senderType === "VISITOR")
     .map((row) => row.body)
@@ -1781,15 +1794,35 @@ async function buildSchedulingIntake(tenantId: string, conversationId: string, b
   const procedure = inferSchedulingProcedure(text, leadCapture.serviceLine);
   const patientStatus = inferPatientStatus(text, leadCapture.patientStatus);
   const urgencyStatus = inferUrgencyStatus(text, leadCapture.urgency, procedure?.slug);
-  const insuranceStatus = inferInsuranceStatus(text);
+  const insurance = inferInsuranceAnswer(text, body, askContext);
   const preferredWindow = inferPreferredWindow(text, leadCapture.preferredTime);
   const missing: SchedulingIntake["missing"] = [];
   if (!procedure) missing.push("procedure");
   if (!patientStatus) missing.push("patientStatus");
   if (!urgencyStatus) missing.push("urgencyStatus");
-  if (!insuranceStatus) missing.push("insuranceStatus");
+  if (!insurance.status) missing.push("insuranceStatus");
   if (!preferredWindow) missing.push("preferredWindow");
-  return { procedure, patientStatus, urgencyStatus, insuranceStatus, preferredWindow, missing };
+  return { procedure, patientStatus, urgencyStatus, insuranceStatus: insurance.status, insurancePlanName: insurance.planName, preferredWindow, missing };
+}
+
+async function getLatestSchedulingAskContext(tenantId: string, conversationId: string): Promise<SchedulingAskContext> {
+  const result = await query<{ body: string; metadata: unknown }>(
+    `select "body", "metadata"
+     from "PatientWebChatMessage"
+     where "tenantId" = $1
+       and "conversationId" = $2
+       and "senderType" = 'ASSISTANT'
+       and "metadata"->'scheduling'->>'kind' = 'SCHEDULING_INTAKE'
+     order by "createdAt" desc
+     limit 1`,
+    [tenantId, conversationId],
+  );
+  const row = result.rows[0];
+  const scheduling = (row?.metadata as { scheduling?: { askFor?: unknown } } | undefined)?.scheduling;
+  const askFor = typeof scheduling?.askFor === "string" && ["procedure", "patientStatus", "urgencyStatus", "insuranceStatus", "preferredWindow"].includes(scheduling.askFor)
+    ? scheduling.askFor as SchedulingAskContext["askFor"]
+    : null;
+  return { askFor, assistantBody: row?.body ?? "" };
 }
 
 function schedulingIntakeQuestion(intake: SchedulingIntake) {
@@ -1846,10 +1879,31 @@ function inferUrgencyStatus(text: string, urgency?: string, procedureSlug?: stri
   return null;
 }
 
-function inferInsuranceStatus(text: string) {
-  if (/(self pay|self-pay|cash|no insurance|without insurance|membership|plan member)/.test(text)) return "SELF_PAY_OR_MEMBERSHIP";
-  if (/(insurance|ppo|hmo|medicaid|medicare|delta|aetna|cigna|metlife|guardian|united|uhc|humana|principal|anthem|blue cross|bcbs)/.test(text)) return "INSURANCE";
-  return null;
+function inferInsuranceAnswer(transcriptText: string, currentBody: string, askContext: SchedulingAskContext) {
+  const text = transcriptText.toLowerCase();
+  const current = currentBody.trim();
+  if (/(self pay|self-pay|cash|no insurance|without insurance|membership|plan member|member plan|in-house plan|practice plan)/.test(text)) {
+    return { status: "SELF_PAY_OR_MEMBERSHIP", planName: extractPlanName(current) };
+  }
+  if (/(insurance|ppo|hmo|medicaid|medicare|delta|aetna|cigna|metlife|guardian|united|uhc|humana|principal|anthem|blue cross|bcbs)/.test(text)) {
+    return { status: "INSURANCE", planName: extractPlanName(current) };
+  }
+  const wasAskedInsurance = askContext.askFor === "insuranceStatus" || /using dental insurance|insurance plan name|membership plan|self-pay/i.test(askContext.assistantBody);
+  if (wasAskedInsurance && /^(no|none|self pay|self-pay|cash|no insurance)$/i.test(current)) {
+    return { status: "SELF_PAY_OR_MEMBERSHIP", planName: null };
+  }
+  if (wasAskedInsurance && current.length >= 2) {
+    return { status: "INSURANCE", planName: extractPlanName(current) };
+  }
+  return { status: null, planName: null };
+}
+
+function extractPlanName(value: string) {
+  const cleaned = value
+    .replace(/^(yes|yeah|yep|i have|we have|my plan is|it is|it's|insurance is|dental insurance is)\s+/i, "")
+    .trim();
+  if (!cleaned || /^(yes|yeah|yep)$/i.test(cleaned)) return null;
+  return cleaned.slice(0, 80);
 }
 
 function inferPreferredWindow(text: string, preferredTime?: string) {
@@ -1857,6 +1911,7 @@ function inferPreferredWindow(text: string, preferredTime?: string) {
   if (direct && !/today or next available/i.test(direct)) return direct.slice(0, 120);
   if (/\btoday\b/.test(text)) return "today";
   if (/\btomorrow\b/.test(text)) return "tomorrow";
+  if (/\b(earliest|soonest|first available|next available|asap)\b/.test(text)) return "next available";
   if (/\bmorning\b/.test(text)) return "morning";
   if (/\bafternoon\b/.test(text)) return "afternoon";
   if (/\bevening\b/.test(text)) return "evening";
