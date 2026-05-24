@@ -35,7 +35,8 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
   const aiStartUrl = `${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(input.conversationId)}&scenario=inbound_takeover&reason=no_answer`;
   const transcription = `<Start><Transcription name="onedentalai-live-${xmlEscape(input.conversationId)}" statusCallbackUrl="${xmlEscape(transcriptionUrl)}" track="both_tracks" languageCode="en-US" /></Start>`;
   const practiceBridgeNumber = resolvePracticeBridgeNumber(route);
-  if (practiceBridgeNumber) {
+  const callerNumber = normalizePhoneNumber(input.payload.From || "");
+  if (practiceBridgeNumber && callerNumber !== practiceBridgeNumber) {
     await query(
       `update "PhoneActiveCall"
        set "callControlMode" = 'TWILIO_DIRECT_DIAL',
