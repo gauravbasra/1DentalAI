@@ -207,6 +207,7 @@ const ledgerPage = fs.readFileSync("src/app/app/pms/ledger/page.tsx", "utf8");
 const imagingPage = fs.readFileSync("src/app/app/pms/imaging/page.tsx", "utf8");
 const labsPage = fs.readFileSync("src/app/app/pms/labs/page.tsx", "utf8");
 const inventoryPage = fs.readFileSync("src/app/app/pms/inventory/page.tsx", "utf8");
+const vendorInventoryPortalPage = fs.readFileSync("src/app/vendor/inventory/page.tsx", "utf8");
 const documentsPage = fs.readFileSync("src/app/app/pms/documents/page.tsx", "utf8");
 const reportsPage = fs.readFileSync("src/app/app/pms/reports/page.tsx", "utf8");
 for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addToothCondition", "addProcedureLog", "Treatment plan builder", "addTreatmentPlanItem", "updateTreatmentPlanStatus", "Treatment plan was not found in this tenant", "Treatment plan acceptance requires at least one procedure item", "itemUpdate.rowCount !== itemCount", "tenantId: session.tenantId"]) {
@@ -217,8 +218,8 @@ for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addT
   }
 }
 
-for (const token of ["PmsInventoryVendor", "PmsInventoryCatalogItem", "PmsInventoryLot", "PmsInventoryMovement", "PmsInventoryAsset", "PmsInventoryRfp", "PmsInventoryVendorBid", "getInventoryWorkbench", "receiveInventoryStock", "consumeInventoryStock", "createInventoryRfp", "resolveInventoryReportingWindow", "Reporting filters", "Apply calendar range", "periodUsageCents", "reportBuckets", "Practice inventory and vendor marketplace"]) {
-  const haystack = `${schema}\n${inventoryPage}\n${fs.readFileSync("src/lib/pms-inventory-repository.ts", "utf8")}\n${fs.readFileSync("src/app/api/pms/inventory/route.ts", "utf8")}`;
+for (const token of ["PmsInventoryVendor", "PmsInventoryCatalogItem", "PmsInventoryLot", "PmsInventoryMovement", "PmsInventoryAsset", "PmsInventoryRfp", "PmsInventoryVendorBid", "PmsInventoryCycleCount", "getInventoryWorkbench", "receiveInventoryStock", "consumeInventoryStock", "createInventoryRfp", "resolveInventoryReportingWindow", "Reporting filters", "Apply calendar range", "periodUsageCents", "reportBuckets", "Practice inventory and vendor marketplace", "getInventoryVendorPortal", "submitInventoryVendorBid", "awardInventoryBidToPurchaseOrder", "receiveInventoryPurchaseOrder", "recordInventoryCycleCount", "lookupInventoryBarcode", "Barcode labels", "Cycle counts", "Purchase orders", "Open vendor bid portal"]) {
+  const haystack = `${schema}\n${inventoryPage}\n${vendorInventoryPortalPage}\n${fs.readFileSync("src/lib/pms-inventory-repository.ts", "utf8")}\n${fs.readFileSync("src/app/api/pms/inventory/route.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS inventory marketplace token missing: ${token}`);
     process.exit(1);

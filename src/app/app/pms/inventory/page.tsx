@@ -6,12 +6,15 @@ import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import {
   consumeInventoryStock,
+  awardInventoryBidToPurchaseOrder,
   createInventoryAsset,
   createInventoryItem,
   createInventoryRfp,
   createInventoryVendor,
   getInventoryWorkbench,
   receiveInventoryStock,
+  receiveInventoryPurchaseOrder,
+  recordInventoryCycleCount,
 } from "@/lib/pms-inventory-repository";
 
 export const dynamic = "force-dynamic";
@@ -145,6 +148,42 @@ async function createAssetAction(formData: FormData) {
   revalidatePath("/app/pms/inventory");
 }
 
+async function awardBidAction(formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await awardInventoryBidToPurchaseOrder({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+    bidId: String(formData.get("bidId") ?? ""),
+  });
+  revalidatePath("/app/pms/inventory");
+}
+
+async function receivePurchaseOrderAction(formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await receiveInventoryPurchaseOrder({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+    purchaseOrderId: String(formData.get("purchaseOrderId") ?? ""),
+    locationId: String(formData.get("locationId") ?? ""),
+  });
+  revalidatePath("/app/pms/inventory");
+}
+
+async function recordCycleCountAction(formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await recordInventoryCycleCount({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+    lotId: String(formData.get("lotId") ?? ""),
+    countedQuantity: number(formData.get("countedQuantity")),
+    reason: String(formData.get("reason") ?? "Physical cycle count"),
+  });
+  revalidatePath("/app/pms/inventory");
+}
+
 export default async function InventoryPage({ searchParams }: { searchParams: Promise<{ role?: string; period?: string; startDate?: string; endDate?: string }> }) {
   const params = await searchParams;
   const session = await requireAuth();
@@ -166,6 +205,9 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
   const benchmarks = workbench.benchmarks as AnyRow[];
   const locations = workbench.locations as AnyRow[];
   const reportBuckets = workbench.reportBuckets as AnyRow[];
+  const purchaseOrders = workbench.purchaseOrders as AnyRow[];
+  const cycleCounts = workbench.cycleCounts as AnyRow[];
+  const labelQueue = workbench.labelQueue as AnyRow[];
   const roleParam = `role=${role.key}`;
 
   return (
@@ -215,6 +257,9 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         <Metric label="Maintenance" value={summary.maintenanceDue} tone="red" />
         <Metric label="Open RFPs" value={summary.openRfps} />
         <Metric label="Vendors" value={summary.marketplaceVendors} />
+        <Metric label="Portal subs" value={summary.activeMarketplaceSubscriptions} />
+        <Metric label="Open POs" value={summary.openPurchaseOrders} />
+        <Metric label="Cycle counts" value={summary.openCycleCounts} />
         <Metric label="Stock value" value={<Money cents={Number(summary.inventoryValueCents)} />} />
         <Metric label="Period used" value={<Money cents={Number(summary.periodUsageCents)} />} />
         <Metric label="Period received" value={<Money cents={Number(summary.periodReceivedCents)} />} />
@@ -238,6 +283,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
                         {item.controlledSubstance ? <StatusFor value="CONTROLLED" /> : null}
                       </div>
                       <p className="mt-1 text-sm text-neutral-600">{item.sku} · {item.category} · {item.vendorName ?? "No preferred vendor"} · {item.clinicalUse ?? "General practice use"}</p>
+                      <p className="mt-1 font-mono text-xs text-neutral-500">{item.barcodeValue}</p>
                     </div>
                     <div className="grid grid-cols-3 gap-2 text-center text-xs">
                       <Mini label="On hand" value={qty.toLocaleString()} />
@@ -319,6 +365,11 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
                   <StatusFor value={String(vendor.marketplaceStatus)} />
                 </div>
                 <p className="mt-2 text-xs text-neutral-500">Reliability {vendor.reliabilityScore}/100 · {vendor.complianceStatus}</p>
+                <div className="mt-2 grid gap-1 rounded-md border border-neutral-200 bg-white p-2 text-xs text-neutral-600">
+                  <p>Portal <strong>{vendor.portalStatus}</strong> · subscription <strong>{vendor.subscriptionStatus}</strong></p>
+                  <p>Fee {Number(vendor.marketplaceFeeBps ?? 0) / 100}% · plan {vendor.subscriptionPlan ?? "not subscribed"}</p>
+                  {vendor.portalToken ? <Link className="font-semibold text-cyan-700 hover:text-cyan-900" href={`/vendor/inventory?token=${vendor.portalToken}`}>Open vendor bid portal</Link> : null}
+                </div>
               </div>
             ))}
           </div>
@@ -439,8 +490,79 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
             ))}
             {bids.slice(0, 4).map((bid) => (
               <div key={String(bid.id)} className="rounded-lg border border-cyan-100 bg-cyan-50 p-3 text-sm">
-                <p className="font-semibold text-neutral-950">{bid.vendorName} bid · <Money cents={Number(bid.bidTotalCents ?? 0)} /></p>
-                <p className="text-neutral-600">{bid.rfpNumber} · lead {bid.leadDays} days · reliability {bid.reliabilityScore}</p>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-neutral-950">{bid.vendorName} bid · <Money cents={Number(bid.bidTotalCents ?? 0)} /></p>
+                    <p className="text-neutral-600">{bid.rfpNumber} · lead {bid.leadDays} days · reliability {bid.reliabilityScore}</p>
+                  </div>
+                  <form action={awardBidAction}>
+                    <input type="hidden" name="bidId" value={String(bid.id)} />
+                    <button className="rounded-md bg-cyan-700 px-3 py-2 text-xs font-semibold text-white">Award PO</button>
+                  </form>
+                </div>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+      </section>
+
+      <section className="mt-6 grid gap-6 xl:grid-cols-3">
+        <PmsCard title="Purchase orders" eyebrow="Approval, award, receiving">
+          <div className="grid gap-3">
+            {purchaseOrders.map((po) => (
+              <div key={String(po.id)} className="rounded-lg border border-neutral-200 bg-white p-3 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-neutral-950">{po.poNumber} · {po.vendorName}</p>
+                    <p className="mt-1 text-neutral-600"><Money cents={Number(po.totalCents ?? 0)} /> · {po.lineCount} lines</p>
+                  </div>
+                  <StatusFor value={String(po.status)} />
+                </div>
+                {String(po.status) !== "RECEIVED" ? (
+                  <form action={receivePurchaseOrderAction} className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+                    <input type="hidden" name="purchaseOrderId" value={String(po.id)} />
+                    <Select name="locationId" label="Receive to" options={locations.map((location) => [String(location.id), String(location.locationName)])} />
+                    <button className="self-end rounded-md bg-neutral-950 px-3 py-2 text-xs font-semibold text-white">Receive PO</button>
+                  </form>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+
+        <PmsCard title="Barcode labels" eyebrow="Scan and print controls">
+          <div className="mb-3 rounded-lg border border-dashed border-neutral-300 p-3">
+            <Input name="barcodeScanner" label="Scanner input" placeholder="Click here and scan an item, lot, or asset barcode" />
+            <p className="mt-2 text-xs text-neutral-500">Barcode scanners type into this field like a keyboard. The API action `lookupBarcode` resolves item, lot, or asset records for receive, consume, and count workflows.</p>
+          </div>
+          <div className="grid gap-2 print:grid-cols-2">
+            {labelQueue.slice(0, 24).map((label) => (
+              <div key={`${label.labelType}-${label.id}`} className="rounded-md border border-neutral-300 bg-white p-3 text-sm">
+                <p className="font-semibold text-neutral-950">{label.labelName}</p>
+                <p className="text-xs text-neutral-500">{label.labelType} · {label.labelCode}</p>
+                <div className="mt-2 h-10 rounded bg-[repeating-linear-gradient(90deg,#111_0,#111_2px,#fff_2px,#fff_5px,#111_5px,#111_8px,#fff_8px,#fff_11px)]" />
+                <p className="mt-1 font-mono text-xs">{label.barcodeValue}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white print:hidden">Use browser print for labels</p>
+        </PmsCard>
+
+        <PmsCard title="Cycle counts" eyebrow="Physical inventory control">
+          <form action={recordCycleCountAction} className="mb-4 grid gap-3 rounded-lg border border-neutral-200 p-3">
+            <Select name="lotId" label="Lot to count" options={lots.map((lot) => [String(lot.id), `${lot.itemName} · ${lot.lotNumber ?? lot.barcodeValue} · expected ${lot.quantityOnHand}`])} />
+            <Input name="countedQuantity" label="Counted quantity" type="number" step="0.01" required />
+            <Input name="reason" label="Reason" defaultValue="Physical cycle count" />
+            <button className="rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white">Post count and variance</button>
+          </form>
+          <div className="grid gap-3">
+            {cycleCounts.map((count) => (
+              <div key={String(count.id)} className="rounded-lg bg-neutral-50 p-3 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="font-semibold text-neutral-950">{count.countNumber}</p>
+                  <StatusFor value={String(count.status)} />
+                </div>
+                <p className="mt-1 text-neutral-600">{count.locationName ?? "All locations"} · {count.lineCount} lines · variance <Money cents={Number(count.varianceCents ?? 0)} /></p>
               </div>
             ))}
           </div>

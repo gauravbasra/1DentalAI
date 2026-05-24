@@ -2006,6 +2006,11 @@ model PmsInventoryVendor {
   vendorName         String
   vendorType         String
   marketplaceStatus  String   @default("PRIVATE_VENDOR")
+  portalStatus       String   @default("INVITED")
+  portalToken        String?
+  subscriptionStatus String   @default("NOT_SUBSCRIBED")
+  subscriptionPlan   String?
+  marketplaceFeeBps  Int      @default(0)
   contactName        String?
   email              String?
   phone              String?
@@ -2015,12 +2020,16 @@ model PmsInventoryVendor {
   averageLeadDays    Int      @default(5)
   contractExpiresAt  DateTime?
   complianceStatus   String   @default("NEEDS_REVIEW")
+  verifiedAt         DateTime?
   notes              String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   @@index([tenantId, marketplaceStatus])
+  @@index([tenantId, portalStatus])
+  @@index([subscriptionStatus])
   @@index([tenantId, vendorType])
+  @@unique([portalToken])
   @@unique([tenantId, vendorName])
 }
 
@@ -2029,6 +2038,7 @@ model PmsInventoryCatalogItem {
   tenantId            String
   vendorId            String?
   sku                 String
+  barcodeValue        String?
   itemName            String
   category            String
   clinicalUse         String?
@@ -2048,6 +2058,7 @@ model PmsInventoryCatalogItem {
 
   @@index([tenantId, category])
   @@index([tenantId, status])
+  @@unique([tenantId, barcodeValue])
   @@unique([tenantId, sku])
 }
 
@@ -2072,6 +2083,7 @@ model PmsInventoryLot {
   vendorId          String?
   locationId        String
   lotNumber         String?
+  barcodeValue      String?
   serialNumber      String?
   expirationDate    DateTime?
   quantityOnHand    Decimal  @default(0)
@@ -2084,6 +2096,7 @@ model PmsInventoryLot {
   @@index([tenantId, itemId, status])
   @@index([tenantId, expirationDate])
   @@index([tenantId, locationId])
+  @@unique([tenantId, barcodeValue])
 }
 
 model PmsInventoryMovement {
@@ -2115,6 +2128,7 @@ model PmsInventoryAsset {
   vendorId              String?
   locationId            String?
   assetTag              String
+  barcodeValue          String?
   assetName             String
   assetType             String
   manufacturer          String?
@@ -2133,6 +2147,7 @@ model PmsInventoryAsset {
 
   @@index([tenantId, status])
   @@index([tenantId, nextMaintenanceAt])
+  @@unique([tenantId, barcodeValue])
   @@unique([tenantId, assetTag])
 }
 
@@ -2149,6 +2164,9 @@ model PmsInventoryPurchaseOrder {
   totalCents          Int      @default(0)
   expectedDeliveryAt  DateTime?
   approvedAt          DateTime?
+  approvedByRole      String?
+  rejectedAt          DateTime?
+  receivedByRole      String?
   receivedAt          DateTime?
   notes               String?
   createdAt           DateTime @default(now())
@@ -2215,14 +2233,54 @@ model PmsInventoryVendorBid {
   status             String   @default("SUBMITTED")
   bidTotalCents      Int      @default(0)
   leadDays           Int      @default(5)
+  lineItems          Json?
   warrantyTerms      String?
   notes              String?
+  submittedByName    String?
+  submittedByEmail   String?
   submittedAt        DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   @@index([tenantId, status])
   @@index([rfpId])
   @@unique([rfpId, vendorId])
+}
+
+model PmsInventoryCycleCount {
+  id              String   @id @default(cuid())
+  tenantId        String
+  countNumber     String
+  status          String   @default("OPEN")
+  locationId      String?
+  startedByRole   String
+  completedByRole String?
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  varianceCents   Int      @default(0)
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([tenantId, startedAt])
+  @@unique([tenantId, countNumber])
+}
+
+model PmsInventoryCycleCountLine {
+  id            String   @id @default(cuid())
+  cycleCountId  String
+  lotId         String
+  itemId        String
+  expectedQty   Decimal
+  countedQty    Decimal
+  varianceQty   Decimal
+  unitCostCents Int      @default(0)
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  @@index([cycleCountId])
+  @@index([lotId])
+  @@index([itemId])
 }
 
 model PmsInventoryBenchmarkSnapshot {

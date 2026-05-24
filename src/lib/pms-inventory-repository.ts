@@ -9,6 +9,10 @@ type InventorySummaryRow = {
   maintenanceDue: string;
   openRfps: string;
   marketplaceVendors: string;
+  activeVendorPortals: string;
+  activeMarketplaceSubscriptions: string;
+  openPurchaseOrders: string;
+  openCycleCounts: string;
   inventoryValueCents: string;
   last30UsageCents: string;
   periodUsageCents: string;
@@ -18,6 +22,14 @@ type InventorySummaryRow = {
 };
 
 export const resolveInventoryReportingWindow = resolveReportingWindow;
+
+function barcode(kind: string, id: string) {
+  return `1DAI-${kind}-${id.replace(/[^a-z0-9]/gi, "").slice(-10).toUpperCase()}`;
+}
+
+function portalToken(id: string) {
+  return `vendor_${id.replace(/[^a-z0-9]/gi, "").slice(-24).toLowerCase()}`;
+}
 
 async function addInventoryAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string, metadata: Record<string, unknown> = {}) {
   await query(
@@ -29,7 +41,7 @@ async function addInventoryAudit(tenantId: string, actorRole: string, eventType:
 
 export async function getInventoryWorkbench(tenantId = defaultTenantId, filters: ReportingWindowFilters = {}) {
   const reportingWindow = resolveInventoryReportingWindow(filters);
-  const [summary, items, lots, vendors, assets, movements, rfps, bids, benchmarks, locations, reportBuckets] = await Promise.all([
+  const [summary, items, lots, vendors, assets, movements, rfps, bids, benchmarks, locations, reportBuckets, purchaseOrders, cycleCounts, labelQueue] = await Promise.all([
     query<InventorySummaryRow>(
       `with stock as (
          select i."id", i."parLevel", i."reorderPoint", coalesce(sum(l."quantityOnHand"), 0) as qty,
@@ -46,6 +58,10 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId, filters:
         (select count(*) from "PmsInventoryAsset" where "tenantId" = $1 and "status" = 'ACTIVE' and "nextMaintenanceAt" <= current_date + interval '30 days')::text as "maintenanceDue",
         (select count(*) from "PmsInventoryRfp" where "tenantId" = $1 and "status" in ('DRAFT', 'RELEASED', 'EVALUATING'))::text as "openRfps",
         (select count(*) from "PmsInventoryVendor" where "tenantId" = $1 and "marketplaceStatus" = 'MARKETPLACE_VENDOR')::text as "marketplaceVendors",
+        (select count(*) from "PmsInventoryVendor" where "tenantId" = $1 and "portalStatus" = 'ACTIVE')::text as "activeVendorPortals",
+        (select count(*) from "PmsInventoryVendor" where "tenantId" = $1 and "subscriptionStatus" = 'ACTIVE')::text as "activeMarketplaceSubscriptions",
+        (select count(*) from "PmsInventoryPurchaseOrder" where "tenantId" = $1 and "status" in ('DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED'))::text as "openPurchaseOrders",
+        (select count(*) from "PmsInventoryCycleCount" where "tenantId" = $1 and "status" in ('OPEN', 'COUNTING'))::text as "openCycleCounts",
         coalesce((select sum(value_cents)::bigint from stock), 0)::text as "inventoryValueCents",
         coalesce((select sum(abs("quantity") * "unitCostCents")::bigint from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" = 'CONSUMED' and "createdAt" >= current_date - interval '30 days'), 0)::text as "last30UsageCents",
         coalesce((select sum(abs("quantity") * "unitCostCents")::bigint from "PmsInventoryMovement" where "tenantId" = $1 and "movementType" = 'CONSUMED' and "createdAt" >= $2::timestamp and "createdAt" < $3::timestamp), 0)::text as "periodUsageCents",
@@ -145,6 +161,47 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId, filters:
        order by "bucketDate" asc, "movementType"`,
       [tenantId, reportingWindow.startTimestamp, reportingWindow.endTimestamp],
     ),
+    query(
+      `select po.*, v."vendorName",
+              coalesce(sum(line."lineTotalCents"), 0)::bigint::text as "lineSubtotalCents",
+              coalesce(count(line."id"), 0)::int as "lineCount"
+       from "PmsInventoryPurchaseOrder" po
+       join "PmsInventoryVendor" v on v."id" = po."vendorId"
+       left join "PmsInventoryPurchaseOrderLine" line on line."purchaseOrderId" = po."id"
+       where po."tenantId" = $1
+       group by po."id", v."vendorName"
+       order by po."createdAt" desc
+       limit 50`,
+      [tenantId],
+    ),
+    query(
+      `select cc.*, loc."locationName", coalesce(count(line."id"), 0)::int as "lineCount"
+       from "PmsInventoryCycleCount" cc
+       left join "PmsInventoryStockLocation" loc on loc."id" = cc."locationId"
+       left join "PmsInventoryCycleCountLine" line on line."cycleCountId" = cc."id"
+       where cc."tenantId" = $1
+       group by cc."id", loc."locationName"
+       order by cc."startedAt" desc
+       limit 25`,
+      [tenantId],
+    ),
+    query(
+      `select 'ITEM' as "labelType", "id", "itemName" as "labelName", "sku" as "labelCode", "barcodeValue"
+       from "PmsInventoryCatalogItem"
+       where "tenantId" = $1 and "status" = 'ACTIVE'
+       union all
+       select 'LOT' as "labelType", l."id", i."itemName" as "labelName", coalesce(l."lotNumber", l."serialNumber", l."id") as "labelCode", l."barcodeValue"
+       from "PmsInventoryLot" l
+       join "PmsInventoryCatalogItem" i on i."id" = l."itemId"
+       where l."tenantId" = $1 and l."status" = 'ACTIVE'
+       union all
+       select 'ASSET' as "labelType", "id", "assetName" as "labelName", "assetTag" as "labelCode", "barcodeValue"
+       from "PmsInventoryAsset"
+       where "tenantId" = $1 and "status" = 'ACTIVE'
+       order by "labelType", "labelName"
+       limit 120`,
+      [tenantId],
+    ),
   ]);
 
   return {
@@ -155,6 +212,10 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId, filters:
       maintenanceDue: "0",
       openRfps: "0",
       marketplaceVendors: "0",
+      activeVendorPortals: "0",
+      activeMarketplaceSubscriptions: "0",
+      openPurchaseOrders: "0",
+      openCycleCounts: "0",
       inventoryValueCents: "0",
       last30UsageCents: "0",
       periodUsageCents: "0",
@@ -173,6 +234,9 @@ export async function getInventoryWorkbench(tenantId = defaultTenantId, filters:
     benchmarks: benchmarks.rows,
     locations: locations.rows,
     reportBuckets: reportBuckets.rows,
+    purchaseOrders: purchaseOrders.rows,
+    cycleCounts: cycleCounts.rows,
+    labelQueue: labelQueue.rows,
   };
 }
 
@@ -189,13 +253,18 @@ export async function createInventoryVendor(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("inv_vendor");
+  const token = portalToken(id);
   const result = await query(
     `insert into "PmsInventoryVendor"
-       ("id", "tenantId", "vendorName", "vendorType", "marketplaceStatus", "email", "phone", "website", "paymentTerms", "complianceStatus", "updatedAt")
-     values ($1, $2, $3, $4, coalesce($5, 'PRIVATE_VENDOR'), $6, $7, $8, $9, 'NEEDS_REVIEW', current_timestamp)
+       ("id", "tenantId", "vendorName", "vendorType", "marketplaceStatus", "portalStatus", "portalToken", "subscriptionStatus", "subscriptionPlan", "marketplaceFeeBps", "email", "phone", "website", "paymentTerms", "complianceStatus", "verifiedAt", "updatedAt")
+     values ($1, $2, $3, $4, coalesce($5, 'PRIVATE_VENDOR'), case when coalesce($5, 'PRIVATE_VENDOR') in ('MARKETPLACE_VENDOR', 'PREFERRED_VENDOR') then 'ACTIVE' else 'INVITED' end, $6, case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then 'ACTIVE' else 'NOT_SUBSCRIBED' end, case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then 'MARKETPLACE_SELLER' else null end, case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then 250 else 0 end, $7, $8, $9, $10, 'NEEDS_REVIEW', case when coalesce($5, 'PRIVATE_VENDOR') = 'MARKETPLACE_VENDOR' then current_timestamp else null end, current_timestamp)
      on conflict ("tenantId", "vendorName") do update set
        "vendorType" = excluded."vendorType",
        "marketplaceStatus" = excluded."marketplaceStatus",
+       "portalStatus" = excluded."portalStatus",
+       "subscriptionStatus" = excluded."subscriptionStatus",
+       "subscriptionPlan" = excluded."subscriptionPlan",
+       "marketplaceFeeBps" = excluded."marketplaceFeeBps",
        "email" = excluded."email",
        "phone" = excluded."phone",
        "website" = excluded."website",
@@ -208,6 +277,7 @@ export async function createInventoryVendor(input: {
       input.vendorName.trim(),
       input.vendorType.trim() || "SUPPLIES",
       input.marketplaceStatus?.trim() || null,
+      token,
       input.email?.trim() || null,
       input.phone?.trim() || null,
       input.website?.trim() || null,
@@ -240,12 +310,14 @@ export async function createInventoryItem(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("inv_item");
+  const barcodeValue = barcode("ITEM", id);
   const result = await query(
     `insert into "PmsInventoryCatalogItem"
-       ("id", "tenantId", "vendorId", "sku", "itemName", "category", "clinicalUse", "itemType", "unitOfMeasure", "reorderPoint", "parLevel", "lastUnitCostCents", "benchmarkCostCents", "taxable", "requiresLotTracking", "requiresExpiry", "controlledSubstance", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, 'CONSUMABLE'), coalesce($9, 'each'), $10, $11, $12, $13, $14, $15, $16, $17, current_timestamp)
+       ("id", "tenantId", "vendorId", "sku", "barcodeValue", "itemName", "category", "clinicalUse", "itemType", "unitOfMeasure", "reorderPoint", "parLevel", "lastUnitCostCents", "benchmarkCostCents", "taxable", "requiresLotTracking", "requiresExpiry", "controlledSubstance", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9, 'CONSUMABLE'), coalesce($10, 'each'), $11, $12, $13, $14, $15, $16, $17, $18, current_timestamp)
      on conflict ("tenantId", "sku") do update set
-       "vendorId" = excluded."vendorId",
+      "vendorId" = excluded."vendorId",
+       "barcodeValue" = coalesce("PmsInventoryCatalogItem"."barcodeValue", excluded."barcodeValue"),
        "itemName" = excluded."itemName",
        "category" = excluded."category",
        "clinicalUse" = excluded."clinicalUse",
@@ -266,6 +338,7 @@ export async function createInventoryItem(input: {
       tenantId,
       input.vendorId || null,
       input.sku.trim(),
+      barcodeValue,
       input.itemName.trim(),
       input.category.trim() || "SUPPLIES",
       input.clinicalUse?.trim() || null,
@@ -302,10 +375,11 @@ export async function receiveInventoryStock(input: {
   const tenantId = input.tenantId ?? defaultTenantId;
   return withTransaction(async (client) => {
     const lotId = newId("inv_lot");
+    const barcodeValue = barcode("LOT", lotId);
     const lot = await client.query(
       `insert into "PmsInventoryLot"
-         ("id", "tenantId", "itemId", "vendorId", "locationId", "lotNumber", "serialNumber", "expirationDate", "quantityOnHand", "unitCostCents", "updatedAt")
-       values ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, $9, $10, current_timestamp)
+         ("id", "tenantId", "itemId", "vendorId", "locationId", "lotNumber", "barcodeValue", "serialNumber", "expirationDate", "quantityOnHand", "unitCostCents", "updatedAt")
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamp, $10, $11, current_timestamp)
        returning *`,
       [
         lotId,
@@ -314,6 +388,7 @@ export async function receiveInventoryStock(input: {
         input.vendorId || null,
         input.locationId,
         input.lotNumber?.trim() || null,
+        barcodeValue,
         input.serialNumber?.trim() || null,
         input.expirationDate || null,
         input.quantity,
@@ -479,13 +554,15 @@ export async function createInventoryAsset(input: {
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("inv_asset");
+  const barcodeValue = barcode("ASSET", id);
   const result = await query(
     `insert into "PmsInventoryAsset"
-       ("id", "tenantId", "vendorId", "locationId", "assetTag", "assetName", "assetType", "manufacturer", "modelNumber", "serialNumber", "purchaseCostCents", "nextMaintenanceAt", "downtimeRisk", "notes", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::timestamp, coalesce($13, 'LOW'), $14, current_timestamp)
+       ("id", "tenantId", "vendorId", "locationId", "assetTag", "barcodeValue", "assetName", "assetType", "manufacturer", "modelNumber", "serialNumber", "purchaseCostCents", "nextMaintenanceAt", "downtimeRisk", "notes", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::timestamp, coalesce($14, 'LOW'), $15, current_timestamp)
      on conflict ("tenantId", "assetTag") do update set
        "vendorId" = excluded."vendorId",
        "locationId" = excluded."locationId",
+       "barcodeValue" = coalesce("PmsInventoryAsset"."barcodeValue", excluded."barcodeValue"),
        "assetName" = excluded."assetName",
        "assetType" = excluded."assetType",
        "manufacturer" = excluded."manufacturer",
@@ -503,6 +580,7 @@ export async function createInventoryAsset(input: {
       input.vendorId || null,
       input.locationId || null,
       input.assetTag.trim(),
+      barcodeValue,
       input.assetName.trim(),
       input.assetType.trim(),
       input.manufacturer?.trim() || null,
@@ -517,4 +595,241 @@ export async function createInventoryAsset(input: {
   const row = result.rows[0];
   await addInventoryAudit(tenantId, input.actorRole ?? "practice_manager", "INVENTORY_ASSET_UPSERTED", "PmsInventoryAsset", row.id, { assetTag: row.assetTag });
   return row;
+}
+
+export async function getInventoryVendorPortal(token: string) {
+  const vendor = await query(
+    `select * from "PmsInventoryVendor" where "portalToken" = $1 and "portalStatus" = 'ACTIVE' limit 1`,
+    [token.trim()],
+  );
+  const vendorRow = vendor.rows[0];
+  if (!vendorRow) return null;
+  const tenantId = String(vendorRow.tenantId);
+  const [rfps, bids, awardedPurchaseOrders] = await Promise.all([
+    query(
+      `select r.*, coalesce(jsonb_agg(jsonb_build_object('itemName', line."itemName", 'quantity', line."quantity", 'requirements', line."requirements") order by line."createdAt") filter (where line."id" is not null), '[]'::jsonb) as "lines"
+       from "PmsInventoryRfp" r
+       left join "PmsInventoryRfpLine" line on line."rfpId" = r."id"
+       where r."tenantId" = $1 and r."status" in ('RELEASED', 'EVALUATING')
+         and (r."releaseMode" = 'MARKETPLACE' or r."releaseMode" = 'PREFERRED_VENDORS' or r."category" = $2)
+       group by r."id"
+       order by r."responseDueAt" asc nulls last, r."createdAt" desc`,
+      [tenantId, vendorRow.vendorType],
+    ),
+    query(
+      `select b.*, r."rfpNumber", r."title", r."category"
+       from "PmsInventoryVendorBid" b
+       join "PmsInventoryRfp" r on r."id" = b."rfpId"
+       where b."tenantId" = $1 and b."vendorId" = $2
+       order by b."submittedAt" desc`,
+      [tenantId, vendorRow.id],
+    ),
+    query(
+      `select po.*, coalesce(count(line."id"), 0)::int as "lineCount"
+       from "PmsInventoryPurchaseOrder" po
+       left join "PmsInventoryPurchaseOrderLine" line on line."purchaseOrderId" = po."id"
+       where po."tenantId" = $1 and po."vendorId" = $2
+       group by po."id"
+       order by po."createdAt" desc`,
+      [tenantId, vendorRow.id],
+    ),
+  ]);
+  return { vendor: vendorRow, rfps: rfps.rows, bids: bids.rows, purchaseOrders: awardedPurchaseOrders.rows };
+}
+
+export async function submitInventoryVendorBid(input: {
+  portalToken: string;
+  rfpId: string;
+  bidTotalCents: number;
+  leadDays: number;
+  warrantyTerms?: string;
+  notes?: string;
+  submittedByName?: string;
+  submittedByEmail?: string;
+}) {
+  const portal = await getInventoryVendorPortal(input.portalToken);
+  if (!portal) throw new Error("Vendor portal is not active.");
+  const vendor = portal.vendor as Record<string, string>;
+  const rfp = await query(`select * from "PmsInventoryRfp" where "tenantId" = $1 and "id" = $2 and "status" in ('RELEASED', 'EVALUATING')`, [vendor.tenantId, input.rfpId]);
+  if (!rfp.rows[0]) throw new Error("RFP is not open for bidding.");
+  const bidId = newId("inv_bid");
+  const result = await query(
+    `insert into "PmsInventoryVendorBid"
+       ("id", "tenantId", "rfpId", "vendorId", "status", "bidTotalCents", "leadDays", "lineItems", "warrantyTerms", "notes", "submittedByName", "submittedByEmail", "updatedAt")
+     values ($1, $2, $3, $4, 'SUBMITTED', $5, $6, $7::jsonb, $8, $9, $10, $11, current_timestamp)
+     on conflict ("rfpId", "vendorId") do update set
+       "status" = 'RESUBMITTED',
+       "bidTotalCents" = excluded."bidTotalCents",
+       "leadDays" = excluded."leadDays",
+       "lineItems" = excluded."lineItems",
+       "warrantyTerms" = excluded."warrantyTerms",
+       "notes" = excluded."notes",
+       "submittedByName" = excluded."submittedByName",
+       "submittedByEmail" = excluded."submittedByEmail",
+       "submittedAt" = current_timestamp,
+       "updatedAt" = current_timestamp
+     returning *`,
+    [
+      bidId,
+      vendor.tenantId,
+      input.rfpId,
+      vendor.id,
+      input.bidTotalCents,
+      input.leadDays,
+      JSON.stringify({ pricingSource: "vendor_portal", submittedAt: new Date().toISOString() }),
+      input.warrantyTerms?.trim() || null,
+      input.notes?.trim() || null,
+      input.submittedByName?.trim() || null,
+      input.submittedByEmail?.trim() || null,
+    ],
+  );
+  await addInventoryAudit(vendor.tenantId, "vendor_portal", "INVENTORY_VENDOR_BID_SUBMITTED", "PmsInventoryVendorBid", result.rows[0].id, { vendorId: vendor.id, rfpId: input.rfpId });
+  return result.rows[0];
+}
+
+export async function awardInventoryBidToPurchaseOrder(input: { tenantId?: string; actorRole?: string; bidId: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  return withTransaction(async (client) => {
+    const bidResult = await client.query(
+      `select b.*, r."rfpNumber", r."title"
+       from "PmsInventoryVendorBid" b
+       join "PmsInventoryRfp" r on r."id" = b."rfpId"
+       where b."tenantId" = $1 and b."id" = $2
+       for update`,
+      [tenantId, input.bidId],
+    );
+    const bid = bidResult.rows[0];
+    if (!bid) throw new Error("Bid not found.");
+    const numberResult = await client.query<{ next: string }>(`select (count(*) + 1)::text as next from "PmsInventoryPurchaseOrder" where "tenantId" = $1`, [tenantId]);
+    const poId = newId("inv_po");
+    const poNumber = `PO-${new Date().getFullYear()}-${String(numberResult.rows[0]?.next ?? "1").padStart(4, "0")}`;
+    const po = await client.query(
+      `insert into "PmsInventoryPurchaseOrder"
+         ("id", "tenantId", "vendorId", "poNumber", "status", "requestedByRole", "subtotalCents", "taxCents", "shippingCents", "totalCents", "approvedAt", "approvedByRole", "notes", "updatedAt")
+       values ($1, $2, $3, $4, 'APPROVED', $5, $6, 0, 0, $6, current_timestamp, $5, $7, current_timestamp)
+       returning *`,
+      [poId, tenantId, bid.vendorId, poNumber, input.actorRole ?? "practice_manager", Number(bid.bidTotalCents ?? 0), `Awarded from ${bid.rfpNumber}: ${bid.title}`],
+    );
+    const lines = await client.query(`select * from "PmsInventoryRfpLine" where "rfpId" = $1 order by "createdAt"`, [bid.rfpId]);
+    const unitShare = lines.rows.length ? Math.round(Number(bid.bidTotalCents ?? 0) / lines.rows.length) : Number(bid.bidTotalCents ?? 0);
+    for (const line of lines.rows) {
+      if (!line.itemId) continue;
+      const qty = Number(line.quantity || 1) || 1;
+      await client.query(
+        `insert into "PmsInventoryPurchaseOrderLine"
+           ("id", "purchaseOrderId", "itemId", "quantity", "unitCostCents", "lineTotalCents", "updatedAt")
+         values ($1, $2, $3, $4, $5, $6, current_timestamp)`,
+        [newId("inv_pol"), poId, line.itemId, qty, Math.round(unitShare / qty), unitShare],
+      );
+    }
+    await client.query(`update "PmsInventoryVendorBid" set "status" = 'AWARDED', "updatedAt" = current_timestamp where "id" = $1`, [bid.id]);
+    await client.query(`update "PmsInventoryRfp" set "status" = 'AWARDED', "awardedVendorId" = $2, "updatedAt" = current_timestamp where "id" = $1`, [bid.rfpId, bid.vendorId]);
+    await client.query(
+      `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+       values ($1, $2, $3, 'INVENTORY_BID_AWARDED_PO_CREATED', 'PmsInventoryPurchaseOrder', $4, 'ALLOWED', $5::jsonb)`,
+      [newId("audit"), tenantId, input.actorRole ?? "practice_manager", poId, JSON.stringify({ bidId: bid.id, rfpId: bid.rfpId, poNumber })],
+    );
+    return po.rows[0];
+  });
+}
+
+export async function receiveInventoryPurchaseOrder(input: { tenantId?: string; actorRole?: string; purchaseOrderId: string; locationId: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  return withTransaction(async (client) => {
+    const po = await client.query(`select * from "PmsInventoryPurchaseOrder" where "tenantId" = $1 and "id" = $2 for update`, [tenantId, input.purchaseOrderId]);
+    const poRow = po.rows[0];
+    if (!poRow) throw new Error("Purchase order not found.");
+    const lines = await client.query(`select * from "PmsInventoryPurchaseOrderLine" where "purchaseOrderId" = $1 for update`, [input.purchaseOrderId]);
+    for (const line of lines.rows) {
+      const remaining = Number(line.quantity ?? 0) - Number(line.receivedQuantity ?? 0);
+      if (remaining <= 0) continue;
+      const lotId = newId("inv_lot");
+      await client.query(
+        `insert into "PmsInventoryLot"
+           ("id", "tenantId", "itemId", "vendorId", "locationId", "lotNumber", "barcodeValue", "quantityOnHand", "unitCostCents", "updatedAt")
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, current_timestamp)`,
+        [lotId, tenantId, line.itemId, poRow.vendorId, input.locationId, `${poRow.poNumber}-${line.id.slice(-4)}`, barcode("LOT", lotId), remaining, Number(line.unitCostCents ?? 0)],
+      );
+      await client.query(
+        `insert into "PmsInventoryMovement"
+           ("id", "tenantId", "itemId", "lotId", "toLocationId", "movementType", "quantity", "unitCostCents", "reason", "actorRole", "metadata")
+         values ($1, $2, $3, $4, $5, 'RECEIVED', $6, $7, 'Purchase order receiving', $8, $9::jsonb)`,
+        [newId("inv_mov"), tenantId, line.itemId, lotId, input.locationId, remaining, Number(line.unitCostCents ?? 0), input.actorRole ?? "practice_manager", JSON.stringify({ purchaseOrderId: input.purchaseOrderId, poNumber: poRow.poNumber })],
+      );
+      await client.query(`update "PmsInventoryPurchaseOrderLine" set "receivedQuantity" = "quantity", "updatedAt" = current_timestamp where "id" = $1`, [line.id]);
+    }
+    await client.query(
+      `update "PmsInventoryPurchaseOrder"
+       set "status" = 'RECEIVED', "receivedAt" = current_timestamp, "receivedByRole" = $3, "updatedAt" = current_timestamp
+       where "tenantId" = $1 and "id" = $2`,
+      [tenantId, input.purchaseOrderId, input.actorRole ?? "practice_manager"],
+    );
+    await client.query(
+      `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+       values ($1, $2, $3, 'INVENTORY_PO_RECEIVED', 'PmsInventoryPurchaseOrder', $4, 'ALLOWED', $5::jsonb)`,
+      [newId("audit"), tenantId, input.actorRole ?? "practice_manager", input.purchaseOrderId, JSON.stringify({ locationId: input.locationId })],
+    );
+    return { id: input.purchaseOrderId };
+  });
+}
+
+export async function recordInventoryCycleCount(input: { tenantId?: string; actorRole?: string; lotId: string; countedQuantity: number; reason?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  return withTransaction(async (client) => {
+    const lotResult = await client.query<{ id: string; itemId: string; locationId: string; quantityOnHand: string; unitCostCents: number }>(
+      `select "id", "itemId", "locationId", "quantityOnHand"::text as "quantityOnHand", "unitCostCents"
+       from "PmsInventoryLot"
+       where "tenantId" = $1 and "id" = $2
+       for update`,
+      [tenantId, input.lotId],
+    );
+    const lot = lotResult.rows[0];
+    if (!lot) throw new Error("Lot not found.");
+    const expected = Number(lot.quantityOnHand ?? 0);
+    const variance = input.countedQuantity - expected;
+    const countNumberResult = await client.query<{ next: string }>(`select (count(*) + 1)::text as next from "PmsInventoryCycleCount" where "tenantId" = $1`, [tenantId]);
+    const countId = newId("inv_count");
+    const countNumber = `COUNT-${new Date().getFullYear()}-${String(countNumberResult.rows[0]?.next ?? "1").padStart(4, "0")}`;
+    await client.query(
+      `insert into "PmsInventoryCycleCount"
+         ("id", "tenantId", "countNumber", "status", "locationId", "startedByRole", "completedByRole", "completedAt", "varianceCents", "notes", "updatedAt")
+       values ($1, $2, $3, 'COMPLETED', $4, $5, $5, current_timestamp, $6, $7, current_timestamp)`,
+      [countId, tenantId, countNumber, lot.locationId, input.actorRole ?? "practice_manager", Math.round(variance * Number(lot.unitCostCents ?? 0)), input.reason?.trim() || null],
+    );
+    await client.query(
+      `insert into "PmsInventoryCycleCountLine"
+         ("id", "cycleCountId", "lotId", "itemId", "expectedQty", "countedQty", "varianceQty", "unitCostCents", "reason")
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [newId("inv_count_line"), countId, lot.id, lot.itemId, expected, input.countedQuantity, variance, Number(lot.unitCostCents ?? 0), input.reason?.trim() || null],
+    );
+    await client.query(`update "PmsInventoryLot" set "quantityOnHand" = $2, "updatedAt" = current_timestamp where "id" = $1`, [lot.id, input.countedQuantity]);
+    await client.query(
+      `insert into "PmsInventoryMovement"
+         ("id", "tenantId", "itemId", "lotId", "fromLocationId", "movementType", "quantity", "unitCostCents", "reason", "actorRole", "metadata")
+       values ($1, $2, $3, $4, $5, 'CYCLE_COUNT_ADJUSTMENT', $6, $7, $8, $9, $10::jsonb)`,
+      [newId("inv_mov"), tenantId, lot.itemId, lot.id, lot.locationId, variance, Number(lot.unitCostCents ?? 0), input.reason?.trim() || "Cycle count adjustment", input.actorRole ?? "practice_manager", JSON.stringify({ expected, counted: input.countedQuantity, cycleCountId: countId })],
+    );
+    await client.query(
+      `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+       values ($1, $2, $3, 'INVENTORY_CYCLE_COUNT_POSTED', 'PmsInventoryCycleCount', $4, 'ALLOWED', $5::jsonb)`,
+      [newId("audit"), tenantId, input.actorRole ?? "practice_manager", countId, JSON.stringify({ lotId: lot.id, expected, counted: input.countedQuantity, variance })],
+    );
+    return { id: countId, variance };
+  });
+}
+
+export async function lookupInventoryBarcode(tenantId: string, barcodeValue: string) {
+  const code = barcodeValue.trim();
+  const result = await query(
+    `select 'ITEM' as "kind", "id", "itemName" as "name", "sku" as "code", "barcodeValue" from "PmsInventoryCatalogItem" where "tenantId" = $1 and "barcodeValue" = $2
+     union all
+     select 'LOT' as "kind", l."id", i."itemName" as "name", coalesce(l."lotNumber", l."serialNumber", l."id") as "code", l."barcodeValue"
+       from "PmsInventoryLot" l join "PmsInventoryCatalogItem" i on i."id" = l."itemId"
+       where l."tenantId" = $1 and l."barcodeValue" = $2
+     union all
+     select 'ASSET' as "kind", "id", "assetName" as "name", "assetTag" as "code", "barcodeValue" from "PmsInventoryAsset" where "tenantId" = $1 and "barcodeValue" = $2
+     limit 1`,
+    [tenantId, code],
+  );
+  return result.rows[0] ?? null;
 }

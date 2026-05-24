@@ -3,12 +3,16 @@ import type { NextRequest } from "next/server";
 import { requirePmsApiSession } from "@/lib/pms-api-auth";
 import {
   consumeInventoryStock,
+  awardInventoryBidToPurchaseOrder,
   createInventoryAsset,
   createInventoryItem,
   createInventoryRfp,
   createInventoryVendor,
   getInventoryWorkbench,
+  lookupInventoryBarcode,
   receiveInventoryStock,
+  receiveInventoryPurchaseOrder,
+  recordInventoryCycleCount,
 } from "@/lib/pms-inventory-repository";
 
 export const dynamic = "force-dynamic";
@@ -152,6 +156,45 @@ export async function POST(request: Request) {
         downtimeRisk: String(body.downtimeRisk ?? "LOW"),
         notes: body.notes ? String(body.notes) : undefined,
       }),
+    });
+  }
+
+  if (action === "awardBid") {
+    return NextResponse.json({
+      data: await awardInventoryBidToPurchaseOrder({
+        tenantId,
+        actorRole,
+        bidId: String(body.bidId ?? ""),
+      }),
+    });
+  }
+
+  if (action === "receivePurchaseOrder") {
+    return NextResponse.json({
+      data: await receiveInventoryPurchaseOrder({
+        tenantId,
+        actorRole,
+        purchaseOrderId: String(body.purchaseOrderId ?? ""),
+        locationId: String(body.locationId ?? ""),
+      }),
+    });
+  }
+
+  if (action === "recordCycleCount") {
+    return NextResponse.json({
+      data: await recordInventoryCycleCount({
+        tenantId,
+        actorRole,
+        lotId: String(body.lotId ?? ""),
+        countedQuantity: number(body.countedQuantity),
+        reason: body.reason ? String(body.reason) : undefined,
+      }),
+    });
+  }
+
+  if (action === "lookupBarcode") {
+    return NextResponse.json({
+      data: await lookupInventoryBarcode(tenantId, String(body.barcodeValue ?? "")),
     });
   }
 

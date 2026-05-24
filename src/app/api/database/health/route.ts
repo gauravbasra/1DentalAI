@@ -90,6 +90,8 @@ const requiredTables = [
   "PmsInventoryRfpLine",
   "PmsInventoryVendorBid",
   "PmsInventoryBenchmarkSnapshot",
+  "PmsInventoryCycleCount",
+  "PmsInventoryCycleCountLine",
   "PmsTask",
   "PatientEngagementEvent",
   "ReputationRecoveryCase",
