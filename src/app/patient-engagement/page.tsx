@@ -717,7 +717,7 @@ function FlowOverlay({
           <Link href={closeHref} className="grid h-11 w-11 place-items-center rounded-full border border-neutral-200 text-2xl" aria-label="Close">×</Link>
         </div>
 
-        <div className={panel === "phone" ? "min-h-0 flex-1 overflow-hidden bg-[#f7f8f8] p-3" : "min-h-0 flex-1 overflow-y-auto bg-[#f7f8f8] p-7"}>
+        <div className={panel === "phone" ? "min-h-0 flex-1 overflow-hidden bg-[#f7f8f8]" : "min-h-0 flex-1 overflow-y-auto bg-[#f7f8f8] p-7"}>
           {panel === "filters" ? <FiltersPanel metrics={metrics} selectedConversation={selectedConversation} /> : null}
           {panel === "patient" ? <PatientPanel patient={patient} family={family} nextAppointments={nextAppointments} procedures={procedures} /> : null}
           {panel === "call" ? <CallInsightsPanel conversation={selectedConversation} callAi={callAi} callTranscript={callTranscript} tasks={tasks} /> : null}
@@ -779,7 +779,7 @@ function PhonePanel({
     { action: "END_CALL", label: "End", icon: "☎", conferenceRequired: false },
   ];
   return (
-    <div className="flex h-[calc(100vh-150px)] min-h-[640px] overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-sm">
+    <div className="flex h-full min-h-0 overflow-hidden bg-white">
       <nav className="flex w-16 shrink-0 flex-col items-center border-r border-neutral-200 bg-white py-4 text-[10px] font-semibold text-neutral-500">
         {[
           ["Keypad", "⠿", "#phone-dialer"],
@@ -796,8 +796,8 @@ function PhonePanel({
         ))}
       </nav>
 
-      <aside id="phone-dialer" className="flex w-[304px] shrink-0 flex-col border-r border-neutral-200 bg-[#fbfcff]">
-        <div className="border-b border-neutral-200 p-4">
+      <aside id="phone-dialer" className="flex min-h-0 w-[304px] shrink-0 flex-col border-r border-neutral-200 bg-[#fbfcff]">
+        <div className="shrink-0 border-b border-neutral-200 p-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold">Active calls</h3>
             <form action={refreshCarrierStatusAction}>
@@ -820,7 +820,7 @@ function PhonePanel({
           </div>
         </div>
 
-        <form action={softphoneDialAction} className="flex flex-1 flex-col gap-3 p-4">
+        <form action={softphoneDialAction} className="app-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-4">
           <select name="fromNumberId" className="h-9 rounded-full border border-neutral-200 bg-white px-3 text-xs font-semibold text-violet-700">
             <option value="">Caller ID · default</option>
             {activeNumberOptions.map((number) => (
@@ -833,7 +833,7 @@ function PhonePanel({
             {dialKeys.map((key) => {
               const [digit, letters] = key.split(" ");
               return (
-                <button key={key} type="button" className="h-10 rounded-full bg-neutral-100 text-base font-semibold text-neutral-950">
+                <button key={key} type="button" className="h-9 rounded-full bg-neutral-100 text-base font-semibold text-neutral-950">
                   {digit}<span className="block text-[7px] font-bold text-neutral-500">{letters ?? ""}</span>
                 </button>
               );
@@ -841,15 +841,15 @@ function PhonePanel({
           </div>
           <input type="hidden" name="conversationId" value={conversation?.id ?? String(selectedActiveCall?.conversationId ?? "")} />
           <input type="hidden" name="activeCallId" value={String(selectedActiveCall?.id ?? "")} />
-          <div className="mt-auto grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 pt-1">
             <button name="mode" value="VOICE_AI" className="h-11 rounded-full bg-emerald-600 text-sm font-semibold text-white shadow-sm">Voice AI call</button>
             <button name="mode" value="OPERATOR_BRIDGE" className="h-11 rounded-full bg-blue-600 text-sm font-semibold text-white shadow-sm">Bridge call</button>
           </div>
-          <button formAction={createVideoSessionAction} formNoValidate className="h-10 rounded-full border border-neutral-200 bg-white text-sm font-semibold">Create Zoom video</button>
+          <button formAction={createVideoSessionAction} formNoValidate className="h-10 shrink-0 rounded-full border border-neutral-200 bg-white text-sm font-semibold">Create Zoom video</button>
           <p className="text-[11px] leading-4 text-neutral-500">Voice AI dials the patient directly. Bridge calls require your callback number so Twilio can connect you first.</p>
         </form>
 
-        <div className="grid grid-cols-3 gap-2 border-t border-neutral-200 p-4 text-center">
+        <div className="grid shrink-0 grid-cols-3 gap-2 border-t border-neutral-200 p-3 text-center">
           <MetricTile label="Open" value={metrics.openCalls ?? "0"} />
           <MetricTile label="Missed" value={metrics.missedCalls ?? "0"} />
           <MetricTile label="VM" value={metrics.newVoicemails ?? "0"} />
@@ -883,10 +883,10 @@ function PhonePanel({
         </div>
 
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px]">
-          <main className="min-w-0 overflow-hidden p-5">
+          <main className="app-scrollbar min-h-0 min-w-0 overflow-y-auto p-5">
             <h2 className="text-center text-2xl font-semibold">{conversation?.callerName ?? patient.name ?? "Phone workspace"}</h2>
             <div className="mt-4 overflow-hidden rounded-2xl bg-neutral-900 shadow-sm">
-              <div className="relative h-[clamp(240px,38vh,390px)] bg-[radial-gradient(circle_at_45%_35%,#64748b,#111827_58%,#020617)]">
+              <div className="relative h-[clamp(220px,34vh,340px)] bg-[radial-gradient(circle_at_45%_35%,#64748b,#111827_58%,#020617)]">
                 <div className="absolute inset-0 grid place-items-center text-center text-white">
                   <div>
                     <p className="text-6xl font-black">{initials(null, null, conversation?.callerName ?? patient.name ?? "Video")}</p>
@@ -901,7 +901,7 @@ function PhonePanel({
               </div>
             </div>
 
-            <div className="mt-4 flex items-center justify-center gap-3">
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
               <span className="rounded-md bg-emerald-500 px-2 py-1 text-sm font-bold text-white">02:00</span>
               {liveControlActions.map((control) => {
                 const disabled = !selectedActiveCall || (control.conferenceRequired && !hasConferenceBridge);
@@ -954,7 +954,7 @@ function PhonePanel({
             </div>
           </main>
 
-          <aside id="phone-setup" className="min-h-0 overflow-y-auto border-l border-neutral-200 bg-[#f8fafc] p-4">
+          <aside id="phone-setup" className="app-scrollbar min-h-0 overflow-y-auto border-l border-neutral-200 bg-[#f8fafc] p-4">
             <section className="rounded-2xl border border-neutral-200 bg-white p-4">
               <h3 className="text-base font-semibold">Setup inventory</h3>
               <div className="mt-3 space-y-2">
