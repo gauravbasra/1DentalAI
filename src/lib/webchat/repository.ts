@@ -1562,7 +1562,10 @@ async function buildRescheduleReply(input: {
       );
     }
   }
-  const appointments = await query<{
+  const conversationAppointment = await getConversationAppointment(input.tenantId, input.conversationId);
+  const appointments = conversationAppointment
+    ? { rows: [conversationAppointment] }
+    : await query<{
     id: string;
     patientId: string;
     startsAt: string;
@@ -1583,7 +1586,7 @@ async function buildRescheduleReply(input: {
      order by a."startsAt"
      limit 3`,
     [input.tenantId, phoneDigits, email],
-  );
+      );
   if (!appointments.rows.length) {
     return schedulingDecision(
       "I couldn’t find an upcoming appointment from that mobile number or email. Please check the contact detail or ask the front desk to help.",
@@ -1594,7 +1597,7 @@ async function buildRescheduleReply(input: {
   }
   const verified = await hasVerifiedRescheduleOtp(input.tenantId, input.conversationId, phoneDigits);
   if (!verified) {
-    const challenge = await createAndSendRescheduleOtp({
+    const challenge = await sendRescheduleOtpChallenge({
       tenantId: input.tenantId,
       conversationId: input.conversationId,
       phone: phoneForOtp,
@@ -1640,6 +1643,53 @@ async function buildRescheduleReply(input: {
     "SLOTS_READ_FROM_PMS",
     { kind: "RESCHEDULE_SLOT_OFFER", appointmentId: appointments.rows[0].id, patientId: appointments.rows[0].patientId, slug: procedure.slug, serviceLabel: procedure.label, options: slots },
   );
+}
+
+async function getConversationAppointment(tenantId: string, conversationId: string) {
+  const result = await query<{
+    id: string;
+    patientId: string;
+    startsAt: string;
+    appointmentType: string;
+    providerName: string | null;
+  }>(
+    `select a."id", a."patientId", a."startsAt"::text as "startsAt", a."appointmentType", pr."displayName" as "providerName"
+     from "PatientWebChatConversation" c
+     join "PmsAppointment" a on a."id" = c."appointmentId" and a."tenantId" = c."tenantId"
+     left join "PmsProvider" pr on pr."id" = a."providerId"
+     where c."tenantId" = $1
+       and c."id" = $2
+       and a."status" not in ('CANCELED', 'NO_SHOW', 'BROKEN', 'COMPLETED')
+       and a."startsAt" >= current_timestamp
+     limit 1`,
+    [tenantId, conversationId],
+  ).catch(() => ({ rows: [] }));
+  return result.rows[0] ?? null;
+}
+
+async function sendRescheduleOtpChallenge(input: {
+  tenantId: string;
+  conversationId: string;
+  phone?: string;
+  patientId?: string;
+  appointmentId?: string;
+  consentAccepted: boolean;
+}) {
+  try {
+    return await createAndSendRescheduleOtp(input);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Reschedule verification could not be started.";
+    await addWebchatAudit(input.tenantId, "WEBCHAT_RESCHEDULE_OTP_ERROR", input.conversationId, "BLOCKED", {
+      appointmentId: input.appointmentId,
+      reason,
+    }).catch(() => null);
+    return {
+      otpId: null,
+      messageId: null,
+      deliveryStatus: "BLOCKED",
+      reason,
+    };
+  }
 }
 
 async function getLatestRescheduleOffer(tenantId: string, conversationId: string): Promise<RescheduleOffer | null> {
