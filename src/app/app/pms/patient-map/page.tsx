@@ -1,11 +1,44 @@
+import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { Money, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
 import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
-import { getPatientMapAnalytics, parsePatientMapFilters } from "@/lib/pms-patient-map-repository";
+import { createPatientMapReportSnapshot, createPatientMapSavedSegment, getPatientMapAnalytics, parsePatientMapFilters } from "@/lib/pms-patient-map-repository";
 import { PatientMapClient } from "./patient-map-client";
 
 export const dynamic = "force-dynamic";
+
+async function saveSegmentAction(formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  const filters = parsePatientMapFilters(Object.fromEntries(formData.entries()) as Record<string, string>);
+  const analytics = await getPatientMapAnalytics(session.tenantId, filters);
+  await createPatientMapSavedSegment({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+    segmentName: String(formData.get("segmentName") ?? "Patient map segment"),
+    description: String(formData.get("description") ?? ""),
+    filters,
+    mappedPatients: analytics.stats.mappedPatients,
+    valueCents: analytics.stats.productionCents + analytics.stats.treatmentCents,
+  });
+  revalidatePath("/app/pms/patient-map");
+}
+
+async function snapshotReportAction(formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  const filters = parsePatientMapFilters(Object.fromEntries(formData.entries()) as Record<string, string>);
+  const analytics = await getPatientMapAnalytics(session.tenantId, filters);
+  await createPatientMapReportSnapshot({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+    reportName: String(formData.get("reportName") ?? "Patient map report"),
+    filters,
+    analytics,
+  });
+  revalidatePath("/app/pms/patient-map");
+}
 
 export default async function PatientMapPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
@@ -14,6 +47,17 @@ export default async function PatientMapPage({ searchParams }: { searchParams: P
   const filters = parsePatientMapFilters(params);
   const analytics = await getPatientMapAnalytics(session.tenantId, filters);
   const googleMapsKey = process.env.GOOGLE_MAPS_API_KEY ?? "";
+  const exportHref = `/api/pms/patient-map/export?${new URLSearchParams({
+    service: filters.service,
+    insurance: filters.insurance,
+    ageBand: filters.ageBand,
+    gender: filters.gender,
+    provider: filters.provider,
+    referralSource: filters.referralSource,
+    valueBand: filters.valueBand,
+    highValue: String(filters.highValueOnly),
+    membership: String(filters.membershipOnly),
+  }).toString()}`;
 
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>
@@ -43,10 +87,22 @@ export default async function PatientMapPage({ searchParams }: { searchParams: P
             <Select label="Insurance" name="insurance" value={filters.insurance} options={analytics.filters.insurances} />
             <Select label="Age band" name="ageBand" value={filters.ageBand} options={analytics.filters.ageBands} />
             <Select label="Gender" name="gender" value={filters.gender} options={analytics.filters.genders} />
+            <Select label="Provider" name="provider" value={filters.provider} options={analytics.filters.providers} />
+            <Select label="Referral source" name="referralSource" value={filters.referralSource} options={analytics.filters.referralSources} />
+            <Select label="Value band" name="valueBand" value={filters.valueBand} options={analytics.filters.valueBands} />
+            <Select label="Map mode" name="mapMode" value={filters.mapMode} options={["markers", "heatmap"]} />
             <Toggle label="High-value services only" name="highValue" checked={filters.highValueOnly} />
             <Toggle label="Membership signal only" name="membership" checked={filters.membershipOnly} />
             <button className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white">Apply filters</button>
           </form>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <a href={exportHref} className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-center text-xs font-semibold text-neutral-700">Export CSV</a>
+            <form action={snapshotReportAction}>
+              <HiddenFilters filters={filters} />
+              <input type="hidden" name="reportName" value="Patient geography snapshot" />
+              <button className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700">Snapshot</button>
+            </form>
+          </div>
           <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">Data status</p>
             <div className="mt-3 grid gap-2 text-xs leading-5 text-neutral-600">
@@ -59,7 +115,34 @@ export default async function PatientMapPage({ searchParams }: { searchParams: P
         </PmsCard>
 
         <PmsCard title="Google patient map" eyebrow="Household clusters">
-          <PatientMapClient apiKey={googleMapsKey} points={analytics.points} />
+          <PatientMapClient apiKey={googleMapsKey} points={analytics.points} mode={filters.mapMode} />
+        </PmsCard>
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+        <PmsCard title="Saved map segments" eyebrow="Reusable drilldowns">
+          <form action={saveSegmentAction} className="grid gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+            <HiddenFilters filters={filters} />
+            <Input label="Segment name" name="segmentName" defaultValue="High-value geography segment" />
+            <Input label="Description" name="description" defaultValue="Saved from current patient map filters" />
+            <button className="rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white">Save current segment</button>
+          </form>
+          <div className="mt-3 grid gap-2">
+            {analytics.savedSegments.map((segment) => (
+              <div key={segment.id} className="rounded-lg bg-neutral-50 p-3 text-sm">
+                <p className="font-semibold text-neutral-950">{segment.segmentName}</p>
+                <p className="mt-1 text-xs text-neutral-500">{segment.lastPatientCount} patients · <Money cents={segment.lastValueCents} /> value · {segment.lastRunAt ? new Date(segment.lastRunAt).toLocaleDateString() : "not run"}</p>
+              </div>
+            ))}
+          </div>
+        </PmsCard>
+        <PmsCard title="Geographic opportunity score" eyebrow="ZIP, service, payer, and referral concentration">
+          <div className="grid gap-3 md:grid-cols-2">
+            <Breakdown title="ZIP codes" rows={analytics.zipAnalytics} />
+            <Breakdown title="Services" rows={analytics.serviceAnalytics} />
+            <Breakdown title="Payers" rows={analytics.payerAnalytics} />
+            <Breakdown title="Referral sources" rows={analytics.referralAnalytics} />
+          </div>
         </PmsCard>
       </section>
 
@@ -86,7 +169,7 @@ export default async function PatientMapPage({ searchParams }: { searchParams: P
                     <td className="px-3 py-3 text-neutral-700">{point.patientCount} / {point.familyMemberCount}</td>
                     <td className="max-w-xs px-3 py-3 text-xs leading-5 text-neutral-600">{point.serviceLines.slice(0, 4).join(", ") || "No service history"}</td>
                     <td className="max-w-xs px-3 py-3 text-xs leading-5 text-neutral-600">{point.payerNames.slice(0, 3).join(", ") || "No payer"}</td>
-                    <td className="px-3 py-3 text-right font-semibold text-neutral-950"><Money cents={point.productionCents + point.treatmentCents} /></td>
+                    <td className="px-3 py-3 text-right font-semibold text-neutral-950"><Money cents={point.productionCents + point.treatmentCents} /><p className="text-xs text-neutral-500">score {point.opportunityScore}</p></td>
                   </tr>
                 ))}
               </tbody>
@@ -123,8 +206,17 @@ function Select({ label, name, value, options }: { label: string; name: string; 
       {label}
       <select name={name} defaultValue={value} className="min-h-10 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-950 outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100">
         <option value="all">All</option>
-        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+        {options.map((option) => <option key={option} value={option}>{optionLabel(option)}</option>)}
       </select>
+    </label>
+  );
+}
+
+function Input({ label, name, defaultValue }: { label: string; name: string; defaultValue: string }) {
+  return (
+    <label className="grid gap-1 text-xs font-semibold text-neutral-700">
+      {label}
+      <input name={name} defaultValue={defaultValue} className="min-h-10 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-950 outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-100" />
     </label>
   );
 }
@@ -145,4 +237,52 @@ function Readout({ title, body }: { title: string; body: string }) {
       <p className="mt-1 text-xs leading-5 text-neutral-600">{body}</p>
     </div>
   );
+}
+
+function Breakdown({ title, rows }: { title: string; rows: Array<{ label: string; mappedPatients: number; productionCents: number; treatmentCents: number; highValuePatients: number; membershipSignals: number }> }) {
+  return (
+    <div className="rounded-lg border border-neutral-200 bg-white p-3">
+      <p className="text-sm font-semibold text-neutral-950">{title}</p>
+      <div className="mt-3 grid gap-2">
+        {rows.slice(0, 5).map((row) => (
+          <div key={`${title}-${row.label}`} className="rounded-md bg-neutral-50 p-2 text-xs">
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-semibold text-neutral-900">{optionLabel(row.label)}</p>
+              <p className="text-right font-semibold text-neutral-950"><Money cents={row.productionCents + row.treatmentCents} /></p>
+            </div>
+            <p className="mt-1 text-neutral-500">{row.mappedPatients} patients · {row.highValuePatients} high value · {row.membershipSignals} membership</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HiddenFilters({ filters }: { filters: ReturnType<typeof parsePatientMapFilters> }) {
+  return (
+    <>
+      <input type="hidden" name="service" value={filters.service} />
+      <input type="hidden" name="insurance" value={filters.insurance} />
+      <input type="hidden" name="ageBand" value={filters.ageBand} />
+      <input type="hidden" name="gender" value={filters.gender} />
+      <input type="hidden" name="provider" value={filters.provider} />
+      <input type="hidden" name="referralSource" value={filters.referralSource} />
+      <input type="hidden" name="valueBand" value={filters.valueBand} />
+      <input type="hidden" name="mapMode" value={filters.mapMode} />
+      <input type="hidden" name="highValue" value={String(filters.highValueOnly)} />
+      <input type="hidden" name="membership" value={String(filters.membershipOnly)} />
+    </>
+  );
+}
+
+function optionLabel(value: string) {
+  const labels: Record<string, string> = {
+    under_1k: "Under $1K",
+    "1k_5k": "$1K-$5K",
+    "5k_10k": "$5K-$10K",
+    "10k_plus": "$10K+",
+    markers: "Markers",
+    heatmap: "Heatmap",
+  };
+  return labels[value] ?? value;
 }

@@ -22,6 +22,8 @@ const requiredTables = [
   "WorkbenchAuditEvent",
   "PmsFamilyAccount",
   "PmsPatientGeoCoordinate",
+  "PmsPatientMapSavedSegment",
+  "PmsPatientMapReportSnapshot",
   "PmsPatient",
   "PmsProvider",
   "PmsStaffMember",

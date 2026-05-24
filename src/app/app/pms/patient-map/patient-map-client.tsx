@@ -11,7 +11,11 @@ declare global {
         Marker: new (options: Record<string, unknown>) => GoogleMarker;
         InfoWindow: new (options?: Record<string, unknown>) => GoogleInfoWindow;
         LatLngBounds: new () => GoogleLatLngBounds;
+        LatLng: new (lat: number, lng: number) => unknown;
         Size: new (width: number, height: number) => unknown;
+        visualization?: {
+          HeatmapLayer: new (options: Record<string, unknown>) => GoogleHeatmapLayer;
+        };
       };
     };
   }
@@ -32,12 +36,16 @@ type GoogleInfoWindow = {
 type GoogleLatLngBounds = {
   extend: (position: { lat: number; lng: number }) => void;
 };
+type GoogleHeatmapLayer = {
+  setMap: (map: GoogleMap | null) => void;
+};
 
 let googleMapsLoader: Promise<void> | null = null;
 
-export function PatientMapClient({ apiKey, points }: { apiKey: string; points: PatientMapPoint[] }) {
+export function PatientMapClient({ apiKey, points, mode }: { apiKey: string; points: PatientMapPoint[]; mode: string }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const markersRef = useRef<GoogleMarker[]>([]);
+  const heatmapRef = useRef<GoogleHeatmapLayer | null>(null);
   const [status, setStatus] = useState(apiKey ? "Loading Google Maps..." : "Google Maps API key is not configured.");
   const center = useMemo(() => getCenter(points), [points]);
 
@@ -62,11 +70,29 @@ export function PatientMapClient({ apiKey, points }: { apiKey: string; points: P
         });
         markersRef.current.forEach((marker) => marker.setMap(null));
         markersRef.current = [];
+        heatmapRef.current?.setMap(null);
+        heatmapRef.current = null;
         const bounds = new window.google.maps.LatLngBounds();
         const infoWindow = new window.google.maps.InfoWindow();
 
+        if (mode === "heatmap" && window.google.maps.visualization?.HeatmapLayer) {
+          heatmapRef.current = new window.google.maps.visualization.HeatmapLayer({
+            data: points.map((point) => ({
+              location: new window.google!.maps.LatLng(point.latitude, point.longitude),
+              weight: Math.max(1, point.patientCount + point.opportunityScore / 10),
+            })),
+            map,
+            radius: 32,
+            opacity: 0.72,
+          });
+        }
+
         for (const point of points) {
           const position = { lat: point.latitude, lng: point.longitude };
+          if (mode === "heatmap") {
+            bounds.extend(position);
+            continue;
+          }
           const marker = new window.google.maps.Marker({
             position,
             map,
@@ -101,8 +127,10 @@ export function PatientMapClient({ apiKey, points }: { apiKey: string; points: P
       disposed = true;
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
+      heatmapRef.current?.setMap(null);
+      heatmapRef.current = null;
     };
-  }, [apiKey, center, points]);
+  }, [apiKey, center, mode, points]);
 
   return (
     <div className="min-w-0">
@@ -135,7 +163,7 @@ function loadGoogleMaps(apiKey: string) {
     script.dataset["1dentalaiGoogleMaps"] = "true";
     script.async = true;
     script.defer = true;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly&libraries=visualization`;
     script.onload = () => resolve();
     script.onerror = () => reject(new Error("Google Maps script failed to load."));
     document.head.appendChild(script);

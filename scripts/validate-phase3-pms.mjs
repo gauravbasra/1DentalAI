@@ -21,6 +21,7 @@ const requiredFiles = [
   "src/app/app/pms/documents/page.tsx",
   "src/app/app/pms/reports/page.tsx",
   "src/app/app/pms/tasks/page.tsx",
+  "src/app/app/pms/patient-map/page.tsx",
   "src/app/app/engagement/page.tsx",
   "src/app/app/rcm/page.tsx",
   "src/app/app/phone/page.tsx",
@@ -35,6 +36,7 @@ const requiredFiles = [
   "src/app/api/pms/perio/[patientId]/route.ts",
   "src/app/api/pms/clinical-workflows/route.ts",
   "src/app/api/pms/inventory/route.ts",
+  "src/app/api/pms/patient-map/export/route.ts",
   "src/app/api/pms/perio/[patientId]/complete/route.ts",
   "src/app/api/pms/scribe/generate/route.ts",
   "src/app/api/pms/scribe/save/route.ts",
@@ -49,10 +51,14 @@ const requiredFiles = [
   "prisma/migrations/202605232130_pms_clinical_process_workflows/migration.sql",
   "prisma/migrations/202605240815_pms_inventory_marketplace/migration.sql",
   "prisma/migrations/202605240925_pms_inventory_common_items_analytics/migration.sql",
+  "prisma/migrations/202605241005_pms_patient_map_segments/migration.sql",
 ];
 
 const requiredSchemaModels = [
   "PmsPatient",
+  "PmsPatientGeoCoordinate",
+  "PmsPatientMapSavedSegment",
+  "PmsPatientMapReportSnapshot",
   "PmsProvider",
   "PmsOperatory",
   "PmsAppointment",
@@ -347,6 +353,9 @@ for (const token of ["MarketingCampaign", "MarketingLandingPage", "AiStudioAsset
 
 const huddlePage = fs.readFileSync("src/app/app/huddle/page.tsx", "utf8");
 const patientFinderPage = fs.readFileSync("src/app/app/patient-finder/page.tsx", "utf8");
+const patientMapPage = fs.readFileSync("src/app/app/pms/patient-map/page.tsx", "utf8");
+const patientMapRepository = fs.readFileSync("src/lib/pms-patient-map-repository.ts", "utf8");
+const patientMapExportRoute = fs.readFileSync("src/app/api/pms/patient-map/export/route.ts", "utf8");
 const patientIntelligenceRepository = fs.readFileSync("src/lib/patient-intelligence-repository.ts", "utf8");
 for (const token of ["MorningHuddleSnapshot", "getMorningHuddle", "Morning huddle", "Perfect Time Slot opening map", "Yesterday, today, and tomorrow operating plan", "Provider goals and clinical hours", "Service-line production", "Huddle work queue", "Suggested patients", "getProviderGoalPacing", "getServiceLineProduction", "getHuddleWorkQueue", "getSuggestedPatients", "getHuddleAnalytics", "Room/provider production"]) {
   if (!`${schema}\n${huddlePage}\n${patientIntelligenceRepository}`.includes(token)) {
@@ -358,6 +367,13 @@ for (const token of ["MorningHuddleSnapshot", "getMorningHuddle", "Morning huddl
 for (const token of ["PatientFinderSavedFilter", "PatientFinderFollowUp", "getPatientFinderCenter", "Opportunity recipes", "Follow-up work queue", "Create follow-up", "getRecipeSourceContext", "unscheduled_treatment", "high_intent_phone"]) {
   if (!`${schema}\n${patientFinderPage}\n${patientIntelligenceRepository}`.includes(token)) {
     console.error(`Patient Finder token missing: ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const token of ["PmsPatientGeoCoordinate", "PmsPatientMapSavedSegment", "PmsPatientMapReportSnapshot", "getPatientMapAnalytics", "createPatientMapSavedSegment", "createPatientMapReportSnapshot", "zipAnalytics", "serviceAnalytics", "payerAnalytics", "referralAnalytics", "Export CSV", "Saved map segments", "heatmap", "opportunityScore"]) {
+  if (!`${schema}\n${patientMapPage}\n${patientMapRepository}\n${patientMapExportRoute}`.includes(token)) {
+    console.error(`Patient map analytics token missing: ${token}`);
     process.exit(1);
   }
 }

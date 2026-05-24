@@ -416,6 +416,42 @@ model PmsPatientGeoCoordinate {
   @@index([latitude, longitude])
 }
 
+model PmsPatientMapSavedSegment {
+  id             String   @id @default(cuid())
+  tenantId       String
+  segmentName    String
+  filters        Json
+  description    String?
+  createdByRole  String
+  lastRunAt      DateTime?
+  lastPatientCount Int    @default(0)
+  lastValueCents Int      @default(0)
+  status         String   @default("ACTIVE")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@unique([tenantId, segmentName])
+}
+
+model PmsPatientMapReportSnapshot {
+  id             String   @id @default(cuid())
+  tenantId       String
+  segmentId      String?
+  reportName     String
+  filters        Json
+  mappedFamilies Int      @default(0)
+  mappedPatients Int      @default(0)
+  productionCents Int     @default(0)
+  treatmentCents Int      @default(0)
+  payload        Json
+  createdByRole  String
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([segmentId])
+}
+
 model PmsPatient {
   id              String    @id @default(cuid())
   tenantId        String
