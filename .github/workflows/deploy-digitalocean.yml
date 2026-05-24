@@ -34,6 +34,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: PMS production gates
+        run: npm run test:pms
+
       - name: Build
         run: npm run build
 
