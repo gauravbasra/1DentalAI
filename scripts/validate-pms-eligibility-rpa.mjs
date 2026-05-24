@@ -21,6 +21,8 @@ const browserRunner = read("src/lib/payer-portal-browser-runner.ts");
 const portalDemo = read("scripts/validate-payer-portal-demo-e2e.mjs");
 const artifacts = read("src/lib/pms-eligibility-artifacts.ts");
 const route = read("src/app/api/pms/insurance/eligibility-rpa/route.ts");
+const portalDirectoryRoute = read("src/app/api/pms/payers/portal-directory/route.ts");
+const portalSettingsUi = read("src/app/app/connectors/payer-portal-settings-client.tsx");
 const pkg = read("package.json");
 
 function requireTokens(label, source, tokens) {
@@ -112,6 +114,11 @@ requireTokens("payer artifact service", payerService, [
   "ELIGIBILITY_PDF",
   "createPayerRpaRunLog",
   "recordPayerGeneratedArtifact",
+  "getPayerPortalDirectory",
+  "upsertPayerPortalSettings",
+  "PAYER_PORTAL_SETTINGS_UPSERTED",
+  "noCredentialsStoredInUrlDirectory",
+  "PAYER_PORTAL_EVIDENCE_REQUIRED",
   "noPhiInLogs",
   "errorMessageRedacted",
 ]);
@@ -185,11 +192,35 @@ requireTokens("eligibility RPA API route", route, [
   "applyEligibilityEvidenceToPms",
   "prepareArtifacts",
 ]);
+requireTokens("payer portal directory API route", portalDirectoryRoute, [
+  "requirePmsApiSession",
+  "auth.session.tenantId",
+  "auth.session.roleKey",
+  "getPayerPortalDirectory",
+  "upsertPayerPortalSettings",
+  "supportedTasks",
+]);
+requireTokens("payer portal settings UI", portalSettingsUi, [
+  "Portal URL directory",
+  "Filter by payer, payer ID, or host",
+  "role=\"dialog\"",
+  "supportedTasks",
+  "credentialStatus",
+  "No usernames or passwords are stored in this directory",
+  "Save portal settings",
+  "READY_FOR_RPA",
+]);
 if (/body\??\.tenantId/.test(route) || /tenantId:\s*body/.test(route)) {
   failures.push("eligibility RPA API route must not accept tenantId from request body.");
 }
 if (/actorRole:\s*body/.test(route)) {
   failures.push("eligibility RPA API route must not accept actorRole from request body.");
+}
+if (/body\??\.tenantId/.test(portalDirectoryRoute) || /tenantId:\s*body/.test(portalDirectoryRoute)) {
+  failures.push("payer portal directory API route must not accept tenantId from request body.");
+}
+if (/actorRole:\s*body/.test(portalDirectoryRoute)) {
+  failures.push("payer portal directory API route must not accept actorRole from request body.");
 }
 requireTokens("package", pkg, ["\"playwright\""]);
 

@@ -1,6 +1,8 @@
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { Money, PmsCard, StatusFor } from "@/components/pms-ui";
+import { PayerPortalSettingsClient } from "@/app/app/connectors/payer-portal-settings-client";
+import { requireAuth } from "@/lib/auth";
 import {
   createConnectorRouteDecision,
   getConnectorControlCenter,
@@ -9,15 +11,17 @@ import {
   updateConnectorInstallation,
 } from "@/lib/connector-control-repository";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
+import { getPayerPortalDirectory, upsertPayerPortalSettings } from "@/lib/payer-network-repository";
 
 export const dynamic = "force-dynamic";
 
-type ConnectorView = "overview" | "credentials" | "installations" | "capabilities" | "tests" | "routes";
+type ConnectorView = "overview" | "credentials" | "payer-portals" | "installations" | "capabilities" | "tests" | "routes";
 type SearchParams = Promise<{ role?: string; view?: string; saved?: string; error?: string; validated?: string; feedback?: string }>;
 
 const connectorViews: Array<{ key: ConnectorView; label: string; description: string }> = [
   { key: "overview", label: "Overview", description: "Readiness, blockers, and spend." },
   { key: "credentials", label: "API keys", description: "Store and rotate encrypted provider keys." },
+  { key: "payer-portals", label: "Payer portals", description: "Configure payer URLs, RPA tasks, and credential references." },
   { key: "installations", label: "Installations", description: "Edit tenant/location connector gates." },
   { key: "capabilities", label: "Capabilities", description: "Map workflows to connector abilities." },
   { key: "tests", label: "Smoke tests", description: "Record webhook and credential evidence." },
@@ -72,6 +76,25 @@ async function recordHealthCheckAction(formData: FormData) {
   revalidatePath("/app/connectors");
 }
 
+async function updatePayerPortalSettingsAction(formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await upsertPayerPortalSettings({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+    payerRegistryEntryId: value(formData, "payerRegistryEntryId"),
+    portalUrl: value(formData, "portalUrl"),
+    loginPath: value(formData, "loginPath"),
+    eligibilityPath: value(formData, "eligibilityPath"),
+    supportedTasks: formData.getAll("supportedTasks").map((item) => String(item)),
+    credentialStatus: value(formData, "credentialStatus"),
+    credentialVaultId: value(formData, "credentialVaultId"),
+    ownerRoleKey: value(formData, "ownerRoleKey"),
+    notes: value(formData, "notes"),
+  });
+  revalidatePath("/app/connectors");
+}
+
 function textList(value: unknown) {
   if (Array.isArray(value)) return value.join(", ");
   return "";
@@ -96,9 +119,14 @@ function formatDate(value: string | Date | null | undefined) {
 
 export default async function ConnectorControlPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
-  const role = getRole(params.role) ?? getRole("owner_dentist");
+  const session = await requireAuth();
+  const role = getRole(params.role) ?? getRole(session.roleKey) ?? getRole("owner_dentist");
   const activeView = connectorViews.some((view) => view.key === params.view) ? params.view as ConnectorView : "overview";
-  const [data, openAiConfig] = await Promise.all([getConnectorControlCenter(), getOpenAiWebchatConfig()]);
+  const [data, openAiConfig, payerPortalDirectory] = await Promise.all([
+    getConnectorControlCenter(session.tenantId),
+    getOpenAiWebchatConfig(session.tenantId),
+    getPayerPortalDirectory(session.tenantId),
+  ]);
   const openAiInstallation = data.installations.find((installation) => installation.category === "AI_LLM" || /openai/i.test(String(installation.definitionName)));
   const metrics = data.metrics ?? {
     definitions: "0",
@@ -256,6 +284,10 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
           </div>
         </PmsCard>
       </div>
+      ) : null}
+
+      {activeView === "payer-portals" ? (
+        <PayerPortalSettingsClient rows={payerPortalDirectory} action={updatePayerPortalSettingsAction} />
       ) : null}
 
       {activeView === "installations" ? (
@@ -529,21 +561,19 @@ export default async function ConnectorControlPage({ searchParams }: { searchPar
 
 function ConnectorViewNav({ activeView, roleKey }: { activeView: ConnectorView; roleKey: RoleKey }) {
   return (
-    <nav aria-label="Connector settings" className="mb-5 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+    <nav aria-label="Connector settings" className="app-scrollbar sticky top-[124px] z-30 mb-5 flex gap-1 overflow-x-auto rounded-lg border border-neutral-200 bg-white p-1 shadow-sm md:top-[112px] xl:top-[96px]">
       {connectorViews.map((view) => (
         <a
           key={view.key}
           href={`/app/connectors?role=${roleKey}&view=${view.key}`}
-          className={`rounded-lg border p-3 text-left transition ${
+          title={view.description}
+          className={`min-h-9 shrink-0 rounded-md px-3 py-2 text-xs font-semibold leading-5 transition ${
             activeView === view.key
-              ? "border-neutral-950 bg-neutral-950 text-white shadow-sm"
-              : "border-neutral-200 bg-white text-neutral-700 hover:border-neutral-400 hover:text-neutral-950"
+              ? "bg-neutral-950 text-white"
+              : "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950"
           }`}
         >
-          <span className="block text-sm font-semibold">{view.label}</span>
-          <span className={`mt-1 block text-xs leading-5 ${activeView === view.key ? "text-neutral-300" : "text-neutral-500"}`}>
-            {view.description}
-          </span>
+          {view.label}
         </a>
       ))}
     </nav>

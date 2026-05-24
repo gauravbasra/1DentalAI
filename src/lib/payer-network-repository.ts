@@ -176,6 +176,44 @@ type ReadinessRow = {
   credentialReferenceId: string | null;
 };
 
+export type PayerPortalDirectoryRow = {
+  payerRegistryEntryId: string;
+  payerName: string;
+  primaryPayerId: string;
+  payerType: string | null;
+  coverageType: string | null;
+  portalUrl: string | null;
+  portalHost: string | null;
+  loginPath: string | null;
+  eligibilityPath: string | null;
+  portalRpaProfile: Record<string, unknown> | null;
+  routeType: string | null;
+  networkType: string | null;
+  manualFallbackAllowed: boolean | null;
+  enrollmentStatus: string | null;
+  credentialingStatus: string | null;
+  credentialReferenceId: string | null;
+  credentialVaultId: string | null;
+  credentialStatus: string | null;
+  credentialOwnerRole: string | null;
+  credentialNotes: string | null;
+  layoutCount: number;
+  activeLayoutCount: number;
+  lastLayoutVerifiedAt: string | null;
+  supportedTasks: string[];
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+const PORTAL_TASK_TO_TRANSACTION_FAMILY: Record<string, PayerTransactionFamily> = {
+  ELIGIBILITY: "ELIGIBILITY_270_271",
+  CLAIM_STATUS: "CLAIM_STATUS_276_277",
+  ERA: "ERA_835",
+  EOB: "ERA_835",
+  PRIOR_AUTH: "PRIOR_AUTH",
+  ATTACHMENTS: "ATTACHMENT_275",
+};
+
 export function normalizePayerName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -351,6 +389,263 @@ export async function resolveInsurancePlanPayer(input: {
     payer: best ?? null,
     candidates: matches,
   };
+}
+
+function normalizePortalUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error("Portal URL is required.");
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("Portal URL must be a valid absolute URL.");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("Payer portal URLs must use HTTPS.");
+  }
+  parsed.hash = "";
+  return { portalUrl: parsed.toString(), portalHost: parsed.hostname.toLowerCase() };
+}
+
+function normalizePortalPath(value: string | undefined) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function normalizePortalTasks(tasks: string[] | undefined) {
+  const normalized = Array.from(new Set((tasks ?? []).map((task) => task.trim().toUpperCase()).filter(Boolean)));
+  return normalized.filter((task) => PORTAL_TASK_TO_TRANSACTION_FAMILY[task]);
+}
+
+export async function getPayerPortalDirectory(tenantId = defaultTenantId) {
+  const result = await query<PayerPortalDirectoryRow>(
+    `select p."id" as "payerRegistryEntryId",
+       p."payerName",
+       p."primaryPayerId",
+       p."payerType",
+       p."coverageType",
+       n."portalUrl",
+       coalesce(cr."portalHost", nullif(lower(regexp_replace(n."portalUrl", '^https://([^/?#]+).*$','\\1')), n."portalUrl")) as "portalHost",
+       (n."portalRpaProfile"->>'loginPath') as "loginPath",
+       (n."portalRpaProfile"->>'eligibilityPath') as "eligibilityPath",
+       n."portalRpaProfile",
+       n."routeType",
+       n."networkType",
+       n."manualFallbackAllowed",
+       n."enrollmentStatus",
+       n."credentialingStatus",
+       cr."id" as "credentialReferenceId",
+       cr."credentialVaultId",
+       cr."credentialStatus",
+       cr."ownerRoleKey" as "credentialOwnerRole",
+       cr."notes" as "credentialNotes",
+       coalesce(layouts."layoutCount", 0)::int as "layoutCount",
+       coalesce(layouts."activeLayoutCount", 0)::int as "activeLayoutCount",
+       layouts."lastLayoutVerifiedAt"::text as "lastLayoutVerifiedAt",
+       coalesce(tasks."supportedTasks", array[]::text[]) as "supportedTasks",
+       n."createdAt"::text as "createdAt",
+       n."updatedAt"::text as "updatedAt"
+     from "PayerRegistryEntry" p
+     left join lateral (
+       select n.*
+       from "PayerNetworkModel" n
+       where n."tenantId" = p."tenantId"
+         and n."payerRegistryEntryId" = p."id"
+         and (n."effectiveTo" is null or n."effectiveTo" >= current_timestamp)
+       order by n."lastVerifiedAt" desc nulls last, n."updatedAt" desc
+       limit 1
+     ) n on true
+     left join lateral (
+       select cr.*
+       from "PayerPortalCredentialReference" cr
+       where cr."tenantId" = p."tenantId" and cr."payerRegistryEntryId" = p."id"
+       order by cr."lastValidatedAt" desc nulls last, cr."updatedAt" desc
+       limit 1
+     ) cr on true
+     left join lateral (
+       select count(*) as "layoutCount",
+         count(*) filter (where l."status" = 'ACTIVE') as "activeLayoutCount",
+         max(l."lastVerifiedAt") as "lastLayoutVerifiedAt"
+       from "PayerPortalLayout" l
+       where l."tenantId" = p."tenantId" and l."payerRegistryEntryId" = p."id"
+     ) layouts on true
+     left join lateral (
+       select array_agg(rp."transactionFamily" order by rp."transactionFamily") filter (where rp."allowPortalRpa" = true) as "supportedTasks"
+       from "PayerRoutePolicy" rp
+       where rp."tenantId" = p."tenantId" and rp."payerRegistryEntryId" = p."id"
+     ) tasks on true
+     where p."tenantId" = $1 and p."active" = true
+     order by
+       case when n."portalUrl" is null then 1 else 0 end,
+       p."payerName"`,
+    [tenantId],
+  );
+  return result.rows;
+}
+
+export async function upsertPayerPortalSettings(input: {
+  payerRegistryEntryId: string;
+  portalUrl: string;
+  loginPath?: string;
+  eligibilityPath?: string;
+  supportedTasks?: string[];
+  credentialStatus?: string;
+  credentialVaultId?: string;
+  ownerRoleKey?: string;
+  notes?: string;
+  actorRole?: string;
+  tenantId?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const { portalUrl, portalHost } = normalizePortalUrl(input.portalUrl);
+  const loginPath = normalizePortalPath(input.loginPath);
+  const eligibilityPath = normalizePortalPath(input.eligibilityPath);
+  const supportedTasks = normalizePortalTasks(input.supportedTasks);
+  if (!supportedTasks.length) {
+    throw new Error("Select at least one supported portal RPA task.");
+  }
+  const actorRole = input.actorRole ?? "integration_worker";
+
+  return withTransaction(async (client) => {
+    const payer = (await client.query<{ id: string; payerName: string; primaryPayerId: string }>(
+      `select "id", "payerName", "primaryPayerId"
+       from "PayerRegistryEntry"
+       where "tenantId" = $1 and "id" = $2 and "active" = true
+       limit 1`,
+      [tenantId, input.payerRegistryEntryId],
+    )).rows[0];
+    if (!payer) throw new Error("Active payer registry entry was not found.");
+
+    const currentNetwork = (await client.query<{ id: string }>(
+      `select "id"
+       from "PayerNetworkModel"
+       where "tenantId" = $1 and "payerRegistryEntryId" = $2 and ("effectiveTo" is null or "effectiveTo" >= current_timestamp)
+       order by "lastVerifiedAt" desc nulls last, "updatedAt" desc
+       limit 1`,
+      [tenantId, payer.id],
+    )).rows[0];
+
+    const portalRpaProfile = {
+      portalHost,
+      loginPath,
+      eligibilityPath,
+      supportedTasks,
+      taskTransactionFamilies: supportedTasks.map((task) => PORTAL_TASK_TO_TRANSACTION_FAMILY[task]),
+      configuredFrom: "TENANT_SETTINGS",
+      noCredentialsStoredInUrlDirectory: true,
+    };
+
+    if (currentNetwork) {
+      await client.query(
+        `update "PayerNetworkModel"
+         set "networkType" = case when "networkType" = 'UNKNOWN' then 'PAYER_PORTAL' else "networkType" end,
+           "routeType" = case when "routeType" = 'BLOCKED' then 'PAYER_PORTAL' else "routeType" end,
+           "portalUrl" = $3,
+           "portalRpaProfile" = coalesce("portalRpaProfile", '{}'::jsonb) || $4::jsonb,
+           "lastVerifiedAt" = current_timestamp,
+           "updatedAt" = current_timestamp
+         where "tenantId" = $1 and "id" = $2`,
+        [tenantId, currentNetwork.id, portalUrl, JSON.stringify(portalRpaProfile)],
+      );
+    } else {
+      await client.query(
+        `insert into "PayerNetworkModel"
+           ("id", "tenantId", "payerRegistryEntryId", "networkType", "routeType", "portalUrl", "portalRpaProfile",
+            "manualFallbackAllowed", "enrollmentStatus", "credentialingStatus", "lastVerifiedAt")
+         values ($1, $2, $3, 'PAYER_PORTAL', 'PAYER_PORTAL', $4, $5::jsonb, false, 'NOT_STARTED', 'UNKNOWN', current_timestamp)`,
+        [newId("payer_net"), tenantId, payer.id, portalUrl, JSON.stringify(portalRpaProfile)],
+      );
+    }
+
+    const credentialStatus = (input.credentialStatus?.trim() || "MISSING").toUpperCase();
+    const existingReference = (await client.query<{ id: string }>(
+      `select "id"
+       from "PayerPortalCredentialReference"
+       where "tenantId" = $1 and "payerRegistryEntryId" = $2 and "portalHost" = $3
+       order by "updatedAt" desc
+       limit 1`,
+      [tenantId, payer.id, portalHost],
+    )).rows[0];
+    if (existingReference) {
+      await client.query(
+        `update "PayerPortalCredentialReference"
+         set "credentialVaultId" = nullif($4, ''),
+           "credentialStatus" = $5,
+           "ownerRoleKey" = $6,
+           "notes" = nullif($7, ''),
+           "lastValidatedAt" = case when $5 = 'VALIDATED' then current_timestamp else "lastValidatedAt" end,
+           "updatedAt" = current_timestamp
+         where "tenantId" = $1 and "id" = $2 and "payerRegistryEntryId" = $3`,
+        [tenantId, existingReference.id, payer.id, input.credentialVaultId ?? "", credentialStatus, input.ownerRoleKey?.trim() || "billing_rcm", input.notes?.trim() ?? ""],
+      );
+    } else {
+      await client.query(
+        `insert into "PayerPortalCredentialReference"
+           ("id", "tenantId", "payerRegistryEntryId", "portalHost", "credentialVaultId", "credentialStatus", "ownerRoleKey", "lastValidatedAt", "notes")
+         values ($1, $2, $3, $4, nullif($5, ''), $6, $7, case when $6 = 'VALIDATED' then current_timestamp else null end, nullif($8, ''))`,
+        [newId("payer_cred_ref"), tenantId, payer.id, portalHost, input.credentialVaultId ?? "", credentialStatus, input.ownerRoleKey?.trim() || "billing_rcm", input.notes?.trim() ?? ""],
+      );
+    }
+
+    for (const task of supportedTasks) {
+      const transactionFamily = PORTAL_TASK_TO_TRANSACTION_FAMILY[task];
+      const requirement = STEDI_STYLE_TRANSACTION_REQUIREMENTS[transactionFamily];
+      await client.query(
+        `insert into "PayerRoutePolicy"
+           ("id", "tenantId", "payerRegistryEntryId", "transactionFamily", "preferredRouteType", "fallbackRouteType",
+            "approvalPolicy", "proofRequired", "routeDecisionMetadata", "requiresElectronicAcknowledgement",
+            "allowPortalRpa", "allowManualAttestation", "requiresValidatedCredential", "connectorHealthRequired",
+            "clearinghouseRouteDecision")
+         values ($1, $2, $3, $4, 'PAYER_PORTAL', 'MANUAL_ONLY', 'PAYER_PORTAL_EVIDENCE_REQUIRED', $5::jsonb, $6::jsonb,
+           true, true, false, true, false, 'NOT_APPLICABLE')
+         on conflict ("tenantId", "payerRegistryEntryId", "transactionFamily") do update set
+           "fallbackRouteType" = case when "PayerRoutePolicy"."preferredRouteType" = 'CLEARINGHOUSE' then 'PAYER_PORTAL' else "PayerRoutePolicy"."fallbackRouteType" end,
+           "approvalPolicy" = case when "PayerRoutePolicy"."approvalPolicy" = 'CONNECTOR_ACK_REQUIRED' then 'PAYER_PORTAL_EVIDENCE_REQUIRED' else "PayerRoutePolicy"."approvalPolicy" end,
+           "routeDecisionMetadata" = coalesce("PayerRoutePolicy"."routeDecisionMetadata", '{}'::jsonb) || excluded."routeDecisionMetadata",
+           "allowPortalRpa" = true,
+           "requiresValidatedCredential" = true,
+           "updatedAt" = current_timestamp`,
+        [
+          newId("payer_policy"),
+          tenantId,
+          payer.id,
+          transactionFamily,
+          JSON.stringify(requirement.proofTypes),
+          JSON.stringify({
+            portalHost,
+            portalUrl,
+            loginPath,
+            eligibilityPath,
+            stediTransactionKey: requirement.stediTransactionKey,
+            x12Transaction: requirement.x12Transaction,
+            noCredentialsStoredInUrlDirectory: true,
+          }),
+        ],
+      );
+    }
+
+    await client.query(
+      `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+       values ($1, $2, $3, 'PAYER_PORTAL_SETTINGS_UPSERTED', 'PayerRegistryEntry', $4, 'ALLOWED', $5::jsonb)`,
+      [
+        newId("audit"),
+        tenantId,
+        actorRole,
+        payer.id,
+        JSON.stringify({
+          payerRegistryEntryId: payer.id,
+          portalHost,
+          supportedTasks,
+          credentialStatus,
+          hasCredentialVaultReference: Boolean(input.credentialVaultId?.trim()),
+          noRawCredentialStored: true,
+        }),
+      ],
+    );
+
+    return { payerRegistryEntryId: payer.id, payerName: payer.payerName, portalHost, supportedTasks };
+  });
 }
 
 export async function importPayerMatrixSnapshot(input: {
