@@ -69,16 +69,16 @@ export async function handleVoiceAiTurn(input: {
   if (speech) {
     await query(
       `insert into "PhoneCallTranscriptEvent"
-       ("id", "tenantId", "conversationId", "speakerRole", "speakerLabel", "transcriptText", "confidence", "languageCode", "isFinal", "metadata", "updatedAt")
-       values ($1, $2, $3, 'CALLER', 'Caller', $4, $5, 'en-US', true, $6::jsonb, current_timestamp)`,
+       ("id", "tenantId", "conversationId", "speaker", "transcriptText", "confidence", "languageCode", "isFinal", "metadata")
+       values ($1, $2, $3, 'CALLER', $4, $5, 'en-US', true, $6::jsonb)`,
       [newId("ptrx"), tenantId, conversationId, speech, Number(input.payload.Confidence || 0) || null, JSON.stringify(redactTwilio(input.payload))],
     );
   }
   const reply = await generateVoiceReply({ tenantId, conversationId, scenario, speech });
   await query(
     `insert into "PhoneCallTranscriptEvent"
-     ("id", "tenantId", "conversationId", "speakerRole", "speakerLabel", "transcriptText", "languageCode", "isFinal", "metadata", "updatedAt")
-     values ($1, $2, $3, 'AI_AGENT', 'Voice AI', $4, 'en-US', true, $5::jsonb, current_timestamp)`,
+     ("id", "tenantId", "conversationId", "speaker", "transcriptText", "languageCode", "isFinal", "metadata")
+     values ($1, $2, $3, 'AI_AGENT', $4, 'en-US', true, $5::jsonb)`,
     [newId("ptrx"), tenantId, conversationId, reply, JSON.stringify({ scenario, source: "voice_ai" })],
   );
   await query(
@@ -203,8 +203,8 @@ async function createVoicePromptEvent(input: { tenantId: string; conversationId:
   const id = newId("paie");
   await query(
     `insert into "PhoneCallAiAssistEvent"
-     ("id", "tenantId", "conversationId", "eventType", "severity", "title", "recommendation", "metadata", "updatedAt")
-     values ($1, $2, $3, 'AI_VOICE_PROMPT', 'INFO', $4, $5, $6::jsonb, current_timestamp)`,
+     ("id", "tenantId", "conversationId", "eventType", "severity", "title", "body", "metadata")
+     values ($1, $2, $3, 'AI_VOICE_PROMPT', 'INFO', $4, $5, $6::jsonb)`,
     [
       id,
       input.tenantId,
