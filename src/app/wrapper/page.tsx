@@ -9,9 +9,9 @@ export const dynamic = "force-dynamic";
 
 const products = [
   {
-    href: "/pms",
+    href: "/app/pms",
     label: "PMS",
-    status: "Separate product",
+    status: "Live PMS",
     body: "Patients, appointments, schedule, charting, perio, imaging, treatment plans, ledger, insurance, labs, reports, and practice intelligence.",
   },
   {
@@ -54,7 +54,7 @@ export default async function WrapperPage() {
           <Link key={product.href} href={product.href} className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-md">
             <div className="flex items-start justify-between gap-3">
               <h2 className="text-xl font-semibold tracking-tight text-neutral-950">{product.label}</h2>
-              <StateBadge tone={product.status === "First rebuild" ? "cyan" : "neutral"}>{product.status}</StateBadge>
+              <StateBadge tone={product.status === "First rebuild" || product.status === "Live PMS" ? "cyan" : "neutral"}>{product.status}</StateBadge>
             </div>
             <p className="mt-4 text-sm leading-6 text-neutral-600">{product.body}</p>
             <p className="mt-5 text-sm font-semibold text-cyan-700">Open product</p>

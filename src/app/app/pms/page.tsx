@@ -4,7 +4,7 @@ import { StatusPill } from "@/components/foundation-shell";
 import { Money, PmsCard, StatusFor } from "@/components/pms-ui";
 import { requireAuth } from "@/lib/auth";
 import { getRole } from "@/lib/foundation-data";
-import { getInsuranceBoard, getLedgerBoard, getPmsDashboard, getPracticeIntelligence, listLabCases, listPatients, listSchedule, listTasks } from "@/lib/pms-repository";
+import { getInsuranceBoard, getLedgerBoard, getPmsDashboard, getPmsDataSourceStatus, getPracticeIntelligence, listLabCases, listPatients, listSchedule, listTasks } from "@/lib/pms-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +12,9 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
   const params = await searchParams;
   const session = await requireAuth();
   const role = getRole(params.role);
-  const [dashboard, intelligence, schedule, patients, tasks, insurance, ledger, labs] = await Promise.all([
+  const [dashboard, dataSource, intelligence, schedule, patients, tasks, insurance, ledger, labs] = await Promise.all([
     getPmsDashboard(session.tenantId),
+    getPmsDataSourceStatus(session.tenantId),
     getPracticeIntelligence(session.tenantId),
     listSchedule(session.tenantId),
     listPatients(session.tenantId),
@@ -56,6 +57,7 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
             <div className="mx-auto max-w-[1800px]">
+              <PmsSourceBanner dataSource={dataSource} />
               <div className="mb-5 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
                 <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Operating flow</p>
@@ -406,6 +408,43 @@ function MobilePmsDock({ roleKey }: { roleKey: string }) {
         </Link>
       ))}
     </nav>
+  );
+}
+
+function PmsSourceBanner({
+  dataSource,
+}: {
+  dataSource: {
+    mode: string;
+    samplePatientCount: number;
+    lastSync: { source: string | null; importedPatients: string | null; importedAppointments: string | null; createdAt: string } | null;
+    hasNexHealthCredential: boolean;
+    hasOpenDentalCredential: boolean;
+    nextAction: string;
+  };
+}) {
+  const live = dataSource.mode === "LIVE_SYNCED";
+  return (
+    <section className={`mb-5 rounded-lg border px-4 py-3 shadow-sm ${live ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className={`text-[11px] font-black uppercase tracking-[0.16em] ${live ? "text-emerald-800" : "text-amber-900"}`}>PMS data source</p>
+          <h2 className={`mt-1 text-base font-black tracking-tight ${live ? "text-emerald-950" : "text-amber-950"}`}>
+            {live
+              ? `${dataSource.lastSync?.source ?? "Live PMS"} sync active`
+              : dataSource.samplePatientCount > 0
+                ? "Seeded PMS data is still visible"
+                : "No live PMS records imported yet"}
+          </h2>
+          <p className={`mt-1 max-w-5xl text-sm leading-6 ${live ? "text-emerald-900" : "text-amber-950"}`}>{dataSource.nextAction}</p>
+        </div>
+        <div className="grid gap-2 text-right text-xs font-semibold sm:grid-cols-3">
+          <span className="rounded-md bg-white/70 px-3 py-2">NexHealth {dataSource.hasNexHealthCredential ? "vaulted" : "missing"}</span>
+          <span className="rounded-md bg-white/70 px-3 py-2">Open Dental {dataSource.hasOpenDentalCredential ? "vaulted" : "missing"}</span>
+          <span className="rounded-md bg-white/70 px-3 py-2">{live ? `${dataSource.lastSync?.importedPatients ?? 0} patients` : `${dataSource.samplePatientCount} seeded patients`}</span>
+        </div>
+      </div>
+    </section>
   );
 }
 

@@ -263,6 +263,58 @@ export async function getPmsDashboard(tenantId = defaultTenantId) {
   };
 }
 
+export async function getPmsDataSourceStatus(tenantId = defaultTenantId) {
+  const [samplePatients, liveSyncs, nexHealthCredentials, openDentalCredentials] = await Promise.all([
+    query<{ count: string }>(
+      `select count(*)::text as count
+       from "PmsPatient"
+       where "tenantId" = $1 and ("id" like 'pat_sample_%' or "email" like '%@example.test')`,
+      [tenantId],
+    ),
+    query<{ source: string | null; importedPatients: string | null; importedAppointments: string | null; createdAt: string }>(
+      `select
+         "metadata"->>'source' as source,
+         "metadata"->>'importedPatients' as "importedPatients",
+         "metadata"->>'importedAppointments' as "importedAppointments",
+         "createdAt"::text as "createdAt"
+       from "PmsAuditEvent"
+       where "tenantId" = $1 and "eventType" = 'LIVE_PMS_SYNC_COMPLETED'
+       order by "createdAt" desc
+       limit 1`,
+      [tenantId],
+    ),
+    query<{ count: string }>(
+      `select count(*)::text as count
+       from "ConnectorCredentialVault"
+       where "tenantId" = $1 and upper("providerKey") in ('NEXHEALTH','PMS_NEXHEALTH') and "status" <> 'REVOKED'`,
+      [tenantId],
+    ),
+    query<{ count: string }>(
+      `select count(*)::text as count
+       from "ConnectorCredentialVault"
+       where "tenantId" = $1 and upper("providerKey") in ('OPEN_DENTAL','OPENDENTAL','PMS_OPEN_DENTAL') and "status" <> 'REVOKED'`,
+      [tenantId],
+    ),
+  ]);
+
+  const lastSync = liveSyncs.rows[0] ?? null;
+  const sampleCount = Number(samplePatients.rows[0]?.count ?? 0);
+  const hasNexHealthCredential = Number(nexHealthCredentials.rows[0]?.count ?? 0) > 0;
+  const hasOpenDentalCredential = Number(openDentalCredentials.rows[0]?.count ?? 0) > 0;
+  return {
+    mode: lastSync ? "LIVE_SYNCED" : sampleCount > 0 ? "SEEDED_DATA" : "EMPTY",
+    samplePatientCount: sampleCount,
+    lastSync,
+    hasNexHealthCredential,
+    hasOpenDentalCredential,
+    nextAction: lastSync
+      ? "Live PMS data has been imported into the canonical PMS tables."
+      : hasNexHealthCredential || hasOpenDentalCredential
+        ? "Run the live PMS sync job before treating this workspace as production data."
+        : "Add NexHealth or Open Dental credentials, validate the PMS sync, then clean seeded records after records import successfully.",
+  };
+}
+
 export async function getPracticeIntelligence(tenantId = defaultTenantId): Promise<PmsPracticeIntelligence> {
   const [
     productionTrend,

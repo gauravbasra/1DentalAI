@@ -83,12 +83,20 @@ jobs:
           OPENAI_PHI_ALLOWED: ${{ secrets.OPENAI_PHI_ALLOWED }}
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
+          TWILIO_WEBHOOK_BASE_URL: ${{ secrets.TWILIO_WEBHOOK_BASE_URL }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
           SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
           SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
           POSTMARK_SERVER_TOKEN: ${{ secrets.POSTMARK_SERVER_TOKEN }}
           POSTMARK_FROM_EMAIL: ${{ secrets.POSTMARK_FROM_EMAIL }}
+          NEXHEALTH_API_KEY: ${{ secrets.NEXHEALTH_API_KEY != '' && secrets.NEXHEALTH_API_KEY || secrets.NEXHEALTH }}
+          NEXHEALTH_BASE_URL: ${{ secrets.NEXHEALTH_BASE_URL }}
+          NEXHEALTH_SUBDOMAIN: ${{ secrets.NEXHEALTH_SUBDOMAIN }}
+          NEXHEALTH_SUBDOMAIN_OR_ORG_ID: ${{ secrets.NEXHEALTH_SUBDOMAIN_OR_ORG_ID }}
+          PMS_SYNC_SOURCE: ${{ secrets.PMS_SYNC_SOURCE }}
         run: |
           ZOOM_ACCOUNT_ID_B64="$(printf '%s' "${ZOOM_ACCOUNT_ID:-}" | base64 -w 0)"
           ZOOM_CLIENT_ID_B64="$(printf '%s' "${ZOOM_CLIENT_ID:-}" | base64 -w 0)"
@@ -101,12 +109,20 @@ jobs:
           OPENAI_PHI_ALLOWED_B64="$(printf '%s' "${OPENAI_PHI_ALLOWED:-}" | base64 -w 0)"
           TWILIO_ACCOUNT_SID_B64="$(printf '%s' "${TWILIO_ACCOUNT_SID:-}" | base64 -w 0)"
           TWILIO_AUTH_TOKEN_B64="$(printf '%s' "${TWILIO_AUTH_TOKEN:-}" | base64 -w 0)"
+          TWILIO_FROM_NUMBER_B64="$(printf '%s' "${TWILIO_FROM_NUMBER:-}" | base64 -w 0)"
+          TWILIO_WEBHOOK_BASE_URL_B64="$(printf '%s' "${TWILIO_WEBHOOK_BASE_URL:-}" | base64 -w 0)"
+          GOOGLE_MAPS_API_KEY_B64="$(printf '%s' "${GOOGLE_MAPS_API_KEY:-}" | base64 -w 0)"
           RESEND_API_KEY_B64="$(printf '%s' "${RESEND_API_KEY:-}" | base64 -w 0)"
           RESEND_FROM_EMAIL_B64="$(printf '%s' "${RESEND_FROM_EMAIL:-}" | base64 -w 0)"
           SENDGRID_API_KEY_B64="$(printf '%s' "${SENDGRID_API_KEY:-}" | base64 -w 0)"
           SENDGRID_FROM_EMAIL_B64="$(printf '%s' "${SENDGRID_FROM_EMAIL:-}" | base64 -w 0)"
           POSTMARK_SERVER_TOKEN_B64="$(printf '%s' "${POSTMARK_SERVER_TOKEN:-}" | base64 -w 0)"
           POSTMARK_FROM_EMAIL_B64="$(printf '%s' "${POSTMARK_FROM_EMAIL:-}" | base64 -w 0)"
+          NEXHEALTH_API_KEY_B64="$(printf '%s' "${NEXHEALTH_API_KEY:-}" | base64 -w 0)"
+          NEXHEALTH_BASE_URL_B64="$(printf '%s' "${NEXHEALTH_BASE_URL:-}" | base64 -w 0)"
+          NEXHEALTH_SUBDOMAIN_B64="$(printf '%s' "${NEXHEALTH_SUBDOMAIN:-}" | base64 -w 0)"
+          NEXHEALTH_SUBDOMAIN_OR_ORG_ID_B64="$(printf '%s' "${NEXHEALTH_SUBDOMAIN_OR_ORG_ID:-}" | base64 -w 0)"
+          PMS_SYNC_SOURCE_B64="$(printf '%s' "${PMS_SYNC_SOURCE:-NEXHEALTH}" | base64 -w 0)"
           for i in 1 2 3; do
             timeout 600s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
             set -euo pipefail
@@ -178,6 +194,18 @@ jobs:
               TWILIO_AUTH_TOKEN_VALUE="\$(printf '%s' "${TWILIO_AUTH_TOKEN_B64}" | base64 -d)"
               if grep -q '^TWILIO_AUTH_TOKEN=' .env; then sed -i "s|^TWILIO_AUTH_TOKEN=.*|TWILIO_AUTH_TOKEN=\${TWILIO_AUTH_TOKEN_VALUE}|" .env; else printf '\\nTWILIO_AUTH_TOKEN=%s\\n' "\${TWILIO_AUTH_TOKEN_VALUE}" >> .env; fi
             fi
+            if [ -n "${TWILIO_FROM_NUMBER_B64}" ]; then
+              TWILIO_FROM_NUMBER_VALUE="\$(printf '%s' "${TWILIO_FROM_NUMBER_B64}" | base64 -d)"
+              if grep -q '^TWILIO_FROM_NUMBER=' .env; then sed -i "s|^TWILIO_FROM_NUMBER=.*|TWILIO_FROM_NUMBER=\${TWILIO_FROM_NUMBER_VALUE}|" .env; else printf '\\nTWILIO_FROM_NUMBER=%s\\n' "\${TWILIO_FROM_NUMBER_VALUE}" >> .env; fi
+            fi
+            if [ -n "${TWILIO_WEBHOOK_BASE_URL_B64}" ]; then
+              TWILIO_WEBHOOK_BASE_URL_VALUE="\$(printf '%s' "${TWILIO_WEBHOOK_BASE_URL_B64}" | base64 -d)"
+              if grep -q '^TWILIO_WEBHOOK_BASE_URL=' .env; then sed -i "s|^TWILIO_WEBHOOK_BASE_URL=.*|TWILIO_WEBHOOK_BASE_URL=\${TWILIO_WEBHOOK_BASE_URL_VALUE}|" .env; else printf '\\nTWILIO_WEBHOOK_BASE_URL=%s\\n' "\${TWILIO_WEBHOOK_BASE_URL_VALUE}" >> .env; fi
+            fi
+            if [ -n "${GOOGLE_MAPS_API_KEY_B64}" ]; then
+              GOOGLE_MAPS_API_KEY_VALUE="\$(printf '%s' "${GOOGLE_MAPS_API_KEY_B64}" | base64 -d)"
+              if grep -q '^GOOGLE_MAPS_API_KEY=' .env; then sed -i "s|^GOOGLE_MAPS_API_KEY=.*|GOOGLE_MAPS_API_KEY=\${GOOGLE_MAPS_API_KEY_VALUE}|" .env; else printf '\\nGOOGLE_MAPS_API_KEY=%s\\n' "\${GOOGLE_MAPS_API_KEY_VALUE}" >> .env; fi
+            fi
             if [ -n "${RESEND_API_KEY_B64}" ]; then
               RESEND_API_KEY_VALUE="\$(printf '%s' "${RESEND_API_KEY_B64}" | base64 -d)"
               if grep -q '^RESEND_API_KEY=' .env; then sed -i "s|^RESEND_API_KEY=.*|RESEND_API_KEY=\${RESEND_API_KEY_VALUE}|" .env; else printf '\\nRESEND_API_KEY=%s\\n' "\${RESEND_API_KEY_VALUE}" >> .env; fi
@@ -202,8 +230,31 @@ jobs:
               POSTMARK_FROM_EMAIL_VALUE="\$(printf '%s' "${POSTMARK_FROM_EMAIL_B64}" | base64 -d)"
               if grep -q '^POSTMARK_FROM_EMAIL=' .env; then sed -i "s|^POSTMARK_FROM_EMAIL=.*|POSTMARK_FROM_EMAIL=\${POSTMARK_FROM_EMAIL_VALUE}|" .env; else printf '\\nPOSTMARK_FROM_EMAIL=%s\\n' "\${POSTMARK_FROM_EMAIL_VALUE}" >> .env; fi
             fi
+            if [ -n "${NEXHEALTH_API_KEY_B64}" ]; then
+              NEXHEALTH_API_KEY_VALUE="\$(printf '%s' "${NEXHEALTH_API_KEY_B64}" | base64 -d)"
+              if grep -q '^NEXHEALTH_API_KEY=' .env; then sed -i "s|^NEXHEALTH_API_KEY=.*|NEXHEALTH_API_KEY=\${NEXHEALTH_API_KEY_VALUE}|" .env; else printf '\\nNEXHEALTH_API_KEY=%s\\n' "\${NEXHEALTH_API_KEY_VALUE}" >> .env; fi
+            fi
+            if [ -n "${NEXHEALTH_BASE_URL_B64}" ]; then
+              NEXHEALTH_BASE_URL_VALUE="\$(printf '%s' "${NEXHEALTH_BASE_URL_B64}" | base64 -d)"
+              if grep -q '^NEXHEALTH_BASE_URL=' .env; then sed -i "s|^NEXHEALTH_BASE_URL=.*|NEXHEALTH_BASE_URL=\${NEXHEALTH_BASE_URL_VALUE}|" .env; else printf '\\nNEXHEALTH_BASE_URL=%s\\n' "\${NEXHEALTH_BASE_URL_VALUE}" >> .env; fi
+            fi
+            if [ -n "${NEXHEALTH_SUBDOMAIN_B64}" ]; then
+              NEXHEALTH_SUBDOMAIN_VALUE="\$(printf '%s' "${NEXHEALTH_SUBDOMAIN_B64}" | base64 -d)"
+              if grep -q '^NEXHEALTH_SUBDOMAIN=' .env; then sed -i "s|^NEXHEALTH_SUBDOMAIN=.*|NEXHEALTH_SUBDOMAIN=\${NEXHEALTH_SUBDOMAIN_VALUE}|" .env; else printf '\\nNEXHEALTH_SUBDOMAIN=%s\\n' "\${NEXHEALTH_SUBDOMAIN_VALUE}" >> .env; fi
+            fi
+            if [ -n "${NEXHEALTH_SUBDOMAIN_OR_ORG_ID_B64}" ]; then
+              NEXHEALTH_SUBDOMAIN_OR_ORG_ID_VALUE="\$(printf '%s' "${NEXHEALTH_SUBDOMAIN_OR_ORG_ID_B64}" | base64 -d)"
+              if grep -q '^NEXHEALTH_SUBDOMAIN_OR_ORG_ID=' .env; then sed -i "s|^NEXHEALTH_SUBDOMAIN_OR_ORG_ID=.*|NEXHEALTH_SUBDOMAIN_OR_ORG_ID=\${NEXHEALTH_SUBDOMAIN_OR_ORG_ID_VALUE}|" .env; else printf '\\nNEXHEALTH_SUBDOMAIN_OR_ORG_ID=%s\\n' "\${NEXHEALTH_SUBDOMAIN_OR_ORG_ID_VALUE}" >> .env; fi
+            fi
+            PMS_SYNC_SOURCE_VALUE="\$(printf '%s' "${PMS_SYNC_SOURCE_B64}" | base64 -d)"
+            if grep -q '^PMS_SYNC_SOURCE=' .env; then sed -i "s|^PMS_SYNC_SOURCE=.*|PMS_SYNC_SOURCE=\${PMS_SYNC_SOURCE_VALUE}|" .env; else printf '\\nPMS_SYNC_SOURCE=%s\\n' "\${PMS_SYNC_SOURCE_VALUE}" >> .env; fi
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
             docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm ci && (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true) && (npx prisma migrate resolve --rolled-back 202605221910_activate_webchat_openai || true) && npx prisma migrate deploy' < /dev/null
+            if grep -q '^NEXHEALTH_API_KEY=' .env; then
+              docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm run pms:sync-live' < /dev/null || echo "Live PMS sync failed; keeping existing PMS records and surfacing source status in the PMS UI."
+            else
+              echo "NEXHEALTH_API_KEY is not configured; live PMS sync skipped."
+            fi
           EOF
             sleep 10
           done
