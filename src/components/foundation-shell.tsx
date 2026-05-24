@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import {
-  foundationPractice,
   getRole,
   roles,
   type RoleKey,
@@ -39,8 +38,6 @@ export async function FoundationShell({
   const session = await requireAuth();
   const role = getRole(roleKey);
   const roleParam = `role=${role.key}`;
-  const modeLabel = foundationPractice.mode === "PRODUCTION_SETUP" ? "Production setup" : "Live";
-  const groups = Array.from(new Set(appNav.map((item) => item.group)));
   const activeItem = appNav.find((item) => active === item.href || (item.href !== "/app/overview" && active.startsWith(`${item.href}/`)));
 
   return (
@@ -76,42 +73,6 @@ export async function FoundationShell({
                 </Link>
               );
             })}
-          </nav>
-        </aside>
-
-        <aside className="hidden w-[330px] shrink-0 overflow-y-auto border-r border-neutral-200 bg-[#fbfcfb] xl:block">
-          <div className="border-b border-neutral-200 px-6 py-6">
-            <Link href={`/app/overview?${roleParam}`} className="text-sm font-semibold uppercase tracking-[0.2em] text-neutral-500">
-              1DentalAI
-            </Link>
-            <h1 className="mt-4 text-3xl font-semibold tracking-tight text-neutral-950">{activeItem?.label ?? "Operations"}</h1>
-            <p className="mt-2 text-sm leading-6 text-neutral-600">{role.title}</p>
-            <div className="mt-4 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
-              {modeLabel}
-            </div>
-          </div>
-          <nav aria-label="Application navigation" className="space-y-5 px-4 py-5">
-            {groups.map((group) => (
-              <div key={group}>
-                <p className="px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-400">{group}</p>
-                <div className="mt-2 space-y-1">
-                  {appNav.filter((item) => item.group === group).map((item) => {
-                    const selected = active === item.href || (item.href !== "/app/overview" && active.startsWith(`${item.href}/`));
-                    return (
-                      <Link
-                        key={item.href}
-                        href={`${item.href}?${roleParam}`}
-                        className={`block rounded-2xl px-4 py-3 text-sm font-semibold transition ${
-                          selected ? "bg-neutral-950 text-white" : "text-neutral-700 hover:bg-white hover:text-neutral-950 hover:shadow-sm"
-                        }`}
-                      >
-                        {item.label}
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
           </nav>
         </aside>
 
