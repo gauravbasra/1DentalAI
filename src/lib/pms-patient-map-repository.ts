@@ -102,6 +102,7 @@ type FamilyAddressRow = {
   state: string | null;
   postalCode: string | null;
   addressHash: string | null;
+  status: string | null;
 };
 
 type GeocodeResult = {
@@ -603,12 +604,11 @@ async function addPatientMapAudit(tenantId: string, actorRole: string, eventType
 
 async function geocodeMissingFamilyAccounts(tenantId: string) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  const response = { enabled: Boolean(apiKey), attempted: 0, updated: 0, failed: 0 };
-  if (!apiKey) return response;
+  const response = { enabled: true, attempted: 0, updated: 0, failed: 0 };
 
   const candidates = await query<FamilyAddressRow>(
     `
-      select fa."id", fa."addressLine1", fa."addressLine2", fa."city", fa."state", fa."postalCode", geo."addressHash"
+      select fa."id", fa."addressLine1", fa."addressLine2", fa."city", fa."state", fa."postalCode", geo."addressHash", geo."status"
       from "PmsFamilyAccount" fa
       left join "PmsPatientGeoCoordinate" geo on geo."tenantId" = fa."tenantId" and geo."familyAccountId" = fa."id"
       where fa."tenantId" = $1
@@ -623,12 +623,13 @@ async function geocodeMissingFamilyAccounts(tenantId: string) {
   for (const family of candidates.rows) {
     const address = formatAddress(family);
     const addressHash = hashAddress(address);
-    if (family.addressHash === addressHash) continue;
+    if (family.addressHash === addressHash && family.status === "GEOCODED") continue;
     response.attempted += 1;
-    const geocode = await geocodeAddress(address, apiKey);
-    if (geocode.ok) response.updated += 1;
+    const geocode = apiKey ? await geocodeAddress(address, apiKey) : { ok: false, failureReason: "Google Maps API key is not configured." };
+    const resolved = geocode.ok ? geocode : fallbackGeocodeAddress(family, address, geocode.failureReason);
+    if (resolved.ok) response.updated += 1;
     else response.failed += 1;
-    await upsertGeocodeResult(tenantId, family.id, addressHash, geocode);
+    await upsertGeocodeResult(tenantId, family.id, addressHash, resolved);
   }
 
   return response;
@@ -694,6 +695,123 @@ async function upsertGeocodeResult(tenantId: string, familyAccountId: string, ad
 
 function formatAddress(row: Pick<FamilyAddressRow, "addressLine1" | "addressLine2" | "city" | "state" | "postalCode">) {
   return [row.addressLine1, row.addressLine2, row.city, row.state, row.postalCode, "USA"].filter(Boolean).join(", ");
+}
+
+const ZIP_CENTROIDS: Record<string, { lat: number; lng: number }> = {
+  "80002": { lat: 39.7941, lng: -105.0985 },
+  "80003": { lat: 39.8282, lng: -105.0656 },
+  "80004": { lat: 39.8148, lng: -105.1225 },
+  "80005": { lat: 39.8457, lng: -105.1172 },
+  "80010": { lat: 39.7391, lng: -104.8644 },
+  "80011": { lat: 39.7388, lng: -104.7892 },
+  "80012": { lat: 39.6994, lng: -104.8371 },
+  "80013": { lat: 39.6593, lng: -104.7709 },
+  "80014": { lat: 39.6665, lng: -104.8357 },
+  "80015": { lat: 39.6255, lng: -104.7876 },
+  "80016": { lat: 39.5896, lng: -104.7162 },
+  "80020": { lat: 39.9247, lng: -105.0809 },
+  "80021": { lat: 39.8857, lng: -105.1139 },
+  "80022": { lat: 39.8537, lng: -104.7846 },
+  "80023": { lat: 39.9657, lng: -105.0145 },
+  "80110": { lat: 39.6469, lng: -105.0097 },
+  "80111": { lat: 39.6134, lng: -104.8796 },
+  "80112": { lat: 39.5807, lng: -104.8736 },
+  "80113": { lat: 39.6477, lng: -104.9716 },
+  "80120": { lat: 39.5997, lng: -105.0049 },
+  "80121": { lat: 39.6105, lng: -104.9587 },
+  "80122": { lat: 39.5802, lng: -104.9564 },
+  "80124": { lat: 39.5356, lng: -104.8915 },
+  "80126": { lat: 39.5438, lng: -104.9498 },
+  "80127": { lat: 39.5924, lng: -105.1305 },
+  "80128": { lat: 39.5808, lng: -105.0802 },
+  "80129": { lat: 39.5398, lng: -105.0105 },
+  "80134": { lat: 39.4897, lng: -104.7606 },
+  "80138": { lat: 39.5144, lng: -104.7064 },
+  "80202": { lat: 39.7527, lng: -104.9992 },
+  "80203": { lat: 39.7312, lng: -104.9827 },
+  "80204": { lat: 39.7341, lng: -105.0201 },
+  "80205": { lat: 39.7597, lng: -104.9653 },
+  "80206": { lat: 39.7316, lng: -104.9522 },
+  "80207": { lat: 39.7629, lng: -104.9177 },
+  "80209": { lat: 39.7046, lng: -104.9744 },
+  "80210": { lat: 39.6776, lng: -104.9658 },
+  "80211": { lat: 39.7697, lng: -105.0208 },
+  "80212": { lat: 39.7726, lng: -105.0439 },
+  "80214": { lat: 39.7425, lng: -105.0702 },
+  "80215": { lat: 39.7445, lng: -105.1085 },
+  "80216": { lat: 39.7866, lng: -104.9601 },
+  "80218": { lat: 39.7328, lng: -104.9713 },
+  "80219": { lat: 39.6968, lng: -105.0349 },
+  "80220": { lat: 39.7321, lng: -104.9124 },
+  "80221": { lat: 39.8164, lng: -105.0092 },
+  "80222": { lat: 39.6785, lng: -104.9277 },
+  "80223": { lat: 39.6999, lng: -105.0038 },
+  "80224": { lat: 39.6889, lng: -104.9109 },
+  "80226": { lat: 39.7117, lng: -105.0843 },
+  "80227": { lat: 39.6656, lng: -105.0929 },
+  "80228": { lat: 39.6908, lng: -105.1564 },
+  "80229": { lat: 39.8567, lng: -104.9564 },
+  "80230": { lat: 39.7191, lng: -104.8884 },
+  "80231": { lat: 39.6745, lng: -104.8849 },
+  "80232": { lat: 39.6903, lng: -105.0902 },
+  "80233": { lat: 39.9017, lng: -104.9467 },
+  "80234": { lat: 39.9048, lng: -105.0006 },
+  "80235": { lat: 39.6489, lng: -105.0817 },
+  "80236": { lat: 39.6533, lng: -105.0374 },
+  "80237": { lat: 39.6396, lng: -104.8989 },
+  "80238": { lat: 39.7798, lng: -104.8837 },
+  "80239": { lat: 39.7867, lng: -104.8385 },
+  "80246": { lat: 39.7025, lng: -104.9313 },
+  "80247": { lat: 39.6967, lng: -104.8801 },
+  "80249": { lat: 39.7856, lng: -104.7393 },
+  "80301": { lat: 40.0436, lng: -105.2141 },
+  "80302": { lat: 40.0179, lng: -105.2930 },
+  "80303": { lat: 39.9999, lng: -105.2227 },
+  "80304": { lat: 40.0455, lng: -105.2819 },
+  "80401": { lat: 39.7347, lng: -105.2043 },
+};
+
+const CITY_CENTROIDS: Record<string, { lat: number; lng: number }> = {
+  "arvada,co": { lat: 39.8028, lng: -105.0875 },
+  "aurora,co": { lat: 39.7294, lng: -104.8319 },
+  "boulder,co": { lat: 40.0150, lng: -105.2705 },
+  "broomfield,co": { lat: 39.9205, lng: -105.0867 },
+  "castle rock,co": { lat: 39.3722, lng: -104.8561 },
+  "centennial,co": { lat: 39.5807, lng: -104.8772 },
+  "commerce city,co": { lat: 39.8083, lng: -104.9339 },
+  "denver,co": { lat: 39.7392, lng: -104.9903 },
+  "englewood,co": { lat: 39.6478, lng: -104.9878 },
+  "golden,co": { lat: 39.7555, lng: -105.2211 },
+  "lakewood,co": { lat: 39.7047, lng: -105.0814 },
+  "littleton,co": { lat: 39.6133, lng: -105.0166 },
+  "lone tree,co": { lat: 39.5367, lng: -104.8970 },
+  "parker,co": { lat: 39.5186, lng: -104.7614 },
+  "thornton,co": { lat: 39.8680, lng: -104.9719 },
+  "westminster,co": { lat: 39.8367, lng: -105.0372 },
+  "wheat ridge,co": { lat: 39.7661, lng: -105.0772 },
+};
+
+function fallbackGeocodeAddress(row: Pick<FamilyAddressRow, "city" | "state" | "postalCode">, address: string, failureReason?: string): GeocodeResult {
+  const zip = row.postalCode?.match(/\d{5}/)?.[0];
+  const cityKey = `${row.city ?? ""},${row.state ?? ""}`.toLowerCase().replace(/\s+/g, " ").trim();
+  const base = (zip ? ZIP_CENTROIDS[zip] : null) ?? CITY_CENTROIDS[cityKey];
+  if (!base) return { ok: false, failureReason: failureReason ? `Google geocode failed and no ZIP/city fallback exists: ${failureReason}` : "No ZIP/city fallback exists." };
+  const offset = deterministicOffset(address, zip ? 0.012 : 0.03);
+  return {
+    ok: true,
+    formattedAddress: [row.city, row.state, zip].filter(Boolean).join(", "),
+    latitude: Number((base.lat + offset.lat).toFixed(6)),
+    longitude: Number((base.lng + offset.lng).toFixed(6)),
+    precision: zip ? "ZIP_CENTROID_FALLBACK" : "CITY_CENTROID_FALLBACK",
+    failureReason: failureReason ? `Google geocode unavailable; plotted by ${zip ? "ZIP" : "city"} centroid. ${failureReason}` : undefined,
+  };
+}
+
+function deterministicOffset(seed: string, radius: number) {
+  const digest = crypto.createHash("sha256").update(seed).digest();
+  const angle = (digest[0] / 255) * Math.PI * 2;
+  const distance = (digest[1] / 255) * radius;
+  return { lat: Math.sin(angle) * distance, lng: Math.cos(angle) * distance };
 }
 
 function hashAddress(address: string) {
