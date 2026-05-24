@@ -15,6 +15,7 @@ import {
   updatePhoneConversationStatus,
   updatePhoneOutboundMessageApproval,
 } from "@/lib/operating-system-repository";
+import { DraggableCallPop } from "./draggable-call-pop";
 import { ThemeModeControl } from "./theme-mode-control";
 
 export const dynamic = "force-dynamic";
@@ -369,10 +370,9 @@ function IncomingCallPop({
   const patient = buildPatientContext(conversation ?? null, screenPop, snapshot);
   const isMatched = Boolean(screenPop?.patientId || conversation?.patientId);
   return (
-    <aside className="fixed right-5 top-24 z-[60] w-[420px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl bg-neutral-950 text-white shadow-2xl">
-      <div className="border-b border-white/15 px-5 py-4">
-        <p className="text-sm font-semibold">Incoming call</p>
-        <p className="mt-1 text-xs text-white/70">via {String(ringing.extensionName ?? ringing.toNumber ?? "main line")}</p>
+    <DraggableCallPop callId={String(ringing.id ?? ringing.providerCallId ?? ringing.conversationId ?? "incoming")}>
+      <div className="border-b border-white/15 px-5 py-3">
+        <p className="text-xs text-white/70">via {String(ringing.extensionName ?? ringing.toNumber ?? "main line")}</p>
       </div>
       <div className="flex items-start gap-4 px-5 py-5">
         <Avatar label={patient.initials} tone="peach" />
@@ -396,7 +396,7 @@ function IncomingCallPop({
           </div>
         </div>
       </div>
-    </aside>
+    </DraggableCallPop>
   );
 }
 
