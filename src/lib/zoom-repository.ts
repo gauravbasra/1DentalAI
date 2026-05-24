@@ -228,7 +228,7 @@ export async function createZoomMeetingForAppointment(input: { appointmentId: st
   return { id: visitId, joinUrl: data.join_url, startUrl: data.start_url ?? null, status: "CREATED", reused: false };
 }
 
-export async function listVirtualVisitsForAppointment(appointmentId: string) {
+export async function listVirtualVisitsForAppointment(appointmentId: string, tenantId?: string) {
   const result = await query<{
     id: string;
     providerMeetingId: string;
@@ -246,9 +246,9 @@ export async function listVirtualVisitsForAppointment(appointmentId: string) {
     `select "id", "providerMeetingId", "providerUuid", "topic", "joinUrl", "startUrl", "status", "participantStatus",
       "startedAt"::text as "startedAt", "endedAt"::text as "endedAt", "lastEventAt"::text as "lastEventAt", "createdAt"::text as "createdAt"
      from "PmsVirtualVisit"
-     where "appointmentId" = $1
+     where "appointmentId" = $1 and ($2::text is null or "tenantId" = $2)
      order by "createdAt" desc`,
-    [appointmentId],
+    [appointmentId, tenantId ?? null],
   );
   return result.rows;
 }

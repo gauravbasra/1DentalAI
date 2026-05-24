@@ -2,8 +2,17 @@ import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
 import { EmptyPmsState, Money, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
-import { addAppointmentProcedure, completeAppointmentCheckout, getAppointmentControl, listProcedureCodes } from "@/lib/pms-repository";
+import {
+  addAppointmentProcedure,
+  addClinicalNote,
+  addClinicalNoteAddendum,
+  completeAppointmentCheckout,
+  getAppointmentControl,
+  listProcedureCodes,
+  signClinicalNote,
+} from "@/lib/pms-repository";
 import { createZoomMeetingForAppointment, listVirtualVisitsForAppointment } from "@/lib/zoom-repository";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +24,7 @@ function moneyToCents(value: FormDataEntryValue | null) {
 
 async function addProcedureAction(appointmentId: string, formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const feeValue = String(formData.get("fee") ?? "").trim();
   await addAppointmentProcedure({
     appointmentId,
@@ -22,6 +32,8 @@ async function addProcedureAction(appointmentId: string, formData: FormData) {
     tooth: String(formData.get("tooth") ?? ""),
     surface: String(formData.get("surface") ?? ""),
     feeCents: feeValue ? moneyToCents(feeValue) : undefined,
+    actorRole: session.roleKey,
+    tenantId: session.tenantId,
   });
   revalidatePath(`/app/pms/appointments/${appointmentId}`);
   revalidatePath("/app/pms/schedule");
@@ -29,6 +41,7 @@ async function addProcedureAction(appointmentId: string, formData: FormData) {
 
 async function checkoutAction(appointmentId: string, formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await completeAppointmentCheckout({
     appointmentId,
     procedureIds: formData.getAll("procedureIds").map(String),
@@ -38,6 +51,8 @@ async function checkoutAction(appointmentId: string, formData: FormData) {
     createClaimDraft: formData.get("createClaimDraft") === "on",
     overrideBlockers: formData.get("overrideBlockers") === "on",
     checkoutNote: String(formData.get("checkoutNote") ?? ""),
+    actorRole: session.roleKey,
+    tenantId: session.tenantId,
   });
   revalidatePath(`/app/pms/appointments/${appointmentId}`);
   revalidatePath("/app/pms");
@@ -48,13 +63,61 @@ async function checkoutAction(appointmentId: string, formData: FormData) {
 
 async function createZoomMeetingAction(appointmentId: string, formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await createZoomMeetingForAppointment({
     appointmentId,
-    actorRole: String(formData.get("actorRole") ?? "front_desk"),
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     agenda: String(formData.get("agenda") ?? ""),
   });
   revalidatePath(`/app/pms/appointments/${appointmentId}`);
   revalidatePath("/app/pms/schedule");
+}
+
+async function addAppointmentNoteAction(appointmentId: string, patientId: string, formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await addClinicalNote(
+    patientId,
+    String(formData.get("body") ?? ""),
+    String(formData.get("noteType") ?? "ENCOUNTER"),
+    session.tenantId,
+    session.roleKey,
+    {
+      appointmentId,
+      noteTemplateKey: String(formData.get("noteTemplateKey") ?? "appointment_encounter"),
+      sourceModule: "appointment_control",
+      sourceRecordId: appointmentId,
+    },
+  );
+  revalidatePath(`/app/pms/appointments/${appointmentId}`);
+  revalidatePath(`/app/pms/chart/${patientId}`);
+}
+
+async function signAppointmentNoteAction(appointmentId: string, patientId: string, formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await signClinicalNote({
+    noteId: String(formData.get("noteId") ?? ""),
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+  });
+  revalidatePath(`/app/pms/appointments/${appointmentId}`);
+  revalidatePath(`/app/pms/chart/${patientId}`);
+}
+
+async function addAppointmentNoteAddendumAction(appointmentId: string, patientId: string, formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await addClinicalNoteAddendum({
+    noteId: String(formData.get("noteId") ?? ""),
+    body: String(formData.get("body") ?? ""),
+    reason: String(formData.get("reason") ?? ""),
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+  });
+  revalidatePath(`/app/pms/appointments/${appointmentId}`);
+  revalidatePath(`/app/pms/chart/${patientId}`);
 }
 
 export default async function AppointmentControlPage({
@@ -65,8 +128,13 @@ export default async function AppointmentControlPage({
   searchParams: Promise<{ role?: string }>;
 }) {
   const [{ appointmentId }, query] = await Promise.all([params, searchParams]);
+  const session = await requireAuth();
   const role = getRole(query.role);
-  const [control, procedureCodes, virtualVisits] = await Promise.all([getAppointmentControl(appointmentId), listProcedureCodes(), listVirtualVisitsForAppointment(appointmentId)]);
+  const [control, procedureCodes, virtualVisits] = await Promise.all([
+    getAppointmentControl(appointmentId, session.tenantId),
+    listProcedureCodes(session.tenantId),
+    listVirtualVisitsForAppointment(appointmentId, session.tenantId),
+  ]);
 
   if (!control) {
     return (
@@ -80,6 +148,9 @@ export default async function AppointmentControlPage({
   const addProcedure = addProcedureAction.bind(null, appointment.id);
   const checkout = checkoutAction.bind(null, appointment.id);
   const createZoom = createZoomMeetingAction.bind(null, appointment.id);
+  const addAppointmentNote = appointment.patientId ? addAppointmentNoteAction.bind(null, appointment.id, appointment.patientId) : null;
+  const signAppointmentNote = appointment.patientId ? signAppointmentNoteAction.bind(null, appointment.id, appointment.patientId) : null;
+  const addAppointmentNoteAddendum = appointment.patientId ? addAppointmentNoteAddendumAction.bind(null, appointment.id, appointment.patientId) : null;
   const hardBlockers = control.readinessBlockers.filter((item) => item.severity === "HARD");
 
   return (
@@ -172,6 +243,62 @@ export default async function AppointmentControlPage({
         </div>
 
         <div className="grid gap-4">
+          <PmsCard title="Encounter note" eyebrow="Required clinical sign-off">
+            {appointment.patientId && addAppointmentNote && signAppointmentNote && addAppointmentNoteAddendum ? (
+              <div className="grid gap-4">
+                <form action={addAppointmentNote} className="grid gap-3">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Select label="Note type" name="noteType" options={["ENCOUNTER", "EXAM", "PROCEDURE", "EMERGENCY"]} />
+                    <Select label="Template" name="noteTemplateKey" options={["appointment_encounter", "doctor_exam", "hygiene_recare", "procedure_closeout"]} />
+                  </div>
+                  <textarea name="body" required rows={6} placeholder="Assessment, procedure narrative, consent, anesthesia, findings, provider instructions, and follow-up." className="rounded-md border border-neutral-300 px-3 py-2 text-sm" />
+                  <button className="rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white">Save draft encounter note</button>
+                </form>
+
+                {control.clinicalNotes.length ? (
+                  <div className="grid gap-3">
+                    {control.clinicalNotes.map((note) => (
+                      <div key={note.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-neutral-950">{note.noteType}</p>
+                            <p className="mt-1 text-xs text-neutral-500">
+                              {note.addendumOfNoteId ? `Addendum to ${note.addendumOfNoteId}` : `Created ${new Date(note.createdAt).toLocaleString()}`}
+                            </p>
+                          </div>
+                          <StatusFor value={note.status} />
+                        </div>
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-neutral-700">{note.body}</p>
+                        {note.signedAt ? <p className="mt-2 text-xs font-semibold text-emerald-700">Signed by {note.signedByRole ?? "provider"} on {new Date(note.signedAt).toLocaleString()}</p> : null}
+                        {note.addendumReason ? <p className="mt-2 text-xs text-neutral-500">Reason: {note.addendumReason}</p> : null}
+
+                        {note.status === "DRAFT" ? (
+                          <form action={signAppointmentNote} className="mt-3">
+                            <input type="hidden" name="noteId" value={note.id} />
+                            <button className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white">Sign and lock note</button>
+                          </form>
+                        ) : null}
+
+                        {note.status === "SIGNED" && !note.addendumOfNoteId ? (
+                          <form action={addAppointmentNoteAddendum} className="mt-3 grid gap-2">
+                            <input type="hidden" name="noteId" value={note.id} />
+                            <input name="reason" required placeholder="Addendum reason" className="rounded-md border border-neutral-300 px-3 py-2 text-sm" />
+                            <textarea name="body" required rows={3} placeholder="Signed addendum text" className="rounded-md border border-neutral-300 px-3 py-2 text-sm" />
+                            <button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-800">Add signed addendum</button>
+                          </form>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyPmsState title="No encounter note linked" body="Checkout remains gated until a provider signs a note linked to this appointment." />
+                )}
+              </div>
+            ) : (
+              <EmptyPmsState title="No patient attached" body="Attach a patient before creating the appointment encounter note." />
+            )}
+          </PmsCard>
+
           <PmsCard title="Visit procedures" eyebrow="Complete, charge, and claim">
             {control.procedures.length ? (
               <form action={checkout} className="grid gap-4">

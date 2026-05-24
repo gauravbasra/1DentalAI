@@ -1059,18 +1059,31 @@ model PmsProfileChangeRequest {
 }
 
 model PmsClinicalNote {
-  id         String    @id @default(cuid())
-  patientId  String
-  providerId String?
-  noteType   String
-  status     String    @default("DRAFT")
-  body       String
-  signedAt   DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  tenantId         String
+  patientId        String
+  appointmentId    String?
+  providerId       String?
+  noteType         String
+  noteTemplateKey  String?
+  status           String    @default("DRAFT")
+  body             String
+  signedByRole     String?
+  signatureHash    String?
+  signedAt         DateTime?
+  lockedAt         DateTime?
+  addendumOfNoteId String?
+  addendumReason   String?
+  sourceModule     String?
+  sourceRecordId   String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
+  @@index([tenantId, status, createdAt])
   @@index([patientId, createdAt])
+  @@index([appointmentId, status])
   @@index([providerId, status])
+  @@index([addendumOfNoteId])
 }
 
 model PmsToothCondition {
@@ -1088,20 +1101,27 @@ model PmsToothCondition {
 }
 
 model PmsProcedureLog {
-  id              String    @id @default(cuid())
-  patientId       String
-  providerId      String?
-  procedureCodeId String
-  tooth           String?
-  surface         String?
-  status          String
-  feeCents        Int       @default(0)
-  serviceDate     DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                     String    @id @default(cuid())
+  tenantId               String?
+  patientId              String
+  providerId             String?
+  appointmentId          String?
+  appointmentProcedureId String?
+  checkoutSessionId      String?
+  procedureCodeId        String
+  tooth                  String?
+  surface                String?
+  status                 String
+  feeCents               Int       @default(0)
+  serviceDate            DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
+  @@index([tenantId, appointmentId])
   @@index([patientId, status])
   @@index([providerId, serviceDate])
+  @@index([appointmentProcedureId])
+  @@index([checkoutSessionId])
 }
 
 model PmsPerioExam {
@@ -1171,6 +1191,77 @@ model PmsTreatmentPlanItem {
   @@index([treatmentPlanId, sequence])
 }
 
+model PmsClinicalProcessTemplate {
+  id                String   @id @default(cuid())
+  tenantId          String
+  templateKey       String
+  name              String
+  specialty         String
+  status            String   @default("ACTIVE")
+  appointmentType   String?
+  triggerCodes    String[] @default([])
+  requiredArtifacts Json
+  requiredForms     Json
+  requiredImaging   Json
+  requiredLabs      Json
+  aiPolicy          Json
+  auditPolicy       Json
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([tenantId, templateKey])
+  @@index([tenantId, status, specialty])
+}
+
+model PmsClinicalProcessStep {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  templateId            String
+  stepKey               String
+  sequence              Int
+  title                 String
+  ownerRoleKey          String
+  assignmentType        String
+  procedureCodeIds String[] @default([])
+  noteRequirements Json
+  artifactRequirements Json
+  treatmentPlanRequired Boolean  @default(false)
+  completionPolicy      Json
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([templateId, stepKey])
+  @@index([tenantId, ownerRoleKey])
+  @@index([templateId, sequence])
+}
+
+model PmsClinicalRecommendation {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  patientId            String
+  treatmentPlanId      String?
+  templateId           String?
+  sourceModule         String
+  sourceRecordId       String?
+  recommendationType   String
+  summary              String
+  rationale            String
+  mappedProcedureCodes String[] @default([])
+  assignmentPlan  Json
+  requiredNotes   Json
+  requiredArtifacts    Json
+  confidenceScore      Int      @default(0)
+  status               String   @default("NEEDS_PROVIDER_REVIEW")
+  reviewedByRole       String?
+  reviewedAt           DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([tenantId, status, createdAt])
+  @@index([patientId, status])
+  @@index([treatmentPlanId])
+}
+
 model PmsInsurancePlan {
   id          String   @id @default(cuid())
   tenantId    String
@@ -1191,8 +1282,299 @@ model PmsInsurancePlan {
   @@index([tenantId, status])
 }
 
+
+model PayerMatrixSnapshot {
+  id             String   @id @default(cuid())
+  tenantId       String
+  source         String
+  sourceUrl      String?
+  version        String
+  rowCount       Int      @default(0)
+  checksum       String
+  importStatus   String   @default("IMPORTED")
+  importedByRole String   @default("integration_worker")
+  importedAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  @@unique([tenantId, source, version])
+  @@index([tenantId, importedAt])
+  @@index([tenantId, importStatus])
+}
+
+model PayerRegistryEntry {
+  id               String   @id @default(cuid())
+  tenantId         String
+  payerName        String
+  normalizedName   String
+  primaryPayerId   String
+  payerType        String   @default("UNKNOWN")
+  coverageType     String   @default("DENTAL")
+  operatingStates  String[] @default([])
+  active           Boolean  @default(true)
+  source           String   @default("MANUAL")
+  sourceUrl        String?
+  sourceSnapshotId String?
+  sourceUpdatedAt  DateTime?
+  lastVerifiedAt   DateTime?
+  confidenceScore  Int      @default(100)
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([tenantId, primaryPayerId])
+  @@index([tenantId, active, payerName])
+  @@index([tenantId, normalizedName])
+}
+
+model PayerAlias {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  payerRegistryEntryId String
+  alias                String
+  normalizedAlias      String
+  aliasType            String   @default("CARD_OR_PLAN")
+  confidence           Int      @default(80)
+  source               String   @default("MANUAL")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([tenantId, payerRegistryEntryId, normalizedAlias])
+  @@index([tenantId, normalizedAlias])
+  @@index([payerRegistryEntryId])
+}
+
+model PayerTransactionCapability {
+  id                          String   @id @default(cuid())
+  tenantId                    String
+  payerRegistryEntryId        String
+  transactionFamily           String
+  x12Transaction              String
+  stediTransactionKey         String?
+  supported                   Boolean  @default(false)
+  clearinghouse               String?
+  clearinghousePayerId        String?
+  payerEnrollmentMode         String   @default("UNKNOWN")
+  portalFallbackReason        String?
+  serviceLine                 String   @default("DENTAL")
+  requiresEnrollment          Boolean  @default(false)
+  requiresProviderEnrollment  Boolean  @default(false)
+  requiresLocationEnrollment  Boolean  @default(false)
+  requiresPayerPortalFallback Boolean  @default(false)
+  supportsRealtime            Boolean  @default(false)
+  status                      String   @default("UNKNOWN")
+  limitations                 Json?
+  lastVerifiedAt              DateTime?
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  @@unique([tenantId, payerRegistryEntryId, transactionFamily, serviceLine])
+  @@index([tenantId, transactionFamily, supported])
+  @@index([payerRegistryEntryId, status])
+}
+
+model PayerNetworkModel {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  payerRegistryEntryId  String
+  networkType           String   @default("UNKNOWN")
+  routeType             String   @default("BLOCKED")
+  clearinghouse         String?
+  clearinghouseRouteKey String?
+  clearinghousePayerId  String?
+  directEndpoint        String?
+  portalUrl             String?
+  portalInstructions    Json?
+  portalRpaProfile      Json?
+  manualFallbackAllowed Boolean  @default(false)
+  enrollmentStatus      String   @default("NOT_STARTED")
+  credentialingStatus   String   @default("UNKNOWN")
+  credentialingOwnerRole String?
+  credentialingDueAt    DateTime?
+  providerNpi           String?
+  locationCode          String?
+  effectiveFrom         DateTime?
+  effectiveTo           DateTime?
+  lastVerifiedAt        DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([tenantId, networkType, routeType])
+  @@index([tenantId, payerRegistryEntryId, enrollmentStatus])
+  @@index([payerRegistryEntryId, effectiveTo])
+}
+
+model PayerRoutePolicy {
+  id                                String   @id @default(cuid())
+  tenantId                          String
+  payerRegistryEntryId              String
+  transactionFamily                 String
+  preferredRouteType                String
+  fallbackRouteType                 String   @default("MANUAL_ONLY")
+  approvalPolicy                    String   @default("CONNECTOR_ACK_REQUIRED")
+  proofRequired                     Json?
+  routeDecisionMetadata             Json?
+  externalActionBlockedReason       String?
+  requiresElectronicAcknowledgement Boolean  @default(true)
+  allowPortalRpa                    Boolean  @default(false)
+  allowManualAttestation            Boolean  @default(false)
+  requiresValidatedCredential       Boolean  @default(false)
+  connectorHealthRequired           Boolean  @default(true)
+  clearinghouseRouteDecision        String    @default("UNDECIDED")
+  createdAt                         DateTime @default(now())
+  updatedAt                         DateTime @updatedAt
+
+  @@unique([tenantId, payerRegistryEntryId, transactionFamily])
+  @@index([tenantId, transactionFamily, preferredRouteType])
+  @@index([payerRegistryEntryId, approvalPolicy])
+}
+
+model PayerPortalCredentialReference {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  payerRegistryEntryId String
+  portalHost           String
+  credentialVaultId    String?
+  credentialStatus     String   @default("MISSING")
+  credentialScope      String   @default("PAYER_PORTAL_RPA")
+  ownerRoleKey         String   @default("billing_rcm")
+  lastValidatedAt      DateTime?
+  rotationDueAt        DateTime?
+  notes                String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([tenantId, credentialStatus])
+  @@index([payerRegistryEntryId, portalHost])
+  @@index([credentialVaultId])
+}
+
+model PayerRpaRunLog {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  payerRegistryEntryId  String
+  credentialReferenceId String?
+  transactionFamily     String
+  sourceObjectType      String
+  sourceObjectId        String?
+  runStatus             String   @default("QUEUED")
+  botName               String
+  portalHost            String?
+  startedAt             DateTime?
+  completedAt           DateTime?
+  durationMs            Int?
+  attempt               Int      @default(1)
+  resultSummary         String?
+  evidenceUri           String?
+  errorCode             String?
+  errorMessageRedacted  String?
+  noPhiInLogs           Boolean  @default(true)
+  createdAt             DateTime @default(now())
+
+  @@index([tenantId, transactionFamily, createdAt])
+  @@index([tenantId, runStatus, createdAt])
+  @@index([sourceObjectType, sourceObjectId])
+}
+
+model PayerGeneratedArtifactReference {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  payerRegistryEntryId String?
+  rpaRunLogId          String?
+  sourceObjectType     String
+  sourceObjectId       String?
+  artifactType         String
+  title                String
+  storageUri           String
+  checksum             String?
+  documentStatus       String   @default("GENERATED_PENDING_REVIEW")
+  generatedBy          String   @default("payer_integration_service")
+  generatedAt          DateTime @default(now())
+  reviewedByRole       String?
+  reviewedAt           DateTime?
+  metadata             Json?
+
+  @@index([tenantId, artifactType, generatedAt])
+  @@index([sourceObjectType, sourceObjectId])
+  @@index([rpaRunLogId])
+}
+
+model PayerPortalLayout {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  payerRegistryEntryId String
+  portalHost           String
+  layoutKey            String
+  layoutVersion        String
+  transactionFamily    String   @default("ELIGIBILITY_270_271")
+  loginPath            String?
+  eligibilityPath      String?
+  screenshotPolicy     Json
+  navigationSteps      Json
+  status               String   @default("ACTIVE")
+  lastVerifiedAt       DateTime?
+  createdByRole        String   @default("integration_worker")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([tenantId, payerRegistryEntryId, layoutKey, layoutVersion])
+  @@index([tenantId, payerRegistryEntryId, status])
+  @@index([tenantId, portalHost])
+}
+
+model PayerPortalLayoutField {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  layoutId             String
+  fieldKey             String
+  label                String
+  selector             String
+  valueType            String
+  pmsTarget            String
+  requiredForWriteback Boolean  @default(true)
+  redactionPolicy      String   @default("MASK_IN_SCREENSHOT")
+  confidenceThreshold  Int      @default(85)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([layoutId, fieldKey])
+  @@index([tenantId, pmsTarget])
+}
+
+model PmsEligibilityEvidence {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  patientInsuranceId   String
+  payerRegistryEntryId String?
+  rpaRunLogId          String?
+  portalLayoutId       String?
+  sourceType           String   @default("PAYER_PORTAL_RPA")
+  sourceTraceId        String?
+  eligibilityStatus    String
+  benefitYear          Int
+  deductibleCents      Int      @default(0)
+  deductibleMetCents   Int      @default(0)
+  annualMaxCents       Int      @default(0)
+  annualUsedCents      Int      @default(0)
+  frequencies          Json?
+  limitations          Json?
+  normalizedFields     Json
+  rawFieldEvidence     Json
+  screenshotArtifactId String
+  pdfArtifactId        String
+  writebackStatus      String   @default("PENDING_REVIEW")
+  reviewedByRole       String?
+  reviewedAt           DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([tenantId, patientInsuranceId, createdAt])
+  @@index([tenantId, eligibilityStatus, writebackStatus])
+  @@index([rpaRunLogId])
+}
+
 model PmsPatientInsurance {
   id            String   @id @default(cuid())
+  tenantId      String
   patientId     String
   planId        String
   subscriberId  String
@@ -1206,12 +1588,14 @@ model PmsPatientInsurance {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  @@index([tenantId, eligibilityStatus])
   @@index([patientId, priority])
   @@index([planId, eligibilityStatus])
 }
 
 model PmsBenefitSummary {
   id                 String   @id @default(cuid())
+  tenantId           String
   patientInsuranceId String
   benefitYear        Int
   deductibleCents    Int      @default(0)
@@ -1223,7 +1607,9 @@ model PmsBenefitSummary {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
+  @@index([tenantId, benefitYear])
   @@index([patientInsuranceId, benefitYear])
+  @@unique([tenantId, patientInsuranceId, benefitYear])
 }
 
 model PmsClaim {
@@ -1262,12 +1648,23 @@ model PmsClaimLine {
   feeCents        Int      @default(0)
   allowedCents    Int      @default(0)
   paidCents       Int      @default(0)
+  deductibleCents Int      @default(0)
+  copayCents      Int      @default(0)
+  coinsuranceCents Int     @default(0)
+  writeoffCents   Int      @default(0)
+  denialCents     Int      @default(0)
+  otherAdjustmentCents Int @default(0)
   patientDueCents Int      @default(0)
+  carcCodes       Json?
+  rarcCodes       Json?
+  eraPostingId    String?
+  adjudicatedAt   DateTime?
   status          String   @default("READY")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([claimId, status])
+  @@index([eraPostingId])
   @@index([procedureLogId])
 }
 
@@ -1307,6 +1704,39 @@ model PmsPayment {
 
   @@index([tenantId, postedAt])
   @@index([patientId, postedAt])
+  @@unique([tenantId, paymentType, reference])
+}
+
+model RcmEraAdjudicationLine {
+  id              String   @id @default(cuid())
+  tenantId        String
+  eraPostingId    String
+  claimId         String
+  claimLineId     String
+  procedureCode   String
+  serviceDate     DateTime?
+  tooth           String?
+  surface         String?
+  billedCents     Int      @default(0)
+  allowedCents    Int      @default(0)
+  paidCents       Int      @default(0)
+  deductibleCents Int      @default(0)
+  copayCents      Int      @default(0)
+  coinsuranceCents Int     @default(0)
+  writeoffCents   Int      @default(0)
+  denialCents     Int      @default(0)
+  otherAdjustmentCents Int @default(0)
+  patientResponsibilityCents Int @default(0)
+  carcCodes       Json?
+  rarcCodes       Json?
+  status          String   @default("IMPORTED")
+  sourceTraceId   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, eraPostingId])
+  @@index([claimId, claimLineId])
+  @@unique([tenantId, eraPostingId, claimLineId])
 }
 
 model PmsLedgerAdjustment {
@@ -1554,15 +1984,25 @@ model RcmPriorAuthorization {
   submissionReadiness Json?
   connectorStatus   String   @default("CONNECTOR_REQUIRED")
   blockedReason     String?
+  packetArtifactId   String?
+  packetChecksum     String?
+  submissionMode     String   @default("NOT_SUBMITTED")
+  payerPortalRunId   String?
+  payerAcknowledgementId String?
   submittedAt       DateTime?
   expiresAt         DateTime?
   determination     String?
+  determinationAt   DateTime?
+  approvalNumber    String?
   nextAction        String
   ownerRoleKey      String   @default("billing_rcm")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   @@index([tenantId, status, expiresAt])
+  @@index([tenantId, submissionMode, connectorStatus])
+  @@index([packetArtifactId])
+  @@index([payerPortalRunId])
   @@index([patientId, status])
   @@index([treatmentPlanId])
 }

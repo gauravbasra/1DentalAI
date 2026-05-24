@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { EmptyPmsState, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import {
   assignFormToPatient,
@@ -65,17 +66,20 @@ type PatientRow = { id: string; firstName: string; lastName: string; chartNumber
 
 async function assignAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await assignFormToPatient({
+    tenantId: session.tenantId,
     patientId: String(formData.get("patientId") ?? ""),
     templateId: String(formData.get("templateId") ?? ""),
     dueAt: String(formData.get("dueAt") ?? "") || undefined,
-    assignedByRole: "front_desk",
+    assignedByRole: session.roleKey,
   });
   revalidatePath("/app/pms/forms");
 }
 
 async function responseAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const answers: Record<string, string> = {};
   for (const [key, value] of formData.entries()) {
     if (key.startsWith("answer_")) {
@@ -83,23 +87,26 @@ async function responseAction(formData: FormData) {
     }
   }
   await recordFormResponse({
+    tenantId: session.tenantId,
     assignmentId: String(formData.get("assignmentId") ?? ""),
     submittedByName: String(formData.get("submittedByName") ?? ""),
     signatureName: String(formData.get("signatureName") ?? ""),
     submittedByType: "STAFF_KIOSK",
     answers,
-    actorRole: "front_desk",
+    actorRole: session.roleKey,
   });
   revalidatePath("/app/pms/forms");
 }
 
 async function reviewAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await reviewProfileChangeRequest({
+    tenantId: session.tenantId,
     changeId: String(formData.get("changeId") ?? ""),
     decision: String(formData.get("decision") ?? "REJECTED") as "ACCEPTED" | "REJECTED",
     reviewNote: String(formData.get("reviewNote") ?? ""),
-    reviewedByRole: "front_desk",
+    reviewedByRole: session.roleKey,
   });
   revalidatePath("/app/pms/forms");
   revalidatePath("/app/pms/patients");
@@ -107,8 +114,9 @@ async function reviewAction(formData: FormData) {
 
 export default async function FormsPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
-  const workbench = await getFormsWorkbench();
+  const workbench = await getFormsWorkbench(session.tenantId);
   const templates = workbench.templates as TemplateRow[];
   const fields = workbench.fields as FieldRow[];
   const assignments = workbench.assignments as AssignmentRow[];

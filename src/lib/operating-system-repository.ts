@@ -1,5 +1,7 @@
-import { newId, query } from "@/lib/db";
+import { newId, query, withTransaction } from "@/lib/db";
 import { defaultTenantId } from "@/lib/pms-repository";
+import { recordPayerGeneratedArtifact } from "@/lib/payer-network-repository";
+import { buildEobPdfArtifactPayload, buildPriorAuthPdfArtifactPayload } from "@/lib/rcm-payer-artifacts";
 import { createTwilioCall, findTwilioConferenceSid, getTwilioCredentials, updateTwilioCall, updateTwilioConferenceParticipant, twilioXmlEscape } from "@/lib/twilio-provider";
 
 async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string | null, outcome = "ALLOWED", metadata?: unknown) {
@@ -41,6 +43,98 @@ function evidenceChecklist(requiredEvidence?: string[]) {
     patientFinancialReviewRequired: true,
     externalSubmissionBlocked: true,
   };
+}
+
+type EraAdjudicationLineRow = {
+  id: string;
+  claimLineId: string;
+  procedureCode: string;
+  serviceDate: string | null;
+  tooth: string | null;
+  surface: string | null;
+  billedCents: number;
+  allowedCents: number;
+  paidCents: number;
+  deductibleCents: number;
+  copayCents: number;
+  coinsuranceCents: number;
+  writeoffCents: number;
+  denialCents: number;
+  otherAdjustmentCents: number;
+  patientResponsibilityCents: number;
+  carcCodes: string[];
+  rarcCodes: string[];
+  status: string;
+};
+
+async function getEraAdjudicationLines(eraPostingId: string, tenantId: string) {
+  return (await query<EraAdjudicationLineRow>(
+    `select "id", "claimLineId", "procedureCode", "serviceDate"::text as "serviceDate", "tooth", "surface",
+       "billedCents", "allowedCents", "paidCents", "deductibleCents", "copayCents", "coinsuranceCents",
+       "writeoffCents", "denialCents", "otherAdjustmentCents", "patientResponsibilityCents",
+       coalesce("carcCodes", '[]'::jsonb) as "carcCodes",
+       coalesce("rarcCodes", '[]'::jsonb) as "rarcCodes",
+       "status"
+     from "RcmEraAdjudicationLine"
+     where "eraPostingId" = $1 and "tenantId" = $2
+     order by "serviceDate" asc nulls last, "procedureCode", "claimLineId"`,
+    [eraPostingId, tenantId],
+  )).rows;
+}
+
+function reconcileEraAdjudicationLines(
+  era: { allowedCents: number; paidCents: number; patientDueCents: number; adjustmentCents: number },
+  lines: EraAdjudicationLineRow[],
+) {
+  const totals = lines.reduce(
+    (sum, line) => {
+      const patientResponsibilityCents = Number(line.patientResponsibilityCents);
+      const lineAdjustmentCents = Number(line.writeoffCents) + Number(line.denialCents) + Number(line.otherAdjustmentCents);
+      return {
+        allowedCents: sum.allowedCents + Number(line.allowedCents),
+        paidCents: sum.paidCents + Number(line.paidCents),
+        deductibleCents: sum.deductibleCents + Number(line.deductibleCents),
+        copayCents: sum.copayCents + Number(line.copayCents),
+        coinsuranceCents: sum.coinsuranceCents + Number(line.coinsuranceCents),
+        writeoffCents: sum.writeoffCents + Number(line.writeoffCents),
+        denialCents: sum.denialCents + Number(line.denialCents),
+        otherAdjustmentCents: sum.otherAdjustmentCents + Number(line.otherAdjustmentCents),
+        patientResponsibilityCents: sum.patientResponsibilityCents + patientResponsibilityCents,
+        adjustmentCents: sum.adjustmentCents + lineAdjustmentCents,
+        lineBalanceVarianceCents: sum.lineBalanceVarianceCents + Math.abs(Number(line.allowedCents) - Number(line.paidCents) - patientResponsibilityCents - lineAdjustmentCents),
+        patientResponsibilityVarianceCents:
+          sum.patientResponsibilityVarianceCents +
+          Math.abs(patientResponsibilityCents - Number(line.deductibleCents) - Number(line.copayCents) - Number(line.coinsuranceCents)),
+      };
+    },
+    {
+      allowedCents: 0,
+      paidCents: 0,
+      deductibleCents: 0,
+      copayCents: 0,
+      coinsuranceCents: 0,
+      writeoffCents: 0,
+      denialCents: 0,
+      otherAdjustmentCents: 0,
+      patientResponsibilityCents: 0,
+      adjustmentCents: 0,
+      lineBalanceVarianceCents: 0,
+      patientResponsibilityVarianceCents: 0,
+    },
+  );
+  const postingVarianceCents = Number(era.allowedCents) - Number(era.paidCents) - Number(era.patientDueCents) - Number(era.adjustmentCents);
+  const metadata = {
+    inputTotalsMatchLines:
+      Number(era.allowedCents) === totals.allowedCents &&
+      Number(era.paidCents) === totals.paidCents &&
+      Number(era.patientDueCents) === totals.patientResponsibilityCents &&
+      Number(era.adjustmentCents) === totals.adjustmentCents,
+    lineBalancesToAllowed: totals.lineBalanceVarianceCents === 0,
+    patientResponsibilityBalances: totals.patientResponsibilityVarianceCents === 0,
+    postingVarianceCents,
+    totals,
+  };
+  return { ...metadata, balancedForPosting: metadata.inputTotalsMatchLines && metadata.lineBalancesToAllowed && metadata.patientResponsibilityBalances && postingVarianceCents === 0 };
 }
 
 function isConsentVerified(value?: string | null) {
@@ -323,6 +417,7 @@ export async function getRcmOperatingCenter(tenantId = defaultTenantId) {
 
 export async function createRcmWorkItem(input: {
   tenantId?: string;
+  actorRole?: string;
   patientId?: string;
   claimId?: string;
   workType: string;
@@ -358,11 +453,11 @@ export async function createRcmWorkItem(input: {
       JSON.stringify({ requiresHumanApproval: true, externalSubmissionBlockedWithoutConnector: true, writesBackToPms: true }),
     ],
   );
-  await addAudit(tenantId, "billing_rcm", "RCM_WORK_ITEM_CREATED", "RcmWorkItem", id);
+  await addAudit(tenantId, input.actorRole ?? "billing_rcm", "RCM_WORK_ITEM_CREATED", "RcmWorkItem", id);
   return result.rows[0];
 }
 
-export async function updateRcmWorkItemStatus(id: string, status: string, actorRole = "billing_rcm") {
+export async function updateRcmWorkItemStatus(id: string, status: string, actorRole = "billing_rcm", tenantId = defaultTenantId) {
   const nextStatus = requireAllowed(status === "COMPLETED" ? "MANUAL_PROOF_REQUIRED" : status, allowedRcmWorkStatuses, "READY_FOR_REVIEW");
   const result = await query<{ id: string; tenantId: string }>(
     `update "RcmWorkItem"
@@ -371,15 +466,16 @@ export async function updateRcmWorkItemStatus(id: string, status: string, actorR
        "blockerReason" = case when $2 in ('APPROVED_STAGED','MANUAL_PROOF_REQUIRED') then coalesce("blockerReason", 'External payer/payment action is staged only; connector acknowledgement or manual proof is required before completion.') else "blockerReason" end,
        "completedAt" = case when $2 in ('COMPLETED','CLOSED') then current_timestamp else "completedAt" end,
        "updatedAt" = current_timestamp
-     where "id" = $1
-     returning "id", "tenantId"`,
-    [id, nextStatus],
+	     where "id" = $1 and "tenantId" = $4
+	     returning "id", "tenantId"`,
+    [id, nextStatus, null, tenantId],
   );
   if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_WORK_ITEM_STATUS_UPDATED", "RcmWorkItem", id, "ALLOWED", { requestedStatus: status, appliedStatus: nextStatus });
 }
 
 export async function createPriorAuthorization(input: {
   tenantId?: string;
+  actorRole?: string;
   patientId: string;
   treatmentPlanId?: string;
   patientInsuranceId?: string;
@@ -393,8 +489,8 @@ export async function createPriorAuthorization(input: {
   const id = newId("pa");
   const result = await query(
     `insert into "RcmPriorAuthorization"
-       ("id", "tenantId", "patientId", "treatmentPlanId", "patientInsuranceId", "payerName", "requestedCents", "status", "requiredEvidence", "evidenceChecklist", "submissionReadiness", "connectorStatus", "blockedReason", "expiresAt", "nextAction", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, 'EVIDENCE_NEEDED', $8::jsonb, $11::jsonb, $12::jsonb, 'CONNECTOR_REQUIRED', 'Prior authorization cannot be marked submitted until a payer connector acknowledgement or manual proof is attached.', $9::timestamp, $10, current_timestamp)
+       ("id", "tenantId", "patientId", "treatmentPlanId", "patientInsuranceId", "payerName", "requestedCents", "status", "requiredEvidence", "evidenceChecklist", "submissionReadiness", "connectorStatus", "blockedReason", "submissionMode", "expiresAt", "nextAction", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, 'EVIDENCE_NEEDED', $8::jsonb, $11::jsonb, $12::jsonb, 'CONNECTOR_REQUIRED', 'Prior authorization cannot be marked submitted until a payer connector acknowledgement or manual proof is attached.', 'NOT_SUBMITTED', $9::timestamp, $10, current_timestamp)
      returning *`,
     [
       id,
@@ -411,31 +507,124 @@ export async function createPriorAuthorization(input: {
       JSON.stringify({ evidenceComplete: false, payerConnectorReady: false, humanApprovalRequired: true, externalSubmissionBlocked: true }),
     ],
   );
-  await addAudit(tenantId, "billing_rcm", "RCM_PRIOR_AUTH_CREATED", "RcmPriorAuthorization", id);
+  await addAudit(tenantId, input.actorRole ?? "billing_rcm", "RCM_PRIOR_AUTH_CREATED", "RcmPriorAuthorization", id);
   return result.rows[0];
 }
 
-export async function updatePriorAuthorizationStatus(id: string, status: string, actorRole = "billing_rcm") {
+export async function updatePriorAuthorizationStatus(id: string, status: string, actorRole = "billing_rcm", tenantId = defaultTenantId) {
   const nextStatus = requireAllowed(status === "SUBMITTED" ? "BLOCKED_CONNECTOR_REQUIRED" : status, allowedPriorAuthStatuses, "READY_FOR_REVIEW");
   const result = await query<{ tenantId: string }>(
     `update "RcmPriorAuthorization"
-     set "status" = $2,
-       "connectorStatus" = case when $2 in ('APPROVED_STAGED','BLOCKED_CONNECTOR_REQUIRED') then 'CONNECTOR_REQUIRED' else "connectorStatus" end,
-       "blockedReason" = case
+	     set "status" = $2,
+	       "connectorStatus" = case when $2 in ('APPROVED_STAGED','BLOCKED_CONNECTOR_REQUIRED') then 'CONNECTOR_REQUIRED' else "connectorStatus" end,
+	       "submissionMode" = case
+	         when $2 = 'APPROVED_STAGED' then 'READY_FOR_CONNECTOR_OR_PORTAL'
+	         when $2 = 'MANUAL_PROOF_REQUIRED' then 'MANUAL_PROOF_REQUIRED'
+	         else "submissionMode"
+	       end,
+	       "blockedReason" = case
          when $2 in ('APPROVED_STAGED','BLOCKED_CONNECTOR_REQUIRED') then 'Prior authorization is staged only. Payer submission requires connector acknowledgement or attached manual proof.'
          else "blockedReason"
        end,
        "submissionReadiness" = coalesce("submissionReadiness", '{"evidenceComplete":false,"payerConnectorReady":false,"humanApprovalRequired":true,"externalSubmissionBlocked":true}'::jsonb),
        "updatedAt" = current_timestamp
-     where "id" = $1
-     returning "tenantId"`,
-    [id, nextStatus],
+	     where "id" = $1 and "tenantId" = $3
+	     returning "tenantId"`,
+    [id, nextStatus, tenantId],
   );
   if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_PRIOR_AUTH_STATUS_UPDATED", "RcmPriorAuthorization", id, "ALLOWED", { requestedStatus: status, appliedStatus: nextStatus });
 }
 
+export async function stagePriorAuthorizationPacket(input: {
+  id: string;
+  tenantId?: string;
+  payerRegistryEntryId?: string;
+  clinicalNarrative?: string;
+  actorRole?: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const priorAuth = (await query<{
+    id: string;
+    tenantId: string;
+    patientId: string;
+    treatmentPlanId: string | null;
+    payerName: string;
+    requestedCents: number;
+    requiredEvidence: unknown;
+    treatmentPlanName: string | null;
+    firstName: string;
+    lastName: string;
+    chartNumber: string;
+    treatmentPlanEvidence: unknown;
+  }>(
+    `select pa.*, p."firstName", p."lastName", p."chartNumber", tp."name" as "treatmentPlanName",
+       coalesce(items."treatmentPlanEvidence", '[]'::jsonb) as "treatmentPlanEvidence"
+     from "RcmPriorAuthorization" pa
+     join "PmsPatient" p on p."id" = pa."patientId"
+     left join "PmsTreatmentPlan" tp on tp."id" = pa."treatmentPlanId"
+     left join lateral (
+       select jsonb_agg(jsonb_build_object('code', pc."code", 'description', pc."description", 'tooth', tpi."tooth", 'surface', tpi."surface", 'feeCents', tpi."feeCents") order by pc."code") as "treatmentPlanEvidence"
+       from "PmsTreatmentPlanItem" tpi
+       join "PmsProcedureCode" pc on pc."id" = tpi."procedureCodeId"
+       where tpi."treatmentPlanId" = pa."treatmentPlanId"
+     ) items on true
+     where pa."id" = $1 and pa."tenantId" = $2`,
+    [input.id, tenantId],
+  )).rows[0];
+  if (!priorAuth) throw new Error("Prior authorization was not found.");
+
+  const payload = buildPriorAuthPdfArtifactPayload({
+    tenantId: priorAuth.tenantId,
+    priorAuthorizationId: priorAuth.id,
+    patientLabel: `${priorAuth.lastName}, ${priorAuth.firstName} (${priorAuth.chartNumber})`,
+    payerName: priorAuth.payerName,
+    requestedCents: Number(priorAuth.requestedCents),
+    treatmentPlanName: priorAuth.treatmentPlanName,
+    requiredEvidence: priorAuth.requiredEvidence,
+    treatmentPlanEvidence: priorAuth.treatmentPlanEvidence,
+    clinicalNarrative: input.clinicalNarrative,
+  });
+  const artifact = await recordPayerGeneratedArtifact({
+    tenantId: priorAuth.tenantId,
+    payerRegistryEntryId: input.payerRegistryEntryId,
+    sourceObjectType: "RcmPriorAuthorization",
+    sourceObjectId: priorAuth.id,
+    artifactType: payload.artifactType,
+    title: payload.title,
+    storageUri: `artifact://prior-auth-packet/${payload.checksum}.html`,
+    checksum: payload.checksum,
+    metadata: { ...payload.metadata, contentType: payload.contentType, renderReady: true },
+  });
+  await query(
+    `update "RcmPriorAuthorization"
+	     set "status" = 'READY_FOR_REVIEW',
+	       "connectorStatus" = 'MANUAL_PROOF_REQUIRED',
+	       "blockedReason" = 'Prior authorization packet is staged; external payer submission still requires connector acknowledgement or manual proof.',
+	       "packetArtifactId" = $2,
+	       "packetChecksum" = $3,
+	       "submissionMode" = 'PACKET_READY_MANUAL_PROOF_REQUIRED',
+	       "submissionReadiness" = jsonb_build_object(
+	         'evidenceComplete', true,
+	         'packetArtifactId', $2::text,
+	         'packetChecksum', $3::text,
+	         'submissionMode', 'PACKET_READY_MANUAL_PROOF_REQUIRED',
+	         'payerPortalRunId', null,
+	         'payerAcknowledgementId', null,
+	         'payerConnectorReady', false,
+	         'humanApprovalRequired', true,
+	         'externalSubmissionBlocked', true
+	       ),
+	       "updatedAt" = current_timestamp
+	     where "id" = $1 and "tenantId" = $4`,
+    [priorAuth.id, artifact.id, payload.checksum, priorAuth.tenantId],
+  );
+  await addAudit(priorAuth.tenantId, input.actorRole ?? "billing_rcm", "RCM_PRIOR_AUTH_PACKET_STAGED", "RcmPriorAuthorization", priorAuth.id, "ALLOWED", { artifactId: artifact.id, checksum: payload.checksum });
+  return { artifactId: artifact.id, checksum: payload.checksum };
+}
+
 export async function createDenialCase(input: {
   tenantId?: string;
+  actorRole?: string;
   patientId: string;
   claimId: string;
   payerName: string;
@@ -476,11 +665,11 @@ export async function createDenialCase(input: {
       input.rootCause?.trim() || null,
     ],
   );
-  await addAudit(tenantId, "billing_rcm", "RCM_DENIAL_CASE_CREATED", "RcmDenialCase", id);
+  await addAudit(tenantId, input.actorRole ?? "billing_rcm", "RCM_DENIAL_CASE_CREATED", "RcmDenialCase", id);
   return result.rows[0];
 }
 
-export async function updateDenialCaseStatus(id: string, status: string, actorRole = "billing_rcm") {
+export async function updateDenialCaseStatus(id: string, status: string, actorRole = "billing_rcm", tenantId = defaultTenantId) {
   const nextStatus = requireAllowed(status === "SUBMITTED" ? "BLOCKED_CONNECTOR_REQUIRED" : status, allowedDenialStatuses, "APPEAL_READY");
   const result = await query<{ tenantId: string }>(
     `update "RcmDenialCase"
@@ -490,14 +679,15 @@ export async function updateDenialCaseStatus(id: string, status: string, actorRo
        "blockedReason" = case when $2 in ('APPROVED_STAGED','BLOCKED_CONNECTOR_REQUIRED') then 'Appeal package is staged only. External submission requires payer connector acknowledgement or attached manual proof.' else "blockedReason" end,
        "submissionReadiness" = coalesce("submissionReadiness", '{"appealPacketComplete":false,"payerConnectorReady":false,"humanApprovalRequired":true,"externalSubmissionBlocked":true}'::jsonb),
        "updatedAt" = current_timestamp
-     where "id" = $1 returning "tenantId"`,
-    [id, nextStatus],
+	     where "id" = $1 and "tenantId" = $3 returning "tenantId"`,
+    [id, nextStatus, tenantId],
   );
   if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_DENIAL_STATUS_UPDATED", "RcmDenialCase", id, "ALLOWED", { requestedStatus: status, appliedStatus: nextStatus });
 }
 
 export async function createPayerFollowUp(input: {
   tenantId?: string;
+  actorRole?: string;
   patientId?: string;
   claimId?: string;
   payerName: string;
@@ -515,11 +705,11 @@ export async function createPayerFollowUp(input: {
      returning *`,
     [id, tenantId, input.patientId || null, input.claimId || null, input.payerName.trim(), input.reason.trim(), input.channel, input.dueAt || null, input.nextAction.trim(), JSON.stringify(["payer portal screenshot/reference", "call note", "276/277 status response", "staff attestation"])],
   );
-  await addAudit(tenantId, "billing_rcm", "RCM_PAYER_FOLLOW_UP_CREATED", "RcmPayerFollowUp", id);
+  await addAudit(tenantId, input.actorRole ?? "billing_rcm", "RCM_PAYER_FOLLOW_UP_CREATED", "RcmPayerFollowUp", id);
   return result.rows[0];
 }
 
-export async function updatePayerFollowUpStatus(id: string, status: string, outcome?: string, actorRole = "billing_rcm") {
+export async function updatePayerFollowUpStatus(id: string, status: string, outcome?: string, actorRole = "billing_rcm", tenantId = defaultTenantId) {
   const nextStatus = requireAllowed(status === "RESOLVED" ? "MANUAL_PROOF_REQUIRED" : status, allowedPayerFollowUpStatuses, "WAITING_ON_PAYER");
   const result = await query<{ tenantId: string }>(
     `update "RcmPayerFollowUp"
@@ -529,14 +719,268 @@ export async function updatePayerFollowUpStatus(id: string, status: string, outc
        "connectorStatus" = case when $2 in ('WAITING_ON_PAYER','MANUAL_PROOF_REQUIRED') then 'MANUAL_PROOF_REQUIRED' else "connectorStatus" end,
        "blockedReason" = case when $2 in ('WAITING_ON_PAYER','MANUAL_PROOF_REQUIRED') then 'Payer contact is recorded internally; external 276/277 or portal proof is required before payer status is treated as verified.' else "blockedReason" end,
        "updatedAt" = current_timestamp
-     where "id" = $1
-     returning "tenantId"`,
-    [id, nextStatus, outcome || null],
+	     where "id" = $1 and "tenantId" = $4
+	     returning "tenantId"`,
+    [id, nextStatus, outcome || null, tenantId],
   );
   if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_PAYER_FOLLOW_UP_UPDATED", "RcmPayerFollowUp", id, "ALLOWED", { requestedStatus: status, appliedStatus: nextStatus, outcome });
 }
 
-export async function postEraToLedger(id: string, actorRole = "billing_rcm") {
+export async function postEraToLedger(id: string, actorRole = "billing_rcm", tenantId = defaultTenantId) {
+  const result = await withTransaction(async (client) => {
+    const era = (await client.query<{
+      id: string;
+      tenantId: string;
+      patientId: string;
+      claimId: string;
+      payerName: string;
+      eraTraceNumber: string | null;
+      eobDocumentId: string | null;
+      paidCents: number;
+      allowedCents: number;
+      patientDueCents: number;
+      adjustmentCents: number;
+      status: string;
+    }>(`select * from "RcmEraPosting" where "id" = $1 and "tenantId" = $2 for update`, [id, tenantId])).rows[0];
+    if (!era) throw new Error("ERA posting was not found.");
+
+    const existing = (await client.query<{ ledgerEntryId: string; paymentId: string }>(
+      `select p."ledgerEntryId", p."id" as "paymentId"
+       from "PmsPayment" p
+       where p."tenantId" = $1 and p."reference" = $2 and p."paymentType" = 'INSURANCE_ERA'
+       order by p."createdAt" desc
+       limit 1`,
+      [tenantId, id],
+    )).rows[0];
+    if (existing) return { ...existing, tenantId: era.tenantId, audit: "IDEMPOTENT_RETURN" as const };
+    if (era.status === "POSTED") throw new Error("ERA posting is already posted and cannot be posted again.");
+    if (Number(era.paidCents) <= 0) throw new Error("ERA paid amount must be greater than zero before posting.");
+
+    const postingVarianceCents = Number(era.allowedCents) - Number(era.paidCents) - Number(era.patientDueCents) - Number(era.adjustmentCents);
+    if (postingVarianceCents !== 0) {
+      await client.query(
+        `update "RcmEraPosting"
+         set "status" = 'NEEDS_REVIEW',
+           "connectorStatus" = 'MANUAL_PROOF_REQUIRED',
+           "blockedReason" = 'EOB/ERA allowed, paid, patient due, and adjustment amounts must balance before ledger posting.',
+           "postingReadiness" = coalesce("postingReadiness", '{}'::jsonb) || jsonb_build_object(
+             'hasEraOrEobProof', coalesce("eraTraceNumber", '') <> '' or coalesce("eobDocumentId", '') <> '',
+             'ledgerImpactReviewed', false,
+             'adjustmentsReviewed', false,
+             'postingVarianceCents', $2::int,
+             'varianceResolved', false,
+             'pmsLedgerWriteRequiresReview', true
+           ),
+           "updatedAt" = current_timestamp
+         where "id" = $1 and "tenantId" = $3`,
+        [id, postingVarianceCents, tenantId],
+      );
+      return { tenantId: era.tenantId, audit: "BLOCKED_VARIANCE" as const, error: "EOB/ERA amounts must balance before posting to the PMS ledger.", postingVarianceCents };
+    }
+    if (!era.eraTraceNumber && !era.eobDocumentId) {
+      await client.query(
+        `update "RcmEraPosting"
+         set "connectorStatus" = 'MANUAL_PROOF_REQUIRED',
+           "blockedReason" = 'Manual EOB proof or ERA trace is required before posting to the PMS ledger.',
+           "postingReadiness" = coalesce("postingReadiness", '{"hasEraOrEobProof":false,"ledgerImpactReviewed":false,"adjustmentsReviewed":false}'::jsonb),
+           "updatedAt" = current_timestamp
+         where "id" = $1 and "tenantId" = $2`,
+        [id, tenantId],
+      );
+      return { tenantId: era.tenantId, audit: "BLOCKED_PROOF" as const, error: "Manual EOB proof or ERA trace is required before posting to the PMS ledger." };
+    }
+
+    const adjudicationLines = (await client.query<EraAdjudicationLineRow>(
+      `select "id", "claimLineId", "procedureCode", "serviceDate"::text as "serviceDate", "tooth", "surface",
+         "billedCents", "allowedCents", "paidCents", "deductibleCents", "copayCents", "coinsuranceCents",
+         "writeoffCents", "denialCents", "otherAdjustmentCents", "patientResponsibilityCents",
+         coalesce("carcCodes", '[]'::jsonb) as "carcCodes",
+         coalesce("rarcCodes", '[]'::jsonb) as "rarcCodes",
+         "status"
+       from "RcmEraAdjudicationLine"
+       where "eraPostingId" = $1 and "tenantId" = $2
+       order by "serviceDate" asc nulls last, "procedureCode", "claimLineId"`,
+      [id, tenantId],
+    )).rows;
+    if (!adjudicationLines.length) throw new Error("ERA posting requires imported line-level 835/EOB adjudication before ledger posting.");
+    const uniqueClaimLineIds = new Set(adjudicationLines.map((line) => line.claimLineId));
+    if (uniqueClaimLineIds.size !== adjudicationLines.length) {
+      await client.query(
+        `update "RcmEraPosting"
+         set "status" = 'NEEDS_REVIEW',
+           "connectorStatus" = 'MANUAL_PROOF_REQUIRED',
+           "blockedReason" = 'Imported ERA/EOB adjudication includes duplicate claim lines and cannot be posted.',
+           "postingReadiness" = coalesce("postingReadiness", '{}'::jsonb) || jsonb_build_object('lineLevelAdjudicationReady', false, 'duplicateClaimLineIdsRejected', true),
+           "updatedAt" = current_timestamp
+         where "id" = $1 and "tenantId" = $2`,
+        [id, tenantId],
+      );
+      return { tenantId: era.tenantId, audit: "BLOCKED_LINE_RECONCILIATION" as const, error: "Imported ERA/EOB adjudication includes duplicate claim lines and cannot be posted.", reconciliation: { duplicateClaimLineIdsRejected: true } };
+    }
+    const matchingClaimLineCount = Number((await client.query<{ count: string }>(
+      `select count(*)::text as count
+       from "PmsClaimLine" cl
+       join jsonb_to_recordset($3::jsonb) as data("claimLineId" text) on data."claimLineId" = cl."id"
+       where cl."tenantId" = $1 and cl."claimId" = $2`,
+      [tenantId, era.claimId, JSON.stringify(adjudicationLines.map((line) => ({ claimLineId: line.claimLineId })))],
+    )).rows[0]?.count ?? 0);
+    if (matchingClaimLineCount !== adjudicationLines.length) {
+      await client.query(
+        `update "RcmEraPosting"
+         set "status" = 'NEEDS_REVIEW',
+           "connectorStatus" = 'MANUAL_PROOF_REQUIRED',
+           "blockedReason" = 'Every imported ERA/EOB adjudication row must map to a claim line on this tenant and claim before posting.',
+           "postingReadiness" = coalesce("postingReadiness", '{}'::jsonb) || jsonb_build_object('lineLevelAdjudicationReady', false, 'claimLineMatchCount', $2::int, 'adjudicationLineCount', $3::int),
+           "updatedAt" = current_timestamp
+         where "id" = $1 and "tenantId" = $4`,
+        [id, matchingClaimLineCount, adjudicationLines.length, tenantId],
+      );
+      return { tenantId: era.tenantId, audit: "BLOCKED_LINE_OWNERSHIP" as const, error: "Every imported ERA/EOB adjudication row must map to a claim line on this tenant and claim before posting.", reconciliation: { matchingClaimLineCount, adjudicationLineCount: adjudicationLines.length } };
+    }
+    const reconciliation = reconcileEraAdjudicationLines(era, adjudicationLines);
+    if (!reconciliation.balancedForPosting) {
+      await client.query(
+        `update "RcmEraPosting"
+         set "status" = 'NEEDS_REVIEW',
+           "connectorStatus" = 'MANUAL_PROOF_REQUIRED',
+           "blockedReason" = 'Imported ERA/EOB line adjudication totals must reconcile to header totals and line balances before ledger posting.',
+           "postingReadiness" = coalesce("postingReadiness", '{}'::jsonb) || jsonb_build_object(
+             'lineLevelAdjudicationReady', true,
+             'inputTotalsMatchLines', $2::boolean,
+             'lineBalancesToAllowed', $3::boolean,
+             'patientResponsibilityBalances', $4::boolean,
+             'postingVarianceCents', $5::int,
+             'lineReconciliationTotals', $6::jsonb,
+             'varianceResolved', false,
+             'pmsLedgerWriteRequiresReview', true
+           ),
+           "updatedAt" = current_timestamp
+         where "id" = $1 and "tenantId" = $7`,
+        [
+          id,
+          reconciliation.inputTotalsMatchLines,
+          reconciliation.lineBalancesToAllowed,
+          reconciliation.patientResponsibilityBalances,
+          reconciliation.postingVarianceCents,
+          JSON.stringify(reconciliation.totals),
+          tenantId,
+        ],
+      );
+      return { tenantId: era.tenantId, audit: "BLOCKED_LINE_RECONCILIATION" as const, error: "Imported ERA/EOB line adjudication totals must reconcile before posting to the PMS ledger.", reconciliation };
+    }
+
+    await client.query(
+      `update "RcmEraPosting"
+       set "postingReadiness" = coalesce("postingReadiness", '{}'::jsonb) || jsonb_build_object(
+           'hasEraOrEobProof', coalesce("eraTraceNumber", '') <> '' or coalesce("eobDocumentId", '') <> '',
+           'ledgerImpactReviewed', true,
+           'adjustmentsReviewed', true,
+           'lineLevelAdjudicationReady', true,
+           'inputTotalsMatchLines', true,
+           'lineBalancesToAllowed', true,
+           'patientResponsibilityBalances', true,
+           'lineCount', $2::int,
+           'postingVarianceCents', 0,
+           'varianceResolved', true
+         ),
+         "connectorStatus" = 'MANUAL_PROOF_REQUIRED',
+         "blockedReason" = case when coalesce("eraTraceNumber", '') = '' and coalesce("eobDocumentId", '') = '' then 'Manual EOB proof or ERA trace is required for audit review.' else "blockedReason" end
+       where "id" = $1 and "tenantId" = $3`,
+      [id, adjudicationLines.length, tenantId],
+    );
+
+    const ledgerEntryId = newId("led");
+    const paymentId = newId("pay");
+    await client.query(
+      `insert into "PmsLedgerEntry"
+         ("id", "tenantId", "patientId", "claimId", "entryType", "description", "amountCents", "balanceCents", "serviceDate")
+       values ($1, $2, $3, $4, 'INSURANCE_PAYMENT', $5, $6, $6, current_timestamp)`,
+      [ledgerEntryId, era.tenantId, era.patientId, era.claimId, `${era.payerName} ERA insurance payment`, -Math.abs(Number(era.paidCents))],
+    );
+    await client.query(
+      `insert into "PmsPayment"
+         ("id", "tenantId", "patientId", "ledgerEntryId", "paymentType", "amountCents", "reference", "unappliedCents", "status")
+       values ($1, $2, $3, $4, 'INSURANCE_ERA', $5, $6, 0, 'POSTED')`,
+      [paymentId, era.tenantId, era.patientId, ledgerEntryId, Math.abs(Number(era.paidCents)), id],
+    );
+    const claimLineUpdate = await client.query(
+      `update "PmsClaimLine" cl
+       set "allowedCents" = data."allowedCents",
+         "paidCents" = data."paidCents",
+         "deductibleCents" = data."deductibleCents",
+         "copayCents" = data."copayCents",
+         "coinsuranceCents" = data."coinsuranceCents",
+         "writeoffCents" = data."writeoffCents",
+         "denialCents" = data."denialCents",
+         "otherAdjustmentCents" = data."otherAdjustmentCents",
+         "patientDueCents" = data."patientResponsibilityCents",
+         "carcCodes" = data."carcCodes"::jsonb,
+         "rarcCodes" = data."rarcCodes"::jsonb,
+         "eraPostingId" = $2,
+         "adjudicatedAt" = current_timestamp,
+         "status" = data."status",
+         "updatedAt" = current_timestamp
+       from jsonb_to_recordset($3::jsonb) as data(
+         "claimLineId" text,
+         "allowedCents" int,
+         "paidCents" int,
+         "deductibleCents" int,
+         "copayCents" int,
+         "coinsuranceCents" int,
+         "writeoffCents" int,
+         "denialCents" int,
+         "otherAdjustmentCents" int,
+         "patientResponsibilityCents" int,
+         "carcCodes" jsonb,
+         "rarcCodes" jsonb,
+         "status" text
+       )
+      where cl."id" = data."claimLineId" and cl."claimId" = $1 and cl."tenantId" = $4`,
+      [era.claimId, id, JSON.stringify(adjudicationLines), tenantId],
+    );
+    if (claimLineUpdate.rowCount !== adjudicationLines.length) {
+      throw new Error("ERA posting aborted because not every imported adjudication row updated a matching claim line.");
+    }
+    await client.query(
+      `update "PmsClaim"
+       set "allowedCents" = $2, "paidCents" = "paidCents" + $3, "patientDueCents" = $4,
+         "status" = case when ("paidCents" + $3) >= $2 then 'PAID' else 'PARTIALLY_PAID' end,
+         "lastStatusAt" = current_timestamp, "updatedAt" = current_timestamp
+       where "id" = $1 and "tenantId" = $5`,
+      [era.claimId, Number(era.allowedCents), Math.abs(Number(era.paidCents)), Number(era.patientDueCents), tenantId],
+    );
+    await client.query(
+      `update "RcmEraPosting"
+       set "status" = 'POSTED', "postedAt" = current_timestamp, "updatedAt" = current_timestamp
+       where "id" = $1 and "tenantId" = $2`,
+      [id, tenantId],
+    );
+
+    return { ledgerEntryId, paymentId, tenantId: era.tenantId, audit: "POSTED" as const };
+  });
+  if (result.audit === "BLOCKED_VARIANCE") {
+    await addAudit(result.tenantId, actorRole, "RCM_ERA_POST_BLOCKED_VARIANCE", "RcmEraPosting", id, "BLOCKED", { postingVarianceCents: result.postingVarianceCents });
+    throw new Error(result.error);
+  }
+  if (result.audit === "BLOCKED_PROOF") {
+    await addAudit(result.tenantId, actorRole, "RCM_ERA_POST_BLOCKED", "RcmEraPosting", id, "BLOCKED", { blockedReason: "Manual EOB proof or ERA trace is required." });
+    throw new Error(result.error);
+  }
+  if (result.audit === "BLOCKED_LINE_RECONCILIATION" || result.audit === "BLOCKED_LINE_OWNERSHIP") {
+    await addAudit(result.tenantId, actorRole, "RCM_ERA_POST_BLOCKED_LINE_RECONCILIATION", "RcmEraPosting", id, "BLOCKED", result.reconciliation);
+    throw new Error(result.error);
+  }
+  await addAudit(result.tenantId, actorRole, result.audit === "POSTED" ? "RCM_ERA_POSTED_TO_LEDGER" : "RCM_ERA_POST_IDEMPOTENT_RETURN", "RcmEraPosting", id, "ALLOWED", { ledgerEntryId: result.ledgerEntryId, paymentId: result.paymentId });
+  return { ledgerEntryId: result.ledgerEntryId, paymentId: result.paymentId };
+}
+
+export async function attachEobProofToEra(input: {
+  id: string;
+  tenantId?: string;
+  payerRegistryEntryId?: string;
+  adjustmentSummary?: unknown;
+  actorRole?: string;
+}) {
   const era = (await query<{
     id: string;
     tenantId: string;
@@ -544,63 +988,72 @@ export async function postEraToLedger(id: string, actorRole = "billing_rcm") {
     claimId: string;
     payerName: string;
     eraTraceNumber: string | null;
-    eobDocumentId: string | null;
-    paidCents: number;
     allowedCents: number;
+    paidCents: number;
     patientDueCents: number;
     adjustmentCents: number;
-  }>(`select * from "RcmEraPosting" where "id" = $1`, [id])).rows[0];
+    firstName: string;
+    lastName: string;
+    chartNumber: string;
+  }>(
+    `select era.*, p."firstName", p."lastName", p."chartNumber"
+     from "RcmEraPosting" era
+     join "PmsPatient" p on p."id" = era."patientId"
+	     where era."id" = $1 and era."tenantId" = $2`,
+    [input.id, input.tenantId ?? defaultTenantId],
+  )).rows[0];
   if (!era) throw new Error("ERA posting was not found.");
-  if (Number(era.paidCents) <= 0) throw new Error("ERA paid amount must be greater than zero before posting.");
-  if (!era.eraTraceNumber && !era.eobDocumentId) {
-    await query(
-      `update "RcmEraPosting"
-       set "connectorStatus" = 'MANUAL_PROOF_REQUIRED',
-         "blockedReason" = 'Manual EOB proof or ERA trace is required before posting to the PMS ledger.',
-         "postingReadiness" = coalesce("postingReadiness", '{"hasEraOrEobProof":false,"ledgerImpactReviewed":false,"adjustmentsReviewed":false}'::jsonb),
-         "updatedAt" = current_timestamp
-       where "id" = $1`,
-      [id],
-    );
-    await addAudit(era.tenantId, actorRole, "RCM_ERA_POST_BLOCKED", "RcmEraPosting", id, "BLOCKED", { blockedReason: "Manual EOB proof or ERA trace is required." });
-    throw new Error("Manual EOB proof or ERA trace is required before posting to the PMS ledger.");
-  }
+  const adjudicationLines = await getEraAdjudicationLines(era.id, era.tenantId);
+  if (!adjudicationLines.length) throw new Error("EOB proof requires imported line-level 835/EOB adjudication before proof generation.");
+
+  const payload = buildEobPdfArtifactPayload({
+    tenantId: era.tenantId,
+    eraPostingId: era.id,
+    claimId: era.claimId,
+    patientLabel: `${era.lastName}, ${era.firstName} (${era.chartNumber})`,
+    payerName: era.payerName,
+    allowedCents: Number(era.allowedCents),
+    paidCents: Number(era.paidCents),
+    patientDueCents: Number(era.patientDueCents),
+    adjustmentCents: Number(era.adjustmentCents),
+    eraTraceNumber: era.eraTraceNumber,
+    adjudicationLines,
+    adjustmentSummary: input.adjustmentSummary,
+  });
+  const artifact = await recordPayerGeneratedArtifact({
+    tenantId: era.tenantId,
+    payerRegistryEntryId: input.payerRegistryEntryId,
+    sourceObjectType: "RcmEraPosting",
+    sourceObjectId: era.id,
+    artifactType: payload.artifactType,
+    title: payload.title,
+    storageUri: `artifact://eob-posting/${payload.checksum}.html`,
+    checksum: payload.checksum,
+    metadata: { ...payload.metadata, contentType: payload.contentType, renderReady: true },
+  });
   await query(
     `update "RcmEraPosting"
-     set "postingReadiness" = coalesce("postingReadiness", jsonb_build_object('hasEraOrEobProof', coalesce("eraTraceNumber", '') <> '' or coalesce("eobDocumentId", '') <> '', 'ledgerImpactReviewed', true, 'adjustmentsReviewed', true)),
+     set "eobDocumentId" = $2,
+       "postingReadiness" = jsonb_build_object(
+         'hasEraOrEobProof', true,
+         'eobArtifactId', $2::text,
+	         'ledgerImpactReviewed', false,
+	         'adjustmentsReviewed', false,
+	         'lineLevelAdjudicationReady', true,
+	         'lineCount', $3::int,
+	         'pmsLedgerWriteRequiresReview', true
+	       ),
        "connectorStatus" = 'MANUAL_PROOF_REQUIRED',
-       "blockedReason" = case when coalesce("eraTraceNumber", '') = '' and coalesce("eobDocumentId", '') = '' then 'Manual EOB proof or ERA trace is required for audit review.' else "blockedReason" end
-     where "id" = $1`,
-    [id],
+       "blockedReason" = 'EOB proof is attached; ledger posting still requires billing review.',
+       "updatedAt" = current_timestamp
+	     where "id" = $1 and "tenantId" = $4`,
+    [era.id, artifact.id, adjudicationLines.length, era.tenantId],
   );
-  const ledgerEntryId = newId("led");
-  const paymentId = newId("pay");
-  await query(
-    `insert into "PmsLedgerEntry"
-       ("id", "tenantId", "patientId", "claimId", "entryType", "description", "amountCents", "balanceCents", "serviceDate")
-     values ($1, $2, $3, $4, 'INSURANCE_PAYMENT', $5, $6, $6, current_timestamp)`,
-    [ledgerEntryId, era.tenantId, era.patientId, era.claimId, `${era.payerName} ERA insurance payment`, -Math.abs(Number(era.paidCents))],
-  );
-  await query(
-    `insert into "PmsPayment"
-       ("id", "tenantId", "patientId", "ledgerEntryId", "paymentType", "amountCents", "reference", "unappliedCents", "status")
-     values ($1, $2, $3, $4, 'INSURANCE_ERA', $5, $6, 0, 'POSTED')`,
-    [paymentId, era.tenantId, era.patientId, ledgerEntryId, Math.abs(Number(era.paidCents)), id],
-  );
-  await query(
-    `update "PmsClaim"
-     set "allowedCents" = $2, "paidCents" = "paidCents" + $3, "patientDueCents" = $4,
-       "status" = case when ("paidCents" + $3) >= $2 then 'PAID' else 'PARTIALLY_PAID' end,
-       "lastStatusAt" = current_timestamp, "updatedAt" = current_timestamp
-     where "id" = $1`,
-    [era.claimId, Number(era.allowedCents), Math.abs(Number(era.paidCents)), Number(era.patientDueCents)],
-  );
-  await query(`update "RcmEraPosting" set "status" = 'POSTED', "postedAt" = current_timestamp, "updatedAt" = current_timestamp where "id" = $1`, [id]);
-  await addAudit(era.tenantId, actorRole, "RCM_ERA_POSTED_TO_LEDGER", "RcmEraPosting", id, "ALLOWED", { ledgerEntryId, paymentId });
-  return { ledgerEntryId, paymentId };
+  await addAudit(era.tenantId, input.actorRole ?? "billing_rcm", "RCM_EOB_PROOF_ATTACHED", "RcmEraPosting", era.id, "ALLOWED", { artifactId: artifact.id, checksum: payload.checksum });
+  return { artifactId: artifact.id, checksum: payload.checksum };
 }
 
-export async function updateRevenueFindingStatus(id: string, status: string, actorRole = "billing_rcm") {
+export async function updateRevenueFindingStatus(id: string, status: string, actorRole = "billing_rcm", tenantId = defaultTenantId) {
   const nextStatus = requireAllowed(status === "RECOVERED" ? "MANUAL_PROOF_REQUIRED" : status, allowedRevenueStatuses, "IN_REVIEW");
   const result = await query<{ tenantId: string }>(
     `update "RcmRevenueIntegrityFinding"
@@ -609,8 +1062,8 @@ export async function updateRevenueFindingStatus(id: string, status: string, act
        "connectorStatus" = case when $2 in ('RECOVERY_STAGED','MANUAL_PROOF_REQUIRED') then 'MANUAL_PROOF_REQUIRED' else "connectorStatus" end,
        "proofRequired" = coalesce("proofRequired", '["source claim","ledger variance","payer contract or fee schedule","recovery action proof"]'::jsonb),
        "updatedAt" = current_timestamp
-     where "id" = $1 returning "tenantId"`,
-    [id, nextStatus],
+	     where "id" = $1 and "tenantId" = $3 returning "tenantId"`,
+    [id, nextStatus, tenantId],
   );
   if (result.rows[0]) await addAudit(result.rows[0].tenantId, actorRole, "RCM_REVENUE_INTEGRITY_UPDATED", "RcmRevenueIntegrityFinding", id, "ALLOWED", { requestedStatus: status, appliedStatus: nextStatus });
 }

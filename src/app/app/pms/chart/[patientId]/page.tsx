@@ -1,8 +1,9 @@
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { EmptyPmsState, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
-import { addClinicalNote, addProcedureLog, addToothCondition, getChart, listProcedureCodes } from "@/lib/pms-repository";
+import { addClinicalNote, addClinicalNoteAddendum, addProcedureLog, addToothCondition, getChart, listProcedureCodes, signClinicalNote } from "@/lib/pms-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -10,20 +11,63 @@ type ChartAlert = { id: string; title: string; details: string | null };
 type ChartAllergy = { id: string; allergen: string; reaction: string | null };
 type ChartMedication = { id: string; name: string; dosage: string | null };
 type ChartProcedure = { id: string; code: string; description: string; tooth: string | null; status: string };
-type ChartNote = { id: string; noteType: string; status: string; body: string };
+type ChartNote = {
+  id: string;
+  noteType: string;
+  status: string;
+  body: string;
+  signedAt: string | null;
+  signedByRole: string | null;
+  addendumOfNoteId: string | null;
+  addendumReason: string | null;
+};
 type ToothCondition = { id: string; tooth: string; surface: string | null; condition: string; status: string };
 
 async function addNoteAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const patientId = String(formData.get("patientId"));
-  await addClinicalNote(patientId, String(formData.get("body") ?? ""), String(formData.get("noteType") ?? "PROGRESS"));
+  await addClinicalNote(patientId, String(formData.get("body") ?? ""), String(formData.get("noteType") ?? "PROGRESS"), session.tenantId, session.roleKey, {
+    noteTemplateKey: String(formData.get("noteTemplateKey") ?? "chart_progress"),
+    sourceModule: "chart",
+    sourceRecordId: patientId,
+  });
+  revalidatePath(`/app/pms/chart/${patientId}`);
+}
+
+async function signNoteAction(formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  const patientId = String(formData.get("patientId"));
+  await signClinicalNote({
+    noteId: String(formData.get("noteId") ?? ""),
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+  });
+  revalidatePath(`/app/pms/chart/${patientId}`);
+}
+
+async function addNoteAddendumAction(formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  const patientId = String(formData.get("patientId"));
+  await addClinicalNoteAddendum({
+    noteId: String(formData.get("noteId") ?? ""),
+    body: String(formData.get("body") ?? ""),
+    reason: String(formData.get("reason") ?? ""),
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+  });
   revalidatePath(`/app/pms/chart/${patientId}`);
 }
 
 async function addConditionAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const patientId = String(formData.get("patientId"));
   await addToothCondition(patientId, {
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     tooth: String(formData.get("tooth") ?? ""),
     surface: String(formData.get("surface") ?? ""),
     condition: String(formData.get("condition") ?? ""),
@@ -34,8 +78,11 @@ async function addConditionAction(formData: FormData) {
 
 async function addProcedureAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const patientId = String(formData.get("patientId"));
   await addProcedureLog(patientId, {
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     procedureCodeId: String(formData.get("procedureCodeId") ?? ""),
     tooth: String(formData.get("tooth") ?? ""),
     surface: String(formData.get("surface") ?? ""),
@@ -46,8 +93,9 @@ async function addProcedureAction(formData: FormData) {
 
 export default async function ChartPage({ params, searchParams }: { params: Promise<{ patientId: string }>; searchParams: Promise<{ role?: string }> }) {
   const [{ patientId }, query] = await Promise.all([params, searchParams]);
+  const session = await requireAuth();
   const role = getRole(query.role);
-  const [chart, procedureCodes] = await Promise.all([getChart(patientId), listProcedureCodes()]);
+  const [chart, procedureCodes] = await Promise.all([getChart(patientId, session.tenantId), listProcedureCodes(session.tenantId)]);
   const patient = chart.patient;
   const conditions = chart.conditions as ToothCondition[];
 
@@ -127,6 +175,16 @@ export default async function ChartPage({ params, searchParams }: { params: Prom
               </select>
             </label>
             <label className="grid min-w-0 gap-1 text-sm font-semibold text-neutral-700">
+              Template
+              <select name="noteTemplateKey" className={controlClass}>
+                <option value="chart_progress">Chart progress</option>
+                <option value="doctor_exam">Doctor exam</option>
+                <option value="staff_note">Staff note</option>
+                <option value="rdh_note">RDH note</option>
+                <option value="clinical_ai_review">Clinical AI review</option>
+              </select>
+            </label>
+            <label className="grid min-w-0 gap-1 text-sm font-semibold text-neutral-700">
               Note
               <textarea name="body" required rows={8} className={controlClass} />
             </label>
@@ -148,10 +206,31 @@ export default async function ChartPage({ params, searchParams }: { params: Prom
           {chart.notes.length ? (chart.notes as ChartNote[]).map((note) => (
             <div key={note.id} className="mb-3 rounded-2xl bg-neutral-50 p-4">
               <div className="flex items-center justify-between gap-3">
-                <p className="font-semibold text-neutral-950">{note.noteType}</p>
+                <div>
+                  <p className="font-semibold text-neutral-950">{note.noteType}</p>
+                  {note.addendumOfNoteId ? <p className="mt-1 text-xs text-neutral-500">Addendum to {note.addendumOfNoteId}</p> : null}
+                </div>
                 <StatusFor value={note.status} />
               </div>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-neutral-700">{note.body}</p>
+              {note.signedAt ? <p className="mt-2 text-xs font-semibold text-emerald-700">Signed by {note.signedByRole ?? "provider"} on {new Date(note.signedAt).toLocaleString()}</p> : null}
+              {note.addendumReason ? <p className="mt-2 text-xs text-neutral-500">Reason: {note.addendumReason}</p> : null}
+              {note.status === "DRAFT" ? (
+                <form action={signNoteAction} className="mt-3">
+                  <input type="hidden" name="patientId" value={patient.id} />
+                  <input type="hidden" name="noteId" value={note.id} />
+                  <button className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white">Sign and lock note</button>
+                </form>
+              ) : null}
+              {note.status === "SIGNED" && !note.addendumOfNoteId ? (
+                <form action={addNoteAddendumAction} className="mt-3 grid gap-2">
+                  <input type="hidden" name="patientId" value={patient.id} />
+                  <input type="hidden" name="noteId" value={note.id} />
+                  <input name="reason" required placeholder="Addendum reason" className={controlClass} />
+                  <textarea name="body" required rows={3} placeholder="Signed addendum text" className={controlClass} />
+                  <button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-800">Add signed addendum</button>
+                </form>
+              ) : null}
             </div>
           )) : <EmptyPmsState title="No clinical notes yet" body="Use the note panel to record chairside documentation. Notes persist to the chart immediately." />}
         </PmsCard>

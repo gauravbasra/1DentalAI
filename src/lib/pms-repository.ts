@@ -1,6 +1,11 @@
+import { createHash } from "node:crypto";
 import { newId, query, withTransaction } from "@/lib/db";
+import type { QueryResult, QueryResultRow } from "pg";
 
 export const defaultTenantId = "tenant_1dentalai_production";
+
+const clinicalSignRoles = new Set(["owner_doctor", "associate_provider", "rdh", "clinical_assistant"]);
+const checkoutOverrideRoles = new Set(["owner_doctor", "associate_provider", "rdh", "practice_manager"]);
 
 export type PmsPatientSummary = {
   id: string;
@@ -38,6 +43,22 @@ export type PmsFamilyAccountRow = {
   phone: string | null;
   email: string | null;
   financialNote: string | null;
+};
+
+export type PmsOnboardingCompletenessGate = {
+  key: string;
+  label: string;
+  status: "READY" | "NEEDS_WORK" | "BLOCKED";
+  detail: string;
+  action: string;
+};
+
+export type PmsOnboardingCompleteness = {
+  patientId: string;
+  ready: boolean;
+  completedCount: number;
+  totalCount: number;
+  gates: PmsOnboardingCompletenessGate[];
 };
 
 export type PmsAppointmentRow = {
@@ -93,6 +114,7 @@ export type PmsAppointmentControl = {
   forms: Array<{ id: string; templateName: string; status: string; dueAt: string | null }>;
   labCases: Array<{ id: string; labName: string; caseType: string; status: string; dueDate: string | null }>;
   imaging: Array<{ id: string; studyType: string; acquisitionStatus: string; tooth: string | null; region: string | null; takenAt: string | null }>;
+  clinicalNotes: Array<{ id: string; noteType: string; status: string; body: string; signedAt: string | null; signedByRole: string | null; addendumOfNoteId: string | null; addendumReason: string | null; createdAt: string }>;
   claims: Array<{ id: string; claimNumber: string | null; status: string; billedCents: number; patientDueCents: number; attachmentStatus: string }>;
   checkoutSessions: Array<{ id: string; status: string; chargeCents: number; patientPaymentCents: number; claimId: string | null; createdAt: string; checkoutNote: string | null }>;
   readinessBlockers: PmsAppointmentReadinessBlocker[];
@@ -866,7 +888,122 @@ export async function getPatient(patientId: string, tenantId = defaultTenantId) 
   return result.rows[0] ?? null;
 }
 
+export async function getPatientOnboardingCompleteness(patientId: string, tenantId = defaultTenantId): Promise<PmsOnboardingCompleteness | null> {
+  const result = await query<{
+    patientId: string;
+    phone: string | null;
+    email: string | null;
+    dateOfBirth: string | null;
+    responsibleParty: string | null;
+    emergencyContactName: string | null;
+    emergencyContactPhone: string | null;
+    familyAccountId: string | null;
+    guarantorPatientId: string | null;
+    communicationCount: string;
+    signedConsentCount: string;
+    openFormCount: string;
+    pendingProfileChangeCount: string;
+    activeCoverageCount: string;
+    totalCoverageCount: string;
+  }>(
+    `select
+       p."id" as "patientId",
+       p."phone",
+       p."email",
+       p."dateOfBirth"::text as "dateOfBirth",
+       p."responsibleParty",
+       p."emergencyContactName",
+       p."emergencyContactPhone",
+       p."familyAccountId",
+       fa."guarantorPatientId",
+       (select count(*)::text from "PmsPatientCommunicationPreference" cp where cp."patientId" = p."id" and cp."consentStatus" in ('OPTED_IN', 'UNKNOWN')) as "communicationCount",
+       (select count(*)::text from "PmsPatientConsent" c where c."patientId" = p."id" and c."status" = 'SIGNED') as "signedConsentCount",
+       (select count(*)::text from "PmsFormAssignment" a where a."tenantId" = $2 and a."patientId" = p."id" and a."status" in ('ASSIGNED', 'SUBMITTED')) as "openFormCount",
+       (select count(*)::text from "PmsProfileChangeRequest" cr where cr."tenantId" = $2 and cr."patientId" = p."id" and cr."status" = 'PENDING') as "pendingProfileChangeCount",
+       (select count(*)::text from "PmsPatientInsurance" pi where pi."tenantId" = $2 and pi."patientId" = p."id" and pi."eligibilityStatus" = 'ACTIVE') as "activeCoverageCount",
+       (select count(*)::text from "PmsPatientInsurance" pi where pi."tenantId" = $2 and pi."patientId" = p."id") as "totalCoverageCount"
+     from "PmsPatient" p
+     left join "PmsFamilyAccount" fa on fa."id" = p."familyAccountId" and fa."tenantId" = p."tenantId"
+     where p."id" = $1 and p."tenantId" = $2`,
+    [patientId, tenantId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+
+  const hasContact = Boolean(row.phone || row.email);
+  const hasEmergency = Boolean(row.emergencyContactName && row.emergencyContactPhone);
+  const hasGuarantor = Boolean(row.familyAccountId && row.guarantorPatientId && row.responsibleParty);
+  const communicationCount = Number(row.communicationCount ?? 0);
+  const signedConsentCount = Number(row.signedConsentCount ?? 0);
+  const openFormCount = Number(row.openFormCount ?? 0);
+  const pendingProfileChangeCount = Number(row.pendingProfileChangeCount ?? 0);
+  const activeCoverageCount = Number(row.activeCoverageCount ?? 0);
+  const totalCoverageCount = Number(row.totalCoverageCount ?? 0);
+
+  const gates: PmsOnboardingCompletenessGate[] = [
+    {
+      key: "demographics",
+      label: "Demographics",
+      status: row.dateOfBirth && hasContact ? "READY" : "BLOCKED",
+      detail: row.dateOfBirth && hasContact ? "DOB and a reachable phone or email are recorded." : "DOB plus phone or email are required before routine scheduling.",
+      action: "Complete administrative profile.",
+    },
+    {
+      key: "family_guarantor",
+      label: "Family and guarantor",
+      status: hasGuarantor ? "READY" : "BLOCKED",
+      detail: hasGuarantor ? "Family account, responsible party, and guarantor are linked." : "Family account or guarantor relationship is incomplete.",
+      action: "Review family account and responsible party.",
+    },
+    {
+      key: "emergency_contact",
+      label: "Emergency contact",
+      status: hasEmergency ? "READY" : "NEEDS_WORK",
+      detail: hasEmergency ? "Emergency contact name and phone are present." : "Emergency contact is missing or missing a phone number.",
+      action: "Add emergency contact details.",
+    },
+    {
+      key: "communication_consent",
+      label: "Communication consent",
+      status: communicationCount > 0 ? "READY" : "NEEDS_WORK",
+      detail: communicationCount > 0 ? `${communicationCount} contact permission record${communicationCount === 1 ? "" : "s"} available.` : "No contact permission is recorded for reminders or outreach.",
+      action: "Record SMS, email, phone, or portal permission.",
+    },
+    {
+      key: "forms_review",
+      label: "Forms and profile review",
+      status: openFormCount || pendingProfileChangeCount ? "BLOCKED" : "READY",
+      detail: openFormCount || pendingProfileChangeCount ? `${openFormCount} open form packet${openFormCount === 1 ? "" : "s"} and ${pendingProfileChangeCount} pending profile change${pendingProfileChangeCount === 1 ? "" : "s"}.` : "No open packets or pending form-sourced profile changes.",
+      action: "Finish packets and accept or reject profile changes.",
+    },
+    {
+      key: "signed_consents",
+      label: "Signed consents",
+      status: signedConsentCount > 0 ? "READY" : "NEEDS_WORK",
+      detail: signedConsentCount > 0 ? `${signedConsentCount} signed consent record${signedConsentCount === 1 ? "" : "s"} on file.` : "No signed consent is recorded.",
+      action: "Record treatment, HIPAA, or financial consent.",
+    },
+    {
+      key: "insurance",
+      label: "Insurance readiness",
+      status: activeCoverageCount > 0 ? "READY" : totalCoverageCount > 0 ? "NEEDS_WORK" : "BLOCKED",
+      detail: activeCoverageCount > 0 ? "Active coverage is attached." : totalCoverageCount > 0 ? "Coverage exists but eligibility is not active." : "No coverage is attached.",
+      action: "Attach coverage or verify eligibility.",
+    },
+  ];
+  const completedCount = gates.filter((gate) => gate.status === "READY").length;
+
+  return {
+    patientId,
+    ready: gates.every((gate) => gate.status === "READY"),
+    completedCount,
+    totalCount: gates.length,
+    gates,
+  };
+}
+
 export async function updatePatientAdministrativeProfile(input: {
+  tenantId?: string;
   patientId: string;
   preferredName?: string;
   phone?: string;
@@ -880,6 +1017,7 @@ export async function updatePatientAdministrativeProfile(input: {
   patientNote?: string;
   actorRole?: string;
 }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
   const result = await query(
     `update "PmsPatient"
      set "preferredName" = $2,
@@ -893,7 +1031,7 @@ export async function updatePatientAdministrativeProfile(input: {
        "privacyLevel" = $10,
        "patientNote" = $11,
        "updatedAt" = current_timestamp
-     where "id" = $1
+     where "id" = $1 and "tenantId" = $12
      returning *`,
     [
       input.patientId,
@@ -907,24 +1045,25 @@ export async function updatePatientAdministrativeProfile(input: {
       input.referralSource?.trim() || null,
       input.privacyLevel?.trim() || "STANDARD",
       input.patientNote?.trim() || null,
+      tenantId,
     ],
   );
-  await addAudit(defaultTenantId, input.actorRole ?? "front_desk", "PATIENT_PROFILE_UPDATED", "PmsPatient", input.patientId, result.rowCount ? "ALLOWED" : "BLOCKED");
+  await addAudit(tenantId, input.actorRole ?? "front_desk", "PATIENT_PROFILE_UPDATED", "PmsPatient", input.patientId, result.rowCount ? "ALLOWED" : "BLOCKED");
   return result.rows[0] ?? null;
 }
 
-export async function getFamilyAccount(patientId: string) {
+export async function getFamilyAccount(patientId: string, tenantId = defaultTenantId) {
   const result = await query<PmsFamilyAccountRow>(
     `select fa.*
      from "PmsPatient" p
      join "PmsFamilyAccount" fa on fa."id" = p."familyAccountId"
-     where p."id" = $1`,
-    [patientId],
+     where p."id" = $1 and p."tenantId" = $2`,
+    [patientId, tenantId],
   );
   return result.rows[0] ?? null;
 }
 
-export async function getFamilyMembers(patientId: string) {
+export async function getFamilyMembers(patientId: string, tenantId = defaultTenantId) {
   return (await query<PmsPatientSummary>(
     `select
       p."id", p."chartNumber", p."firstName", p."lastName", p."preferredName", p."dateOfBirth"::text as "dateOfBirth",
@@ -939,13 +1078,14 @@ export async function getFamilyMembers(patientId: string) {
      left join (
        select "patientId", sum("balanceCents") as balance_cents from "PmsLedgerEntry" group by "patientId"
      ) l on l."patientId" = p."id"
-     where selected."id" = $1
-     order by p."lastName", p."firstName"`,
-    [patientId],
+	     where selected."id" = $1 and selected."tenantId" = $2 and p."tenantId" = $2
+	     order by p."lastName", p."firstName"`,
+    [patientId, tenantId],
   )).rows;
 }
 
-export async function getPatientAccount(patientId: string) {
+export async function getPatientAccount(patientId: string, tenantId = defaultTenantId) {
+  await assertPatientTenant(patientId, tenantId);
   const [ledger, insurance, claims, treatmentPlans, recalls, documents, imaging, labCases, prescriptions, referrals] = await Promise.all([
     query(`select * from "PmsLedgerEntry" where "patientId" = $1 order by "postedAt" desc limit 50`, [patientId]),
     query(
@@ -981,7 +1121,8 @@ export async function getPatientAccount(patientId: string) {
   };
 }
 
-export async function getPatientProfile(patientId: string) {
+export async function getPatientProfile(patientId: string, tenantId = defaultTenantId) {
+  await assertPatientTenant(patientId, tenantId);
   const [communicationPreferences, consents, medicalHistory, pharmacies, alerts, allergies, medications] = await Promise.all([
     query(`select * from "PmsPatientCommunicationPreference" where "patientId" = $1 order by "priority", "channel"`, [patientId]),
     query(`select * from "PmsPatientConsent" where "patientId" = $1 order by "updatedAt" desc`, [patientId]),
@@ -1004,6 +1145,7 @@ export async function getPatientProfile(patientId: string) {
 }
 
 export async function addCommunicationPreference(input: {
+  tenantId?: string;
   patientId: string;
   channel: string;
   destination: string;
@@ -1014,6 +1156,8 @@ export async function addCommunicationPreference(input: {
   source?: string;
   actorRole?: string;
 }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  await assertPatientTenant(input.patientId, tenantId);
   const id = newId("comm");
   const result = await query(
     `insert into "PmsPatientCommunicationPreference"
@@ -1035,11 +1179,12 @@ export async function addCommunicationPreference(input: {
       input.source?.trim() || null,
     ],
   );
-  await addAudit(defaultTenantId, input.actorRole ?? "front_desk", "COMMUNICATION_PREFERENCE_SAVED", "PmsPatientCommunicationPreference", result.rows[0]?.id ?? id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "front_desk", "COMMUNICATION_PREFERENCE_SAVED", "PmsPatientCommunicationPreference", result.rows[0]?.id ?? id, "ALLOWED");
   return result.rows[0];
 }
 
 export async function addPatientConsent(input: {
+  tenantId?: string;
   patientId: string;
   consentType: string;
   status: string;
@@ -1049,6 +1194,8 @@ export async function addPatientConsent(input: {
   sourceDocumentId?: string;
   actorRole?: string;
 }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  await assertPatientTenant(input.patientId, tenantId);
   const id = newId("consent");
   const result = await query(
     `insert into "PmsPatientConsent"
@@ -1066,11 +1213,12 @@ export async function addPatientConsent(input: {
       input.expiresAt || null,
     ],
   );
-  await addAudit(defaultTenantId, input.actorRole ?? "front_desk", "PATIENT_CONSENT_RECORDED", "PmsPatientConsent", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "front_desk", "PATIENT_CONSENT_RECORDED", "PmsPatientConsent", id, "ALLOWED");
   return result.rows[0];
 }
 
 export async function addMedicalHistoryEntry(input: {
+  tenantId?: string;
   patientId: string;
   category: string;
   condition: string;
@@ -1082,6 +1230,8 @@ export async function addMedicalHistoryEntry(input: {
   reviewedByRole?: string;
   actorRole?: string;
 }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  await assertPatientTenant(input.patientId, tenantId);
   const id = newId("mh");
   const result = await query(
     `insert into "PmsMedicalHistoryEntry"
@@ -1101,11 +1251,12 @@ export async function addMedicalHistoryEntry(input: {
       input.reviewedByRole?.trim() || input.actorRole || null,
     ],
   );
-  await addAudit(defaultTenantId, input.actorRole ?? "associate_provider", "MEDICAL_HISTORY_RECORDED", "PmsMedicalHistoryEntry", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "associate_provider", "MEDICAL_HISTORY_RECORDED", "PmsMedicalHistoryEntry", id, "ALLOWED");
   return result.rows[0];
 }
 
 export async function addPatientPharmacy(input: {
+  tenantId?: string;
   patientId: string;
   pharmacyName: string;
   phone?: string;
@@ -1118,6 +1269,8 @@ export async function addPatientPharmacy(input: {
   notes?: string;
   actorRole?: string;
 }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  await assertPatientTenant(input.patientId, tenantId);
   const id = newId("pharm");
   const preferred = input.isPreferred ?? true;
   if (preferred) {
@@ -1142,40 +1295,46 @@ export async function addPatientPharmacy(input: {
       input.notes?.trim() || null,
     ],
   );
-  await addAudit(defaultTenantId, input.actorRole ?? "front_desk", "PATIENT_PHARMACY_SAVED", "PmsPatientPharmacy", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "front_desk", "PATIENT_PHARMACY_SAVED", "PmsPatientPharmacy", id, "ALLOWED");
   return result.rows[0];
 }
 
-export async function addMedicalAlert(input: { patientId: string; severity: string; title: string; details?: string; actorRole?: string }) {
+export async function addMedicalAlert(input: { tenantId?: string; patientId: string; severity: string; title: string; details?: string; actorRole?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  await assertPatientTenant(input.patientId, tenantId);
   const id = newId("alert");
   const result = await query(
     `insert into "PmsMedicalAlert" ("id", "patientId", "severity", "title", "details", "updatedAt")
      values ($1, $2, $3, $4, $5, current_timestamp) returning *`,
     [id, input.patientId, input.severity.trim(), input.title.trim(), input.details?.trim() || null],
   );
-  await addAudit(defaultTenantId, input.actorRole ?? "associate_provider", "MEDICAL_ALERT_CREATED", "PmsMedicalAlert", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "associate_provider", "MEDICAL_ALERT_CREATED", "PmsMedicalAlert", id, "ALLOWED");
   return result.rows[0];
 }
 
-export async function addAllergy(input: { patientId: string; allergen: string; reaction?: string; severity: string; actorRole?: string }) {
+export async function addAllergy(input: { tenantId?: string; patientId: string; allergen: string; reaction?: string; severity: string; actorRole?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  await assertPatientTenant(input.patientId, tenantId);
   const id = newId("allergy");
   const result = await query(
     `insert into "PmsAllergy" ("id", "patientId", "allergen", "reaction", "severity", "updatedAt")
      values ($1, $2, $3, $4, $5, current_timestamp) returning *`,
     [id, input.patientId, input.allergen.trim(), input.reaction?.trim() || null, input.severity.trim()],
   );
-  await addAudit(defaultTenantId, input.actorRole ?? "associate_provider", "ALLERGY_CREATED", "PmsAllergy", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "associate_provider", "ALLERGY_CREATED", "PmsAllergy", id, "ALLOWED");
   return result.rows[0];
 }
 
-export async function addMedication(input: { patientId: string; name: string; dosage?: string; status?: string; actorRole?: string }) {
+export async function addMedication(input: { tenantId?: string; patientId: string; name: string; dosage?: string; status?: string; actorRole?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  await assertPatientTenant(input.patientId, tenantId);
   const id = newId("med");
   const result = await query(
     `insert into "PmsMedication" ("id", "patientId", "name", "dosage", "status", "updatedAt")
      values ($1, $2, $3, $4, coalesce($5, 'ACTIVE'), current_timestamp) returning *`,
     [id, input.patientId, input.name.trim(), input.dosage?.trim() || null, input.status?.trim() || null],
   );
-  await addAudit(defaultTenantId, input.actorRole ?? "associate_provider", "MEDICATION_CREATED", "PmsMedication", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "associate_provider", "MEDICATION_CREATED", "PmsMedication", id, "ALLOWED");
   return result.rows[0];
 }
 
@@ -1258,14 +1417,14 @@ export async function assignFormToPatient(input: {
   return result.rows[0];
 }
 
-export async function getFormAssignmentDetail(assignmentId: string) {
+export async function getFormAssignmentDetail(assignmentId: string, tenantId = defaultTenantId) {
   const assignment = await query(
     `select a.*, t."name" as "templateName", t."formType", p."firstName", p."lastName", p."chartNumber"
      from "PmsFormAssignment" a
      join "PmsFormTemplate" t on t."id" = a."templateId"
      join "PmsPatient" p on p."id" = a."patientId"
-     where a."id" = $1`,
-    [assignmentId],
+	     where a."id" = $1 and a."tenantId" = $2`,
+    [assignmentId, tenantId],
   );
   const row = assignment.rows[0];
   if (!row) return null;
@@ -1281,6 +1440,7 @@ export async function getFormAssignmentDetail(assignmentId: string) {
 }
 
 export async function recordFormResponse(input: {
+  tenantId?: string;
   assignmentId: string;
   submittedByName?: string;
   submittedByType?: string;
@@ -1288,7 +1448,8 @@ export async function recordFormResponse(input: {
   answers: Record<string, string>;
   actorRole?: string;
 }) {
-  const detail = await getFormAssignmentDetail(input.assignmentId);
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const detail = await getFormAssignmentDetail(input.assignmentId, tenantId);
   if (!detail) throw new Error("Form assignment not found");
   const assignment = detail.assignment as { tenantId: string; patientId: string; id: string };
   const responseId = newId("formresp");
@@ -1317,7 +1478,7 @@ export async function recordFormResponse(input: {
     );
 
     if (field.targetModel && field.targetField) {
-      const currentValue = await getCurrentProfileValue(assignment.patientId, field.targetModel, field.targetField);
+      const currentValue = await getCurrentProfileValue(assignment.patientId, field.targetModel, field.targetField, tenantId);
       await query(
         `insert into "PmsProfileChangeRequest"
            ("id", "tenantId", "patientId", "responseId", "fieldId", "targetModel", "targetField", "currentValue", "proposedValue", "status", "updatedAt")
@@ -1338,11 +1499,13 @@ export async function recordFormResponse(input: {
 }
 
 export async function reviewProfileChangeRequest(input: {
+  tenantId?: string;
   changeId: string;
   decision: "ACCEPTED" | "REJECTED";
   reviewNote?: string;
   reviewedByRole?: string;
 }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
   const changeResult = await query<{
     id: string;
     tenantId: string;
@@ -1351,58 +1514,59 @@ export async function reviewProfileChangeRequest(input: {
     targetField: string;
     proposedValue: string;
     status: string;
-  }>(`select * from "PmsProfileChangeRequest" where "id" = $1`, [input.changeId]);
+  }>(`select * from "PmsProfileChangeRequest" where "id" = $1 and "tenantId" = $2`, [input.changeId, tenantId]);
   const change = changeResult.rows[0];
   if (!change || change.status !== "PENDING") return null;
 
   if (input.decision === "ACCEPTED") {
-    await applyProfileChange(change.patientId, change.targetModel, change.targetField, change.proposedValue);
+    await applyProfileChange(change.patientId, change.targetModel, change.targetField, change.proposedValue, tenantId);
   }
 
   const result = await query(
     `update "PmsProfileChangeRequest"
      set "status" = $2, "reviewNote" = $3, "reviewedByRole" = $4, "reviewedAt" = current_timestamp, "updatedAt" = current_timestamp
-     where "id" = $1
+     where "id" = $1 and "tenantId" = $5
      returning *`,
-    [input.changeId, input.decision, input.reviewNote?.trim() || null, input.reviewedByRole ?? "front_desk"],
+    [input.changeId, input.decision, input.reviewNote?.trim() || null, input.reviewedByRole ?? "front_desk", tenantId],
   );
   await addAudit(change.tenantId, input.reviewedByRole ?? "front_desk", `PROFILE_CHANGE_${input.decision}`, "PmsProfileChangeRequest", input.changeId, "ALLOWED");
   return result.rows[0];
 }
 
-async function getCurrentProfileValue(patientId: string, targetModel: string, targetField: string) {
+async function getCurrentProfileValue(patientId: string, targetModel: string, targetField: string, tenantId = defaultTenantId) {
   if (targetModel === "PmsPatient" && ["phone", "email", "emergencyContactName", "emergencyContactPhone", "patientNote"].includes(targetField)) {
-    const result = await query(`select "${targetField}"::text as value from "PmsPatient" where "id" = $1`, [patientId]);
+    const result = await query(`select "${targetField}"::text as value from "PmsPatient" where "id" = $1 and "tenantId" = $2`, [patientId, tenantId]);
     return result.rows[0]?.value ?? null;
   }
   if (targetModel === "PmsPatientCommunicationPreference") {
+    await assertPatientTenant(patientId, tenantId);
     const result = await query(`select "consentStatus" as value from "PmsPatientCommunicationPreference" where "patientId" = $1 and "channel" = 'SMS' order by "priority" limit 1`, [patientId]);
     return result.rows[0]?.value ?? null;
   }
   return null;
 }
 
-async function applyProfileChange(patientId: string, targetModel: string, targetField: string, proposedValue: string) {
+async function applyProfileChange(patientId: string, targetModel: string, targetField: string, proposedValue: string, tenantId = defaultTenantId) {
   if (targetModel === "PmsPatient" && ["phone", "email", "emergencyContactName", "emergencyContactPhone", "patientNote"].includes(targetField)) {
-    await query(`update "PmsPatient" set "${targetField}" = $2, "updatedAt" = current_timestamp where "id" = $1`, [patientId, proposedValue]);
+    await query(`update "PmsPatient" set "${targetField}" = $2, "updatedAt" = current_timestamp where "id" = $1 and "tenantId" = $3`, [patientId, proposedValue, tenantId]);
     return;
   }
   if (targetModel === "PmsPatientCommunicationPreference" && targetField === "SMS.consentStatus") {
-    const patient = await query<{ phone: string | null }>(`select "phone" from "PmsPatient" where "id" = $1`, [patientId]);
+    const patient = await query<{ phone: string | null }>(`select "phone" from "PmsPatient" where "id" = $1 and "tenantId" = $2`, [patientId, tenantId]);
     const destination = patient.rows[0]?.phone || "SMS destination pending";
-    await addCommunicationPreference({ patientId, channel: "SMS", destination, consentStatus: proposedValue, source: "FORM_REVIEW" });
+    await addCommunicationPreference({ tenantId, patientId, channel: "SMS", destination, consentStatus: proposedValue, source: "FORM_REVIEW" });
     return;
   }
   if (targetModel === "PmsMedicalHistoryEntry" && targetField === "condition") {
-    await addMedicalHistoryEntry({ patientId, category: "FORM_REPORTED", condition: proposedValue, status: "ACTIVE", severity: "MODERATE", notes: "Accepted from patient form review." });
+    await addMedicalHistoryEntry({ tenantId, patientId, category: "FORM_REPORTED", condition: proposedValue, status: "ACTIVE", severity: "MODERATE", notes: "Accepted from patient form review." });
     return;
   }
   if (targetModel === "PmsAllergy" && targetField === "allergen") {
-    await addAllergy({ patientId, allergen: proposedValue, severity: "MODERATE", reaction: "Accepted from patient form review." });
+    await addAllergy({ tenantId, patientId, allergen: proposedValue, severity: "MODERATE", reaction: "Accepted from patient form review." });
     return;
   }
   if (targetModel === "PmsPatientConsent" && targetField === "consentType") {
-    await addPatientConsent({ patientId, consentType: proposedValue, status: "SIGNED", signedAt: new Date().toISOString(), signedByName: "Form signer" });
+    await addPatientConsent({ tenantId, patientId, consentType: proposedValue, status: "SIGNED", signedAt: new Date().toISOString(), signedByName: "Form signer" });
   }
 }
 
@@ -1544,6 +1708,7 @@ export async function createAppointmentHold(input: {
   bookingMode?: string;
   patientIdentityPolicy?: string;
   screenTheme?: Record<string, unknown>;
+  actorRole?: string;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("appt");
@@ -1564,13 +1729,13 @@ export async function createAppointmentHold(input: {
   );
   await query(
     `insert into "PmsAppointmentStatusHistory" ("id", "appointmentId", "status", "actorRole", "note")
-     values ($1, $2, 'HELD', 'front_desk', $3)`,
-    [newId("apst"), id, category ? `Created from category ${category.name}` : null],
+     values ($1, $2, 'HELD', $3, $4)`,
+    [newId("apst"), id, input.actorRole ?? "front_desk", category ? `Created from category ${category.name}` : null],
   );
   if (category?.defaultProcedureCodes.length) {
     await addAppointmentProceduresFromCodes(id, tenantId, category.defaultProcedureCodes);
   }
-  await addAudit(tenantId, "front_desk", "APPOINTMENT_HELD", "PmsAppointment", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "front_desk", "APPOINTMENT_HELD", "PmsAppointment", id, "ALLOWED");
   return result.rows[0];
 }
 
@@ -1613,10 +1778,11 @@ export async function addAppointmentProcedure(input: {
   surface?: string;
   feeCents?: number;
   actorRole?: string;
+  tenantId?: string;
 }) {
   const appointment = (await query<{ tenantId: string }>(
-    `select "tenantId" from "PmsAppointment" where "id" = $1`,
-    [input.appointmentId],
+    `select "tenantId" from "PmsAppointment" where "id" = $1 and ($2::text is null or "tenantId" = $2)`,
+    [input.appointmentId, input.tenantId ?? null],
   )).rows[0];
   if (!appointment) throw new Error("Appointment not found.");
   const code = (await query<{ defaultFeeCents: number }>(
@@ -1646,7 +1812,15 @@ export async function addAppointmentProcedure(input: {
 }
 
 export async function getAppointmentControl(appointmentId: string, tenantId = defaultTenantId): Promise<PmsAppointmentControl | null> {
-  const appointment = (await query<PmsAppointmentControl["appointment"]>(
+  return getAppointmentControlWithExecutor({ query }, appointmentId, tenantId);
+}
+
+type PmsQueryExecutor = {
+  query<T extends QueryResultRow = QueryResultRow>(sql: string, values?: unknown[]): Promise<QueryResult<T>>;
+};
+
+async function getAppointmentControlWithExecutor(executor: PmsQueryExecutor, appointmentId: string, tenantId = defaultTenantId): Promise<PmsAppointmentControl | null> {
+  const appointment = (await executor.query<PmsAppointmentControl["appointment"]>(
     `select
       a."id", a."tenantId", a."patientId",
       case when p."id" is null then null else p."lastName" || ', ' || p."firstName" end as "patientName",
@@ -1667,57 +1841,66 @@ export async function getAppointmentControl(appointmentId: string, tenantId = de
   )).rows[0];
   if (!appointment) return null;
 
-  const [procedures, forms, labCases, imaging, claims, checkoutSessions, balance] = await Promise.all([
-    query<PmsAppointmentProcedureRow>(
+  const [procedures, forms, labCases, imaging, clinicalNotes, claims, checkoutSessions, balance] = await Promise.all([
+    executor.query<PmsAppointmentProcedureRow>(
       `select ap."id", ap."procedureCodeId", pc."code", pc."description", pc."category",
         ap."tooth", ap."surface", ap."feeCents", ap."status"
        from "PmsAppointmentProcedure" ap
        join "PmsProcedureCode" pc on pc."id" = ap."procedureCodeId"
-       where ap."appointmentId" = $1
+       join "PmsAppointment" a on a."id" = ap."appointmentId"
+       where ap."appointmentId" = $1 and a."tenantId" = $2
        order by pc."code", ap."createdAt"`,
-      [appointmentId],
+      [appointmentId, tenantId],
     ),
-    query<PmsAppointmentControl["forms"][number]>(
+    executor.query<PmsAppointmentControl["forms"][number]>(
       `select fa."id", ft."name" as "templateName", fa."status", fa."dueAt"::text as "dueAt"
        from "PmsFormAssignment" fa
        join "PmsFormTemplate" ft on ft."id" = fa."templateId"
-       where fa."appointmentId" = $1
+       join "PmsAppointment" a on a."id" = fa."appointmentId"
+       where fa."appointmentId" = $1 and a."tenantId" = $2
        order by fa."dueAt" asc nulls last, ft."name"`,
-      [appointmentId],
+      [appointmentId, tenantId],
     ),
-    query<PmsAppointmentControl["labCases"][number]>(
+    executor.query<PmsAppointmentControl["labCases"][number]>(
       `select "id", "labName", "caseType", "status", "dueDate"::text as "dueDate"
        from "PmsLabCase"
-       where "appointmentId" = $1
+       where "appointmentId" = $1 and "tenantId" = $2
        order by "dueDate" asc nulls last`,
-      [appointmentId],
+      [appointmentId, tenantId],
     ),
-    query<PmsAppointmentControl["imaging"][number]>(
+    executor.query<PmsAppointmentControl["imaging"][number]>(
       `select "id", "studyType", "acquisitionStatus", "tooth", "region", "takenAt"::text as "takenAt"
        from "PmsImagingStudy"
-       where "appointmentId" = $1
+       where "appointmentId" = $1 and "tenantId" = $2
        order by "takenAt" desc nulls first, "updatedAt" desc`,
-      [appointmentId],
+      [appointmentId, tenantId],
     ),
-    query<PmsAppointmentControl["claims"][number]>(
+    executor.query<PmsAppointmentControl["clinicalNotes"][number]>(
+      `select "id", "noteType", "status", "body", "signedAt"::text as "signedAt", "signedByRole", "addendumOfNoteId", "addendumReason", "createdAt"::text as "createdAt"
+       from "PmsClinicalNote"
+       where "appointmentId" = $1 and "tenantId" = $2
+       order by "createdAt" desc`,
+      [appointmentId, tenantId],
+    ),
+    executor.query<PmsAppointmentControl["claims"][number]>(
       `select "id", "claimNumber", "status", "billedCents", "patientDueCents", "attachmentStatus"
        from "PmsClaim"
-       where "appointmentId" = $1
+       where "appointmentId" = $1 and "tenantId" = $2
        order by "createdAt" desc`,
-      [appointmentId],
+      [appointmentId, tenantId],
     ),
-    query<PmsAppointmentControl["checkoutSessions"][number]>(
+    executor.query<PmsAppointmentControl["checkoutSessions"][number]>(
       `select "id", "status", "chargeCents", "patientPaymentCents", "claimId", "createdAt"::text as "createdAt", "checkoutNote"
        from "PmsCheckoutSession"
-       where "appointmentId" = $1
+       where "appointmentId" = $1 and "tenantId" = $2
        order by "createdAt" desc`,
-      [appointmentId],
+      [appointmentId, tenantId],
     ),
-    query<{ openBalanceCents: string }>(
+    executor.query<{ openBalanceCents: string }>(
       `select coalesce(sum("balanceCents"), 0)::text as "openBalanceCents"
        from "PmsLedgerEntry"
-       where "patientId" = $1`,
-      [appointment.patientId],
+       where "patientId" = $1 and "tenantId" = $2`,
+      [appointment.patientId, tenantId],
     ),
   ]);
 
@@ -1727,6 +1910,7 @@ export async function getAppointmentControl(appointmentId: string, tenantId = de
     forms: forms.rows,
     labCases: labCases.rows,
     imaging: imaging.rows,
+    clinicalNotes: clinicalNotes.rows,
   });
   const procedureFeeCents = procedures.rows.reduce((sum, procedure) => sum + Number(procedure.feeCents ?? 0), 0);
   const estimatedPatientDueCents = appointment.primaryInsuranceId ? Math.round(procedureFeeCents * 0.2) : procedureFeeCents;
@@ -1737,6 +1921,7 @@ export async function getAppointmentControl(appointmentId: string, tenantId = de
     forms: forms.rows,
     labCases: labCases.rows,
     imaging: imaging.rows,
+    clinicalNotes: clinicalNotes.rows,
     claims: claims.rows,
     checkoutSessions: checkoutSessions.rows,
     readinessBlockers,
@@ -1754,6 +1939,7 @@ function buildAppointmentReadinessBlockers(input: {
   forms: PmsAppointmentControl["forms"];
   labCases: PmsAppointmentControl["labCases"];
   imaging: PmsAppointmentControl["imaging"];
+  clinicalNotes: PmsAppointmentControl["clinicalNotes"];
 }): PmsAppointmentReadinessBlocker[] {
   const blockers: PmsAppointmentReadinessBlocker[] = [];
   if (!input.appointment.patientId) {
@@ -1777,6 +1963,10 @@ function buildAppointmentReadinessBlockers(input: {
   if (input.appointment.primaryInsuranceId && input.appointment.eligibilityStatus !== "ACTIVE") {
     blockers.push({ area: "Insurance", severity: "SOFT", message: `Primary insurance is ${input.appointment.eligibilityStatus ?? "not checked"}.`, action: "Verify benefits before estimating patient due." });
   }
+  const signedEncounterNotes = input.clinicalNotes.filter((note) => note.status === "SIGNED" && note.signedAt && !note.addendumOfNoteId);
+  if (!signedEncounterNotes.length) {
+    blockers.push({ area: "Clinical documentation", severity: "HARD", message: "No signed encounter note is linked to this appointment.", action: "Sign a doctor/RDH/staff note or override checkout with an audited reason." });
+  }
   return blockers;
 }
 
@@ -1794,130 +1984,243 @@ export async function completeAppointmentCheckout(input: {
 }) {
   const actorRole = input.actorRole ?? "front_desk";
   const tenantId = input.tenantId ?? defaultTenantId;
-  const control = await getAppointmentControl(input.appointmentId, tenantId);
-  if (!control) throw new Error("Appointment not found.");
-  if (!control.appointment.patientId) throw new Error("A patient is required before checkout.");
-  if (control.appointment.status === "COMPLETED") throw new Error("This appointment has already been completed.");
+  return withTransaction(async (client) => {
+    await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [`checkout:${tenantId}:${input.appointmentId}`]);
 
-  const hardBlockers = control.readinessBlockers.filter((blocker) => blocker.severity === "HARD");
-  if (hardBlockers.length && !input.overrideBlockers) {
-    await addAudit(control.appointment.tenantId, actorRole, "APPOINTMENT_CHECKOUT_BLOCKED", "PmsAppointment", input.appointmentId, "BLOCKED");
-    throw new Error(`Checkout blocked: ${hardBlockers.map((blocker) => blocker.message).join(" ")}`);
-  }
+    const idempotentExistingCheckout = (await client.query<{
+      id: string;
+      claimId: string | null;
+      paymentId: string | null;
+      chargeCents: number;
+      patientPaymentCents: number;
+    }>(
+      `select "id", "claimId", "paymentId", "chargeCents", "patientPaymentCents"
+       from "PmsCheckoutSession"
+       where "tenantId" = $1 and "appointmentId" = $2 and "status" = 'COMPLETED'
+       order by "createdAt" desc
+       limit 1`,
+      [tenantId, input.appointmentId],
+    )).rows[0];
+    if (idempotentExistingCheckout) {
+      return {
+        checkoutId: idempotentExistingCheckout.id,
+        claimId: idempotentExistingCheckout.claimId,
+        paymentId: idempotentExistingCheckout.paymentId,
+        chargeCents: Number(idempotentExistingCheckout.chargeCents),
+        patientPaymentCents: Number(idempotentExistingCheckout.patientPaymentCents),
+      };
+    }
 
-  const selectedIds = input.procedureIds?.filter(Boolean) ?? control.procedures.map((procedure) => procedure.id);
-  const selectedProcedures = control.procedures.filter((procedure) => selectedIds.includes(procedure.id));
-  if (!selectedProcedures.length) throw new Error("Select at least one appointment procedure to complete.");
+    const txAudit = async (eventType: string, targetType: string, targetId: string, outcome: string, metadata?: unknown) => {
+      await client.query(
+        `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+         values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+        [newId("audit"), tenantId, actorRole, eventType, targetType, targetId, outcome, metadata ? JSON.stringify(metadata) : null],
+      );
+    };
 
-  const procedureLogIds: string[] = [];
-  for (const procedure of selectedProcedures) {
-    await query(`update "PmsAppointmentProcedure" set "status" = 'COMPLETED', "updatedAt" = current_timestamp where "id" = $1`, [procedure.id]);
-    const logId = newId("plog");
-    await query(
-      `insert into "PmsProcedureLog"
-         ("id", "patientId", "providerId", "procedureCodeId", "tooth", "surface", "status", "feeCents", "serviceDate", "updatedAt")
-       values ($1, $2, $3, $4, $5, $6, 'COMPLETED', $7, $8::timestamp, current_timestamp)`,
+    const control = await getAppointmentControlWithExecutor(client, input.appointmentId, tenantId);
+    if (!control) throw new Error("Appointment not found.");
+    if (!control.appointment.patientId) throw new Error("A patient is required before checkout.");
+    if (control.appointment.status === "COMPLETED") throw new Error("This appointment has already been completed without a checkout session.");
+
+    const hardBlockers = control.readinessBlockers.filter((blocker) => blocker.severity === "HARD");
+    if (hardBlockers.length && input.overrideBlockers) {
+      if (!checkoutOverrideRoles.has(actorRole)) {
+        await txAudit("APPOINTMENT_CHECKOUT_OVERRIDE_BLOCKED_ROLE", "PmsAppointment", input.appointmentId, "BLOCKED", { actorRole, hardBlockerCount: hardBlockers.length });
+        throw new Error("Only a provider, RDH, or practice manager can override hard checkout blockers.");
+      }
+      if (!input.checkoutNote || input.checkoutNote.trim().length < 12) {
+        await txAudit("APPOINTMENT_CHECKOUT_OVERRIDE_BLOCKED_REASON", "PmsAppointment", input.appointmentId, "BLOCKED", { actorRole, hardBlockerCount: hardBlockers.length });
+        throw new Error("A checkout override reason is required when hard blockers are overridden.");
+      }
+    }
+    if (hardBlockers.length && !input.overrideBlockers) {
+      await addAudit(tenantId, actorRole, "APPOINTMENT_CHECKOUT_BLOCKED", "PmsAppointment", input.appointmentId, "BLOCKED");
+      throw new Error(`Checkout blocked: ${hardBlockers.map((blocker) => blocker.message).join(" ")}`);
+    }
+
+    const selectedIds = input.procedureIds?.filter(Boolean) ?? control.procedures.map((procedure) => procedure.id);
+    const selectedProcedures = control.procedures.filter((procedure) => selectedIds.includes(procedure.id));
+    if (!selectedProcedures.length) throw new Error("Select at least one appointment procedure to complete.");
+    if (selectedProcedures.length !== selectedIds.length) throw new Error("Selected procedures must all belong to this appointment.");
+    const completedProcedureIds = selectedProcedures.map((procedure) => procedure.id);
+    const checkoutId = newId("checkout");
+
+    const procedureLogIds: string[] = [];
+    for (const procedure of selectedProcedures) {
+      await client.query(`update "PmsAppointmentProcedure" set "status" = 'COMPLETED', "updatedAt" = current_timestamp where "id" = $1 and "appointmentId" = $2`, [procedure.id, input.appointmentId]);
+      const logId = newId("plog");
+      await client.query(
+        `insert into "PmsProcedureLog"
+           ("id", "tenantId", "patientId", "providerId", "appointmentId", "appointmentProcedureId", "checkoutSessionId",
+            "procedureCodeId", "tooth", "surface", "status", "feeCents", "serviceDate", "updatedAt")
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'COMPLETED', $11, $12::timestamp, current_timestamp)`,
+        [
+          logId,
+          tenantId,
+          control.appointment.patientId,
+          control.appointment.providerId,
+          input.appointmentId,
+          procedure.id,
+          checkoutId,
+          procedure.procedureCodeId,
+          procedure.tooth,
+          procedure.surface,
+          procedure.feeCents,
+          control.appointment.startsAt,
+        ],
+      );
+      procedureLogIds.push(logId);
+    }
+
+    const chargeCents = selectedProcedures.reduce((sum, procedure) => sum + Number(procedure.feeCents ?? 0), 0);
+    let claimId: string | null = null;
+    if (input.createClaimDraft && control.appointment.primaryInsuranceId) {
+      const coverage = (await client.query<{ payerName: string }>(
+        `select ip."payerName"
+         from "PmsPatientInsurance" pi
+         join "PmsInsurancePlan" ip on ip."id" = pi."planId"
+         where pi."id" = $1 and pi."patientId" = $2 and ip."tenantId" = $3`,
+        [control.appointment.primaryInsuranceId, control.appointment.patientId, tenantId],
+      )).rows[0];
+      if (!coverage) throw new Error("Selected coverage does not belong to the selected patient.");
+
+      const claimProcedures = (await client.query<{
+        id: string;
+        procedureCodeId: string;
+        tooth: string | null;
+        surface: string | null;
+        feeCents: number;
+        serviceDate: string | null;
+      }>(
+        `select pl."id", pl."procedureCodeId", pl."tooth", pl."surface", pl."feeCents", pl."serviceDate"::text as "serviceDate"
+         from "PmsProcedureLog" pl
+         left join "PmsClaimLine" cl on cl."procedureLogId" = pl."id"
+         join "PmsPatient" p on p."id" = pl."patientId"
+         where pl."patientId" = $1 and p."tenantId" = $2 and pl."id" = any($3::text[]) and cl."id" is null`,
+        [control.appointment.patientId, tenantId, procedureLogIds],
+      )).rows;
+      if (!claimProcedures.length) throw new Error("No unclaimed procedures were available for the selected patient.");
+
+      const billedCents = claimProcedures.reduce((sum, procedure) => sum + Number(procedure.feeCents ?? 0), 0);
+      claimId = newId("claim");
+      const claimNumber = `CLM-${new Date().getFullYear()}-${claimId.slice(-6).toUpperCase()}`;
+      await client.query(
+        `insert into "PmsClaim"
+           ("id", "tenantId", "patientId", "appointmentId", "patientInsuranceId", "payerName", "claimNumber", "status", "billedCents", "lastStatusAt", "updatedAt")
+         values ($1, $2, $3, $4, $5, $6, $7, 'READY', $8, current_timestamp, current_timestamp)`,
+        [claimId, tenantId, control.appointment.patientId, input.appointmentId, control.appointment.primaryInsuranceId, coverage.payerName, claimNumber, billedCents],
+      );
+      for (const procedure of claimProcedures) {
+        await client.query(
+          `insert into "PmsClaimLine"
+             ("id", "claimId", "procedureLogId", "procedureCodeId", "tooth", "surface", "serviceDate", "feeCents", "patientDueCents", "updatedAt")
+           values ($1, $2, $3, $4, $5, $6, $7::timestamp, $8, 0, current_timestamp)`,
+          [newId("cline"), claimId, procedure.id, procedure.procedureCodeId, procedure.tooth, procedure.surface, procedure.serviceDate, procedure.feeCents],
+        );
+      }
+      await txAudit("CLAIM_CREATED_FROM_PROCEDURES", "PmsClaim", claimId, "ALLOWED");
+    }
+
+    for (const [index, procedure] of selectedProcedures.entries()) {
+      const ledgerEntryId = newId("led");
+      await client.query(
+        `insert into "PmsLedgerEntry"
+           ("id", "tenantId", "patientId", "claimId", "procedureLogId", "entryType", "description", "amountCents", "balanceCents", "serviceDate")
+         values ($1, $2, $3, $4, $5, 'CHARGE', $6, $7, $7, coalesce($8::timestamp, current_timestamp))`,
+        [
+          ledgerEntryId,
+          tenantId,
+          control.appointment.patientId,
+          claimId,
+          procedureLogIds[index],
+          `${procedure.code} ${procedure.description}`,
+          procedure.feeCents,
+          control.appointment.startsAt,
+        ],
+      );
+      await txAudit("LEDGER_CHARGE_POSTED", "PmsLedgerEntry", ledgerEntryId, "ALLOWED");
+    }
+
+    let paymentId: string | null = null;
+    const paymentCents = Math.max(0, input.paymentCents ?? 0);
+    if (paymentCents > 0) {
+      const ledgerEntryId = newId("led");
+      paymentId = newId("pay");
+      const paymentType = input.paymentType?.trim() || "CARD";
+      await client.query(
+        `insert into "PmsLedgerEntry"
+           ("id", "tenantId", "patientId", "entryType", "description", "amountCents", "balanceCents")
+         values ($1, $2, $3, 'PATIENT_PAYMENT', $4, $5, $5)`,
+        [ledgerEntryId, tenantId, control.appointment.patientId, `${paymentType} patient payment`, -Math.abs(paymentCents)],
+      );
+      await client.query(
+        `insert into "PmsPayment"
+           ("id", "tenantId", "patientId", "ledgerEntryId", "paymentType", "amountCents", "reference", "unappliedCents", "status")
+         values ($1, $2, $3, $4, $5, $6, $7, 0, 'POSTED')`,
+        [paymentId, tenantId, control.appointment.patientId, ledgerEntryId, paymentType, Math.abs(paymentCents), input.paymentReference?.trim() || `Checkout ${input.appointmentId}`],
+      );
+      await txAudit("PATIENT_PAYMENT_POSTED", "PmsPayment", paymentId, "ALLOWED");
+    }
+
+    await client.query(
+      `update "PmsAppointment"
+       set "status" = 'COMPLETED', "readinessStatus" = case when $2::boolean then 'OVERRIDDEN' else 'READY' end,
+         "productionCents" = greatest("productionCents", $3), "updatedAt" = current_timestamp
+       where "id" = $1 and "tenantId" = $4`,
+      [input.appointmentId, Boolean(input.overrideBlockers && control.readinessBlockers.length), chargeCents, tenantId],
+    );
+    await client.query(
+      `insert into "PmsAppointmentStatusHistory" ("id", "appointmentId", "status", "actorRole", "note")
+       values ($1, $2, 'COMPLETED', $3, $4)`,
+      [newId("apst"), input.appointmentId, actorRole, input.checkoutNote?.trim() || null],
+    );
+
+    await client.query(
+      `insert into "PmsCheckoutSession"
+         ("id", "tenantId", "appointmentId", "patientId", "actorRole", "status", "completedProcedureIds", "readinessOverride",
+          "blockerSummary", "chargeCents", "patientPaymentCents", "claimId", "paymentId", "checkoutNote")
+       values ($1, $2, $3, $4, $5, 'COMPLETED', $6::text[], $7, $8::jsonb, $9, $10, $11, $12, $13)`,
       [
-        logId,
+        checkoutId,
+        tenantId,
+        input.appointmentId,
         control.appointment.patientId,
-        control.appointment.providerId,
-        procedure.procedureCodeId,
-        procedure.tooth,
-        procedure.surface,
-        procedure.feeCents,
-        control.appointment.startsAt,
+        actorRole,
+        completedProcedureIds,
+        Boolean(input.overrideBlockers && control.readinessBlockers.length),
+        JSON.stringify(control.readinessBlockers),
+        chargeCents,
+        paymentCents,
+        claimId,
+        paymentId,
+        input.checkoutNote?.trim() || null,
       ],
     );
-    procedureLogIds.push(logId);
-  }
 
-  const chargeCents = selectedProcedures.reduce((sum, procedure) => sum + Number(procedure.feeCents ?? 0), 0);
-  let claimId: string | null = null;
-  if (input.createClaimDraft && control.appointment.primaryInsuranceId) {
-    const claim = await createClaimFromProcedures({
-      tenantId: control.appointment.tenantId,
-      patientId: control.appointment.patientId,
-      patientInsuranceId: control.appointment.primaryInsuranceId,
-      procedureLogIds,
-    });
-    claimId = claim.id;
-    await query(`update "PmsClaim" set "appointmentId" = $2, "updatedAt" = current_timestamp where "id" = $1`, [claimId, input.appointmentId]);
-  }
+    const taskId = newId("task");
+    const ownerRoleKey = claimId ? "billing_rcm" : "front_desk";
+    await client.query(
+      `insert into "PmsTask" ("id", "tenantId", "patientId", "appointmentId", "ownerRoleKey", "title", "taskType", "priority", "dueAt", "updatedAt")
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamp, current_timestamp)`,
+      [
+        taskId,
+        tenantId,
+        control.appointment.patientId,
+        input.appointmentId,
+        ownerRoleKey,
+        claimId ? "Review checkout claim draft before submission" : "Review completed cash-pay checkout",
+        claimId ? "CLAIM_REVIEW" : "CHECKOUT_REVIEW",
+        control.readinessBlockers.length ? "HIGH" : "NORMAL",
+        new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      ],
+    );
+    await txAudit("TASK_CREATED", "PmsTask", taskId, "ALLOWED");
+    await txAudit("APPOINTMENT_CHECKOUT_COMPLETED", "PmsCheckoutSession", checkoutId, "ALLOWED");
 
-  for (const procedure of selectedProcedures) {
-    await postLedgerCharge({
-      tenantId: control.appointment.tenantId,
-      patientId: control.appointment.patientId,
-      claimId: claimId ?? undefined,
-      procedureLogId: procedureLogIds[selectedProcedures.indexOf(procedure)],
-      description: `${procedure.code} ${procedure.description}`,
-      amountCents: procedure.feeCents,
-      serviceDate: control.appointment.startsAt,
-    });
-  }
-
-  let paymentId: string | null = null;
-  const paymentCents = Math.max(0, input.paymentCents ?? 0);
-  if (paymentCents > 0) {
-    const payment = await postPatientPayment({
-      tenantId: control.appointment.tenantId,
-      patientId: control.appointment.patientId,
-      amountCents: paymentCents,
-      paymentType: input.paymentType?.trim() || "CARD",
-      reference: input.paymentReference?.trim() || `Checkout ${input.appointmentId}`,
-    });
-    paymentId = String(payment.id);
-  }
-
-  await query(
-    `update "PmsAppointment"
-     set "status" = 'COMPLETED', "readinessStatus" = case when $2::boolean then 'OVERRIDDEN' else 'READY' end,
-       "productionCents" = greatest("productionCents", $3), "updatedAt" = current_timestamp
-     where "id" = $1`,
-    [input.appointmentId, Boolean(input.overrideBlockers && control.readinessBlockers.length), chargeCents],
-  );
-  await query(
-    `insert into "PmsAppointmentStatusHistory" ("id", "appointmentId", "status", "actorRole", "note")
-     values ($1, $2, 'COMPLETED', $3, $4)`,
-    [newId("apst"), input.appointmentId, actorRole, input.checkoutNote?.trim() || null],
-  );
-
-  const checkoutId = newId("checkout");
-  await query(
-    `insert into "PmsCheckoutSession"
-       ("id", "tenantId", "appointmentId", "patientId", "actorRole", "status", "completedProcedureIds", "readinessOverride",
-        "blockerSummary", "chargeCents", "patientPaymentCents", "claimId", "paymentId", "checkoutNote")
-     values ($1, $2, $3, $4, $5, 'COMPLETED', $6::text[], $7, $8::jsonb, $9, $10, $11, $12, $13)`,
-    [
-      checkoutId,
-      control.appointment.tenantId,
-      input.appointmentId,
-      control.appointment.patientId,
-      actorRole,
-      selectedIds,
-      Boolean(input.overrideBlockers && control.readinessBlockers.length),
-      JSON.stringify(control.readinessBlockers),
-      chargeCents,
-      paymentCents,
-      claimId,
-      paymentId,
-      input.checkoutNote?.trim() || null,
-    ],
-  );
-
-  await createTask({
-    tenantId: control.appointment.tenantId,
-    patientId: control.appointment.patientId,
-    appointmentId: input.appointmentId,
-    ownerRoleKey: claimId ? "billing_rcm" : "front_desk",
-    title: claimId ? "Review checkout claim draft before submission" : "Review completed cash-pay checkout",
-    taskType: claimId ? "CLAIM_REVIEW" : "CHECKOUT_REVIEW",
-    priority: control.readinessBlockers.length ? "HIGH" : "NORMAL",
-    dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    return { checkoutId, claimId, paymentId, chargeCents, patientPaymentCents: paymentCents };
   });
-  await addAudit(control.appointment.tenantId, actorRole, "APPOINTMENT_CHECKOUT_COMPLETED", "PmsCheckoutSession", checkoutId, "ALLOWED");
-
-  return { checkoutId, claimId, paymentId, chargeCents, patientPaymentCents: paymentCents };
 }
 
 export async function getOnlineSchedulingWorkbench(tenantId = defaultTenantId) {
@@ -2139,6 +2442,7 @@ export async function getOnlineSchedulingAvailability(slug: string, tenantId = d
 
 export async function createOnlineSchedulingLink(input: {
   tenantId?: string;
+  actorRole?: string;
   title: string;
   slug: string;
   audience: string;
@@ -2216,7 +2520,7 @@ export async function createOnlineSchedulingLink(input: {
       JSON.stringify(input.screenTheme ?? {}),
     ],
   );
-  await addAudit(tenantId, "front_desk", "ONLINE_SCHEDULING_LINK_UPSERTED", "PmsOnlineSchedulingLink", result.rows[0].id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "front_desk", "ONLINE_SCHEDULING_LINK_UPSERTED", "PmsOnlineSchedulingLink", result.rows[0].id, "ALLOWED");
   return result.rows[0];
 }
 
@@ -2479,7 +2783,10 @@ export async function listProcedureCodes(tenantId = defaultTenantId) {
   )).rows;
 }
 
-export async function addToothCondition(patientId: string, input: { tooth: string; surface?: string; condition: string; status?: string; source?: string }) {
+export async function addToothCondition(patientId: string, input: { tooth: string; surface?: string; condition: string; status?: string; source?: string; tenantId?: string; actorRole?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const patient = await getPatient(patientId, tenantId);
+  if (!patient) throw new Error("Patient not found.");
   const id = newId("tc");
   const result = await query(
     `insert into "PmsToothCondition" ("id", "patientId", "tooth", "surface", "condition", "status", "source", "updatedAt")
@@ -2487,38 +2794,138 @@ export async function addToothCondition(patientId: string, input: { tooth: strin
      returning *`,
     [id, patientId, input.tooth, input.surface || null, input.condition, input.status ?? "ACTIVE", input.source ?? "PROVIDER"],
   );
-  await addAudit(defaultTenantId, "associate_provider", "TOOTH_CONDITION_CREATED", "PmsToothCondition", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "associate_provider", "TOOTH_CONDITION_CREATED", "PmsToothCondition", id, "ALLOWED");
   return result.rows[0];
 }
 
-export async function addProcedureLog(patientId: string, input: { procedureCodeId: string; tooth?: string; surface?: string; status?: string; feeCents?: number; providerId?: string }) {
+export async function addProcedureLog(patientId: string, input: { procedureCodeId: string; tooth?: string; surface?: string; status?: string; feeCents?: number; providerId?: string; tenantId?: string; actorRole?: string }) {
+  const patient = (await query<{ tenantId: string }>(
+    `select "tenantId" from "PmsPatient" where "id" = $1 and ($2::text is null or "tenantId" = $2)`,
+    [patientId, input.tenantId ?? null],
+  )).rows[0];
+  if (!patient) throw new Error("Patient not found.");
+  const procedureCode = (await query<{ defaultFeeCents: number }>(
+    `select "defaultFeeCents" from "PmsProcedureCode" where "id" = $1 and "tenantId" = $2`,
+    [input.procedureCodeId, patient.tenantId],
+  )).rows[0];
+  if (!procedureCode) throw new Error("Procedure code not found for this tenant.");
   const id = newId("plog");
   const result = await query(
     `insert into "PmsProcedureLog"
-       ("id", "patientId", "providerId", "procedureCodeId", "tooth", "surface", "status", "feeCents", "serviceDate", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, coalesce($8::int, (select "defaultFeeCents" from "PmsProcedureCode" where "id" = $4)), current_date, current_timestamp)
+       ("id", "tenantId", "patientId", "providerId", "procedureCodeId", "tooth", "surface", "status", "feeCents", "serviceDate", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9::int, $10::int), current_date, current_timestamp)
      returning *`,
-    [id, patientId, input.providerId ?? null, input.procedureCodeId, input.tooth ?? null, input.surface ?? null, input.status ?? "TREATMENT_PLANNED", input.feeCents ?? null],
+    [
+      id,
+      patient.tenantId,
+      patientId,
+      input.providerId ?? null,
+      input.procedureCodeId,
+      input.tooth ?? null,
+      input.surface ?? null,
+      input.status ?? "TREATMENT_PLANNED",
+      input.feeCents ?? null,
+      procedureCode.defaultFeeCents,
+    ],
   );
-  await addAudit(defaultTenantId, "associate_provider", "PROCEDURE_LOG_CREATED", "PmsProcedureLog", id, "ALLOWED");
+  await addAudit(patient.tenantId, input.actorRole ?? "associate_provider", "PROCEDURE_LOG_CREATED", "PmsProcedureLog", id, "ALLOWED");
   return result.rows[0];
 }
 
-export async function addClinicalNote(patientId: string, body: string, noteType = "PROGRESS", tenantId = defaultTenantId) {
+export async function addClinicalNote(
+  patientId: string,
+  body: string,
+  noteType = "PROGRESS",
+  tenantId = defaultTenantId,
+  actorRole = "associate_provider",
+  options: { appointmentId?: string; providerId?: string; noteTemplateKey?: string; sourceModule?: string; sourceRecordId?: string } = {},
+) {
   const id = newId("note");
   const result = await query(
-    `insert into "PmsClinicalNote" ("id", "patientId", "noteType", "body", "status", "updatedAt")
-     select $1, p."id", $3, $4, 'DRAFT', current_timestamp
+    `insert into "PmsClinicalNote"
+       ("id", "tenantId", "patientId", "appointmentId", "providerId", "noteType", "noteTemplateKey", "body", "status", "sourceModule", "sourceRecordId", "updatedAt")
+     select $1, p."tenantId", p."id", $6, $7, $3, $8, $4, 'DRAFT', $9, $10, current_timestamp
      from "PmsPatient" p
      where p."id" = $2 and p."tenantId" = $5
      returning *`,
-    [id, patientId, noteType, body.trim(), tenantId],
+    [
+      id,
+      patientId,
+      noteType,
+      body.trim(),
+      tenantId,
+      options.appointmentId ?? null,
+      options.providerId ?? null,
+      options.noteTemplateKey ?? null,
+      options.sourceModule ?? "chart",
+      options.sourceRecordId ?? null,
+    ],
   );
   const note = result.rows[0] ?? null;
   if (note) {
-    await addAudit(tenantId, "associate_provider", "CLINICAL_NOTE_CREATED", "PmsClinicalNote", id, "ALLOWED");
+    await addAudit(tenantId, actorRole, "CLINICAL_NOTE_CREATED", "PmsClinicalNote", id, "ALLOWED");
   }
   return note;
+}
+
+export async function signClinicalNote(input: { noteId: string; tenantId?: string; actorRole?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const actorRole = input.actorRole ?? "doctor";
+  if (!clinicalSignRoles.has(actorRole)) {
+    await addAudit(tenantId, actorRole, "CLINICAL_NOTE_SIGN_BLOCKED_ROLE", "PmsClinicalNote", input.noteId, "BLOCKED");
+    throw new Error("Only provider, RDH, or clinical assistant roles can sign clinical notes.");
+  }
+  const note = (await query<{ id: string; body: string; status: string }>(
+    `select "id", "body", "status" from "PmsClinicalNote" where "id" = $1 and "tenantId" = $2`,
+    [input.noteId, tenantId],
+  )).rows[0];
+  if (!note) throw new Error("Clinical note not found.");
+  if (note.status === "SIGNED") return { id: note.id, status: "SIGNED" };
+  if (note.status !== "DRAFT") throw new Error("Only draft clinical notes can be signed.");
+  const signatureHash = createHash("sha256").update(`${tenantId}:${note.id}:${note.body}`).digest("hex");
+  const result = await query(
+    `update "PmsClinicalNote"
+     set "status" = 'SIGNED', "signedByRole" = $3, "signatureHash" = $4, "signedAt" = current_timestamp, "lockedAt" = current_timestamp, "updatedAt" = current_timestamp
+     where "tenantId" = $1 and "id" = $2
+     returning *`,
+    [tenantId, input.noteId, actorRole, signatureHash],
+  );
+  await addAudit(tenantId, actorRole, "CLINICAL_NOTE_SIGNED", "PmsClinicalNote", input.noteId, "ALLOWED");
+  return result.rows[0];
+}
+
+export async function addClinicalNoteAddendum(input: { noteId: string; body: string; reason: string; tenantId?: string; actorRole?: string }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const original = (await query<{ id: string; patientId: string; appointmentId: string | null; providerId: string | null; noteType: string }>(
+    `select "id", "patientId", "appointmentId", "providerId", "noteType"
+     from "PmsClinicalNote"
+     where "tenantId" = $1 and "id" = $2 and "status" = 'SIGNED'
+     limit 1`,
+    [tenantId, input.noteId],
+  )).rows[0];
+  if (!original) throw new Error("Signed clinical note is required before an addendum can be created.");
+  const id = newId("note");
+  const result = await query(
+    `insert into "PmsClinicalNote"
+       ("id", "tenantId", "patientId", "appointmentId", "providerId", "noteType", "status", "body", "signedByRole", "signatureHash", "signedAt", "lockedAt", "addendumOfNoteId", "addendumReason", "sourceModule", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'SIGNED', $7, $8, $9, current_timestamp, current_timestamp, $10, $11, 'clinical_addendum', current_timestamp)
+     returning *`,
+    [
+      id,
+      tenantId,
+      original.patientId,
+      original.appointmentId,
+      original.providerId,
+      `${original.noteType}_ADDENDUM`,
+      input.body.trim(),
+      input.actorRole ?? "doctor",
+      createHash("sha256").update(`${tenantId}:${id}:${input.body.trim()}`).digest("hex"),
+      original.id,
+      input.reason.trim(),
+    ],
+  );
+  await addAudit(tenantId, input.actorRole ?? "doctor", "CLINICAL_NOTE_ADDENDUM_SIGNED", "PmsClinicalNote", id, "ALLOWED");
+  return result.rows[0];
 }
 
 export async function getPerio(patientId: string, tenantId = defaultTenantId) {
@@ -2536,7 +2943,7 @@ export async function getPerio(patientId: string, tenantId = defaultTenantId) {
   return { patient: await getPatient(patientId, tenantId), exam: examRow, measures: measures.rows };
 }
 
-export async function addPerioMeasure(patientId: string, input: { tooth: string; site: string; probingDepth: number; bleeding?: boolean; recession?: number }, tenantId = defaultTenantId) {
+export async function addPerioMeasure(patientId: string, input: { tooth: string; site: string; probingDepth: number; bleeding?: boolean; recession?: number; actorRole?: string }, tenantId = defaultTenantId) {
   const patient = await getPatient(patientId, tenantId);
   if (!patient) return null;
 
@@ -2564,7 +2971,7 @@ export async function addPerioMeasure(patientId: string, input: { tooth: string;
      returning *`,
     [id, exam.id, input.tooth, input.site, input.probingDepth, Boolean(input.bleeding), input.recession ?? null],
   );
-  await addAudit(tenantId, "rdh", "PERIO_MEASURE_RECORDED", "PmsPerioMeasure", result.rows[0].id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "rdh", "PERIO_MEASURE_RECORDED", "PmsPerioMeasure", result.rows[0].id, "ALLOWED");
   return result.rows[0];
 }
 
@@ -2589,6 +2996,7 @@ export async function listTreatmentPlans(tenantId = defaultTenantId) {
 
 export async function createTreatmentPlan(input: {
   tenantId?: string;
+  actorRole?: string;
   patientId: string;
   providerId?: string;
   name: string;
@@ -2599,15 +3007,21 @@ export async function createTreatmentPlan(input: {
   const result = await query(
     `insert into "PmsTreatmentPlan"
        ("id", "tenantId", "patientId", "providerId", "name", "presentationNote", "status", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, 'DRAFT', current_timestamp)
+     select $1, p."tenantId", p."id", $4, $5, $6, 'DRAFT', current_timestamp
+     from "PmsPatient" p
+     where p."id" = $3 and p."tenantId" = $2
+       and ($4::text is null or exists (select 1 from "PmsProvider" pr where pr."id" = $4 and pr."tenantId" = p."tenantId" and pr."status" = 'ACTIVE'))
      returning *`,
     [id, tenantId, input.patientId, input.providerId ?? null, input.name.trim(), input.presentationNote?.trim() || null],
   );
-  await addAudit(tenantId, "treatment_coordinator", "TREATMENT_PLAN_CREATED", "PmsTreatmentPlan", id, "ALLOWED");
+  if (!result.rows[0]) throw new Error("Patient not found in authenticated tenant.");
+  await addAudit(tenantId, input.actorRole ?? "treatment_coordinator", "TREATMENT_PLAN_CREATED", "PmsTreatmentPlan", id, "ALLOWED");
   return result.rows[0];
 }
 
 export async function addTreatmentPlanItem(input: {
+  tenantId?: string;
+  actorRole?: string;
   treatmentPlanId: string;
   procedureCodeId: string;
   phase?: number;
@@ -2615,67 +3029,141 @@ export async function addTreatmentPlanItem(input: {
   tooth?: string;
   surface?: string;
 }) {
-  const code = (await query<{ defaultFeeCents: number }>(`select "defaultFeeCents" from "PmsProcedureCode" where "id" = $1`, [input.procedureCodeId])).rows[0];
-  const feeCents = code?.defaultFeeCents ?? 0;
-  const insuranceEstimateCents = Math.round(feeCents * 0.5);
-  const patientEstimateCents = feeCents - insuranceEstimateCents;
-  const id = newId("txi");
-  const result = await query(
-    `insert into "PmsTreatmentPlanItem"
-       ("id", "treatmentPlanId", "procedureCodeId", "phase", "sequence", "tooth", "surface", "feeCents", "insuranceEstimateCents", "patientEstimateCents", "status", "updatedAt")
-     values ($1, $2, $3, $4, coalesce($5::int, (select coalesce(max("sequence"), 0) + 1 from "PmsTreatmentPlanItem" where "treatmentPlanId" = $2)), $6, $7, $8, $9, $10, 'PROPOSED', current_timestamp)
-     returning *`,
-    [id, input.treatmentPlanId, input.procedureCodeId, input.phase ?? 1, input.sequence ?? null, input.tooth ?? null, input.surface ?? null, feeCents, insuranceEstimateCents, patientEstimateCents],
-  );
-  await recalculateTreatmentPlan(input.treatmentPlanId);
-  return result.rows[0];
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const result = await withTransaction(async (client) => {
+    const plan = (await client.query<{ id: string; status: string }>(
+      `select "id", "status" from "PmsTreatmentPlan" where "id" = $1 and "tenantId" = $2 for update`,
+      [input.treatmentPlanId, tenantId],
+    )).rows[0];
+    if (!plan) throw new Error("Treatment plan was not found in this tenant.");
+    if (["ACCEPTED", "COMPLETED", "VOID"].includes(plan.status)) throw new Error("Accepted or closed treatment plans cannot be modified.");
+    const code = (await client.query<{ defaultFeeCents: number; code: string }>(
+      `select "defaultFeeCents", "code" from "PmsProcedureCode" where "id" = $1 and "tenantId" = $2 and "status" = 'ACTIVE'`,
+      [input.procedureCodeId, tenantId],
+    )).rows[0];
+    if (!code) throw new Error("Active procedure code was not found in this tenant.");
+    if (!/^D\d{4}$/.test(code.code)) throw new Error("Treatment plan items require a valid CDT code.");
+    const feeCents = code.defaultFeeCents;
+    if (feeCents <= 0) throw new Error("Treatment plan items require a non-zero CDT fee.");
+    const insuranceEstimateCents = Math.round(feeCents * 0.5);
+    const patientEstimateCents = feeCents - insuranceEstimateCents;
+    const id = newId("txi");
+    const inserted = await client.query(
+      `insert into "PmsTreatmentPlanItem"
+         ("id", "treatmentPlanId", "procedureCodeId", "phase", "sequence", "tooth", "surface", "feeCents", "insuranceEstimateCents", "patientEstimateCents", "status", "updatedAt")
+       values ($1, $2, $3, $4, coalesce($5::int, (select coalesce(max("sequence"), 0) + 1 from "PmsTreatmentPlanItem" where "treatmentPlanId" = $2)), $6, $7, $8, $9, $10, 'PROPOSED', current_timestamp)
+       returning *`,
+      [id, input.treatmentPlanId, input.procedureCodeId, input.phase ?? 1, input.sequence ?? null, input.tooth ?? null, input.surface ?? null, feeCents, insuranceEstimateCents, patientEstimateCents],
+    );
+    if (inserted.rowCount !== 1) throw new Error("Treatment plan item insert did not affect exactly one row.");
+    await client.query(
+      `update "PmsTreatmentPlan" tp
+       set "totalFeeCents" = coalesce(items.total_fee, 0),
+           "insuranceEstimateCents" = coalesce(items.insurance_estimate, 0),
+           "patientEstimateCents" = coalesce(items.patient_estimate, 0),
+           "updatedAt" = current_timestamp
+       from (
+         select "treatmentPlanId", sum("feeCents") as total_fee, sum("insuranceEstimateCents") as insurance_estimate, sum("patientEstimateCents") as patient_estimate
+         from "PmsTreatmentPlanItem"
+         where "treatmentPlanId" = $1
+         group by "treatmentPlanId"
+       ) items
+       where tp."id" = items."treatmentPlanId" and tp."tenantId" = $2`,
+      [input.treatmentPlanId, tenantId],
+    );
+    return inserted.rows[0];
+  });
+  await addAudit(tenantId, input.actorRole ?? "treatment_coordinator", "TREATMENT_PLAN_ITEM_ADDED", "PmsTreatmentPlan", input.treatmentPlanId, "ALLOWED", { procedureCodeId: input.procedureCodeId });
+  return result;
 }
 
-export async function updateTreatmentPlanStatus(treatmentPlanId: string, status: string) {
+export async function updateTreatmentPlanStatus(treatmentPlanId: string, status: string, actorRole = "treatment_coordinator", tenantId = defaultTenantId) {
   const accepted = status === "ACCEPTED";
-  const result = await query<{ id: string; tenantId: string; patientId: string }>(
-    `update "PmsTreatmentPlan"
-     set "status" = $2,
-         "acceptedAt" = case when $3::boolean then current_timestamp else "acceptedAt" end,
-         "updatedAt" = current_timestamp
-     where "id" = $1
-     returning "id", "tenantId", "patientId"`,
-    [treatmentPlanId, status, accepted],
-  );
-  const plan = result.rows[0] ?? null;
-  if (plan) {
-    if (accepted) {
-      await query(`update "PmsTreatmentPlanItem" set "status" = 'ACCEPTED', "updatedAt" = current_timestamp where "treatmentPlanId" = $1`, [treatmentPlanId]);
-      await createTask({
-        tenantId: plan.tenantId,
-        patientId: plan.patientId,
-        ownerRoleKey: "treatment_coordinator",
-        title: "Schedule accepted treatment plan",
-        taskType: "TREATMENT_SCHEDULING",
-        priority: "HIGH",
-      });
+  const plan = await withTransaction(async (client) => {
+    const existing = (await client.query<{ id: string; tenantId: string; patientId: string; providerId: string | null }>(
+      `select "id", "tenantId", "patientId", "providerId"
+       from "PmsTreatmentPlan"
+       where "id" = $1 and "tenantId" = $2
+       for update`,
+      [treatmentPlanId, tenantId],
+    )).rows[0] ?? null;
+    if (!existing) return null;
+    const readiness = (await client.query<{
+      itemCount: string;
+      invalidCdtCount: string;
+      zeroFeeCount: string;
+      activeCoverageCount: string;
+      signedConsentCount: string;
+    }>(
+      `select
+         count(tpi."id")::text as "itemCount",
+         count(tpi."id") filter (where pc."id" is null or pc."tenantId" <> $2 or pc."code" !~ '^D[0-9]{4}$')::text as "invalidCdtCount",
+         count(tpi."id") filter (where tpi."feeCents" <= 0)::text as "zeroFeeCount",
+         (select count(*)::text from "PmsPatientInsurance" pi where pi."tenantId" = $2 and pi."patientId" = $3 and pi."eligibilityStatus" = 'ACTIVE') as "activeCoverageCount",
+         (select count(*)::text from "PmsPatientConsent" consent
+          where consent."patientId" = $3
+            and consent."status" = 'SIGNED'
+            and consent."consentType" in ('GENERAL_TREATMENT', 'FINANCIAL_POLICY', 'PROCEDURE_CONSENT')
+            and (consent."expiresAt" is null or consent."expiresAt" >= current_date)) as "signedConsentCount"
+       from "PmsTreatmentPlanItem" tpi
+       left join "PmsProcedureCode" pc on pc."id" = tpi."procedureCodeId"
+       where tpi."treatmentPlanId" = $1`,
+      [treatmentPlanId, tenantId, existing.patientId],
+    )).rows[0];
+    const itemCount = Number(readiness?.itemCount ?? 0);
+    const blockers = accepted ? [
+      existing.providerId ? null : "Treatment plan requires an assigned provider before acceptance.",
+      itemCount > 0 ? null : "Treatment plan acceptance requires at least one procedure item.",
+      Number(readiness?.invalidCdtCount ?? 0) === 0 ? null : "Treatment plan contains non-tenant or invalid CDT procedure codes.",
+      Number(readiness?.zeroFeeCount ?? 0) === 0 ? null : "Treatment plan contains zero-fee procedure items.",
+      Number(readiness?.activeCoverageCount ?? 0) > 0 ? null : "Active insurance eligibility is required before treatment plan acceptance.",
+      Number(readiness?.signedConsentCount ?? 0) > 0 ? null : "Signed treatment, financial, or procedure consent is required before treatment plan acceptance.",
+    ].filter(Boolean) as string[] : [];
+    if (blockers.length) {
+      await client.query(
+        `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+         values ($1, $2, $3, 'TREATMENT_PLAN_ACCEPTANCE_BLOCKED_READINESS', 'PmsTreatmentPlan', $4, 'BLOCKED', $5::jsonb)`,
+        [newId("audit"), tenantId, actorRole, treatmentPlanId, JSON.stringify({ blockers })],
+      );
+      throw new Error(`Treatment plan acceptance blocked: ${blockers.join(" ")}`);
     }
-    await addAudit(plan.tenantId, "treatment_coordinator", "TREATMENT_PLAN_STATUS_UPDATED", "PmsTreatmentPlan", treatmentPlanId, "ALLOWED");
+
+    const result = await client.query<{ id: string; tenantId: string; patientId: string }>(
+      `update "PmsTreatmentPlan"
+       set "status" = $2,
+           "acceptedAt" = case when $3::boolean then current_timestamp else "acceptedAt" end,
+           "updatedAt" = current_timestamp
+       where "id" = $1 and "tenantId" = $4
+       returning "id", "tenantId", "patientId"`,
+      [treatmentPlanId, status, accepted, tenantId],
+    );
+    const updated = result.rows[0] ?? null;
+    if (!updated) return null;
+    if (accepted) {
+      const itemUpdate = await client.query(
+        `update "PmsTreatmentPlanItem" tpi
+         set "status" = 'ACCEPTED', "updatedAt" = current_timestamp
+         from "PmsTreatmentPlan" tp
+         where tpi."treatmentPlanId" = tp."id" and tp."id" = $1 and tp."tenantId" = $2`,
+        [treatmentPlanId, tenantId],
+      );
+      if (itemUpdate.rowCount !== itemCount) throw new Error("Treatment plan acceptance aborted because not every item was updated.");
+      const taskId = newId("task");
+      await client.query(
+        `insert into "PmsTask" ("id", "tenantId", "patientId", "ownerRoleKey", "title", "taskType", "priority", "updatedAt")
+         values ($1, $2, $3, 'treatment_coordinator', 'Schedule accepted treatment plan', 'TREATMENT_SCHEDULING', 'HIGH', current_timestamp)`,
+        [taskId, tenantId, updated.patientId],
+      );
+      return { ...updated, taskId };
+    }
+    return { ...updated, taskId: null };
+  });
+  if (!plan) throw new Error("Treatment plan not found in authenticated tenant.");
+  if (plan) {
+    await addAudit(plan.tenantId, actorRole, "TREATMENT_PLAN_STATUS_UPDATED", "PmsTreatmentPlan", treatmentPlanId, "ALLOWED");
+    if (accepted && plan.taskId) await addAudit(plan.tenantId, "treatment_coordinator", "TASK_CREATED", "PmsTask", plan.taskId, "ALLOWED", { patientId: plan.patientId, taskType: "TREATMENT_SCHEDULING", sourceTreatmentPlanId: treatmentPlanId });
   }
   return plan;
-}
-
-async function recalculateTreatmentPlan(treatmentPlanId: string) {
-  await query(
-    `update "PmsTreatmentPlan" tp
-     set "totalFeeCents" = coalesce(items.total_fee, 0),
-         "insuranceEstimateCents" = coalesce(items.insurance_estimate, 0),
-         "patientEstimateCents" = coalesce(items.patient_estimate, 0),
-         "updatedAt" = current_timestamp
-     from (
-       select "treatmentPlanId", sum("feeCents") as total_fee, sum("insuranceEstimateCents") as insurance_estimate, sum("patientEstimateCents") as patient_estimate
-       from "PmsTreatmentPlanItem"
-       where "treatmentPlanId" = $1
-       group by "treatmentPlanId"
-     ) items
-     where tp."id" = items."treatmentPlanId"`,
-    [treatmentPlanId],
-  );
 }
 
 export async function listLedger(tenantId = defaultTenantId) {
@@ -2763,7 +3251,7 @@ export async function listInsurancePlans(tenantId = defaultTenantId) {
 }
 
 export async function getInsuranceBoard(tenantId = defaultTenantId) {
-  const [coverage, plans, claims, readyProcedures] = await Promise.all([
+  const [coverage, plans, claims, readyProcedures, coverageGaps] = await Promise.all([
     listInsurance(tenantId),
     listInsurancePlans(tenantId),
     query(
@@ -2780,13 +3268,39 @@ export async function getInsuranceBoard(tenantId = defaultTenantId) {
       [tenantId],
     ),
     listClaimReadyProcedures(tenantId),
+    query(
+      `select p."id", p."firstName", p."lastName", p."chartNumber", p."dateOfBirth"::text as "dateOfBirth",
+        coalesce(pi.coverage_count, 0)::int as "coverageCount",
+        coalesce(pi.active_count, 0)::int as "activeCoverageCount",
+        case
+          when coalesce(pi.coverage_count, 0) = 0 then 'NO_COVERAGE'
+          when coalesce(pi.active_count, 0) = 0 then 'ELIGIBILITY_NOT_ACTIVE'
+          else 'READY'
+        end as "coverageGate"
+       from "PmsPatient" p
+       left join (
+         select "patientId",
+           count(*) as coverage_count,
+           count(*) filter (where "eligibilityStatus" = 'ACTIVE') as active_count
+         from "PmsPatientInsurance"
+         where "tenantId" = $1
+         group by "patientId"
+       ) pi on pi."patientId" = p."id"
+       where p."tenantId" = $1
+         and p."status" = 'ACTIVE'
+         and coalesce(pi.active_count, 0) = 0
+       order by case when coalesce(pi.coverage_count, 0) = 0 then 0 else 1 end, p."lastName", p."firstName"
+       limit 40`,
+      [tenantId],
+    ),
   ]);
 
-  return { coverage, plans, claims: claims.rows, readyProcedures };
+  return { coverage, plans, claims: claims.rows, readyProcedures, coverageGaps: coverageGaps.rows };
 }
 
 export async function createInsurancePlan(input: {
   tenantId?: string;
+  actorRole?: string;
   payerName: string;
   payerId?: string;
   planName: string;
@@ -2814,11 +3328,13 @@ export async function createInsurancePlan(input: {
       input.networkStatus?.trim() || "UNKNOWN",
     ],
   );
-  await addAudit(tenantId, "insurance_coordinator", "INSURANCE_PLAN_CREATED", "PmsInsurancePlan", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "insurance_coordinator", "INSURANCE_PLAN_CREATED", "PmsInsurancePlan", id, "ALLOWED");
   return result.rows[0];
 }
 
 export async function attachInsuranceToPatient(input: {
+  tenantId?: string;
+  actorRole?: string;
   patientId: string;
   planId: string;
   subscriberId: string;
@@ -2834,11 +3350,22 @@ export async function attachInsuranceToPatient(input: {
   annualMaxCents?: number;
   annualUsedCents?: number;
 }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const ownership = (await query<{ patientId: string; planId: string }>(
+    `select p."id" as "patientId", ip."id" as "planId"
+     from "PmsPatient" p
+     join "PmsInsurancePlan" ip on ip."id" = $2 and ip."tenantId" = p."tenantId"
+     where p."id" = $1 and p."tenantId" = $3`,
+    [input.patientId, input.planId, tenantId],
+  )).rows[0];
+  if (!ownership) {
+    throw new Error("Patient and insurance plan must belong to the authenticated tenant.");
+  }
   const id = newId("pins");
   const result = await query<{ id: string; planId: string }>(
     `insert into "PmsPatientInsurance"
-       ("id", "patientId", "planId", "subscriberId", "memberNumber", "employer", "relationship", "priority", "eligibilityStatus", "lastVerifiedAt", "verificationNote", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, coalesce($8::int, 1), $9, case when $9 <> 'NOT_CHECKED' then current_timestamp else null end, $10, current_timestamp)
+       ("id", "tenantId", "patientId", "planId", "subscriberId", "memberNumber", "employer", "relationship", "priority", "eligibilityStatus", "lastVerifiedAt", "verificationNote", "updatedAt")
+     values ($1, $11, $2, $3, $4, $5, $6, $7, coalesce($8::int, 1), $9, case when $9 <> 'NOT_CHECKED' then current_timestamp else null end, $10, current_timestamp)
      returning "id", "planId"`,
     [
       id,
@@ -2851,13 +3378,14 @@ export async function attachInsuranceToPatient(input: {
       input.priority ?? 1,
       input.eligibilityStatus?.trim() || "NOT_CHECKED",
       input.verificationNote?.trim() || null,
+      tenantId,
     ],
   );
   const benefitId = newId("ben");
   await query(
     `insert into "PmsBenefitSummary"
-       ("id", "patientInsuranceId", "benefitYear", "deductibleCents", "deductibleMetCents", "annualMaxCents", "annualUsedCents", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, current_timestamp)`,
+       ("id", "tenantId", "patientInsuranceId", "benefitYear", "deductibleCents", "deductibleMetCents", "annualMaxCents", "annualUsedCents", "updatedAt")
+     values ($1, $8, $2, $3, $4, $5, $6, $7, current_timestamp)`,
     [
       benefitId,
       id,
@@ -2866,10 +3394,10 @@ export async function attachInsuranceToPatient(input: {
       input.deductibleMetCents ?? 0,
       input.annualMaxCents ?? 0,
       input.annualUsedCents ?? 0,
+      tenantId,
     ],
   );
-  const plan = (await query<{ tenantId: string }>(`select "tenantId" from "PmsInsurancePlan" where "id" = $1`, [result.rows[0]?.planId])).rows[0];
-  await addAudit(plan?.tenantId ?? defaultTenantId, "insurance_coordinator", "PATIENT_INSURANCE_ATTACHED", "PmsPatientInsurance", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "insurance_coordinator", "PATIENT_INSURANCE_ATTACHED", "PmsPatientInsurance", id, "ALLOWED");
   return result.rows[0];
 }
 
@@ -2881,52 +3409,162 @@ export async function listClaimReadyProcedures(tenantId = defaultTenantId) {
      from "PmsProcedureLog" pl
      join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId"
      join "PmsPatient" p on p."id" = pl."patientId"
+     left join "PmsProvider" pr on pr."id" = pl."providerId" and pr."tenantId" = $1 and pr."status" = 'ACTIVE'
      left join "PmsClaimLine" cl on cl."procedureLogId" = pl."id"
-     left join "PmsPatientInsurance" pi on pi."patientId" = pl."patientId" and pi."priority" = 1
-     left join "PmsInsurancePlan" ip on ip."id" = pi."planId"
-     where p."tenantId" = $1 and cl."id" is null and pl."status" in ('COMPLETED', 'TREATMENT_PLANNED')
+     left join "PmsPatientInsurance" pi on pi."tenantId" = $1 and pi."patientId" = pl."patientId" and pi."priority" = 1 and pi."eligibilityStatus" = 'ACTIVE'
+     left join "PmsInsurancePlan" ip on ip."id" = pi."planId" and ip."tenantId" = $1
+     where p."tenantId" = $1
+       and pl."tenantId" = $1
+       and cl."id" is null
+       and pl."status" = 'COMPLETED'
+       and pl."feeCents" > 0
+       and pc."tenantId" = $1
+       and pc."code" ~ '^D[0-9]{4}$'
+       and pr."id" is not null
+       and pi."id" is not null
+       and exists (
+         select 1 from "PmsClinicalNote" cn
+         where cn."tenantId" = $1
+           and cn."patientId" = pl."patientId"
+           and cn."status" = 'SIGNED'
+           and (cn."appointmentId" = pl."appointmentId" or cn."sourceRecordId" = pl."id" or cn."createdAt"::date = coalesce(pl."serviceDate", pl."createdAt")::date)
+       )
+       and exists (
+         select 1 from "PmsPatientConsent" consent
+         where consent."patientId" = pl."patientId"
+           and consent."status" = 'SIGNED'
+           and consent."consentType" in ('GENERAL_TREATMENT', 'FINANCIAL_POLICY', 'PROCEDURE_CONSENT')
+           and (consent."expiresAt" is null or consent."expiresAt" >= current_date)
+       )
+       and (
+         pc."category" not in ('ORAL_SURGERY', 'ENDODONTIC', 'PERIODONTAL', 'IMPLANT', 'PROSTHODONTIC')
+         or exists (
+           select 1 from "PmsDocument" d
+           where d."tenantId" = $1
+             and d."patientId" = pl."patientId"
+             and d."status" in ('READY', 'REVIEWED', 'SIGNED', 'ATTACHED')
+             and d."documentType" in ('CLINICAL_PHOTO', 'XRAY', 'NARRATIVE', 'CLAIM_ATTACHMENT', 'PERIO_CHART', 'REFERRAL')
+             and (d."appointmentId" = pl."appointmentId" or d."createdAt"::date >= coalesce(pl."serviceDate", pl."createdAt")::date - interval '30 days')
+         )
+       )
      order by pl."serviceDate" desc nulls last, p."lastName", pc."code"
      limit 100`,
     [tenantId],
   )).rows;
 }
 
-export async function createClaimFromProcedures(input: { tenantId?: string; patientId: string; patientInsuranceId: string; procedureLogIds: string[] }) {
+type ClaimReadyProcedure = {
+  id: string;
+  procedureCodeId: string;
+  tooth: string | null;
+  surface: string | null;
+  feeCents: number;
+  serviceDate: string | null;
+  code: string;
+  category: string;
+  providerId: string | null;
+  eligibilityStatus: string | null;
+  hasSignedClinicalNote: boolean;
+  hasSignedConsent: boolean;
+  hasAttachmentEvidence: boolean;
+  requiresAttachmentEvidence: boolean;
+};
+
+function claimProcedureReadinessBlockers(procedure: ClaimReadyProcedure) {
+  return [
+    procedure.code && /^D\d{4}$/.test(procedure.code) ? null : `Procedure ${procedure.id} is missing a valid CDT code.`,
+    procedure.providerId ? null : `Procedure ${procedure.code} is missing a provider assignment.`,
+    procedure.feeCents > 0 ? null : `Procedure ${procedure.code} has a zero fee and cannot be claimed.`,
+    procedure.eligibilityStatus === "ACTIVE" ? null : `Procedure ${procedure.code} requires active insurance eligibility.`,
+    procedure.hasSignedClinicalNote ? null : `Procedure ${procedure.code} has no signed clinical note.`,
+    procedure.hasSignedConsent ? null : `Procedure ${procedure.code} has no signed treatment/financial/procedure consent.`,
+    procedure.requiresAttachmentEvidence && !procedure.hasAttachmentEvidence ? `Procedure ${procedure.code} requires reviewed attachment evidence before claim creation.` : null,
+  ].filter(Boolean) as string[];
+}
+
+async function getClaimReadyProceduresOrThrow(input: { tenantId: string; patientId: string; patientInsuranceId: string; procedureIds: string[]; actorRole: string }) {
+  const procedures = (await query<ClaimReadyProcedure>(
+    `select pl."id", pl."procedureCodeId", pl."tooth", pl."surface", pl."feeCents", pl."serviceDate"::text as "serviceDate",
+       pl."providerId", pc."code", pc."category", pi."eligibilityStatus",
+       exists (
+         select 1 from "PmsClinicalNote" cn
+         where cn."tenantId" = $3
+           and cn."patientId" = pl."patientId"
+           and cn."status" = 'SIGNED'
+           and (cn."appointmentId" = pl."appointmentId" or cn."sourceRecordId" = pl."id" or cn."createdAt"::date = coalesce(pl."serviceDate", pl."createdAt")::date)
+       ) as "hasSignedClinicalNote",
+       exists (
+         select 1 from "PmsPatientConsent" consent
+         where consent."patientId" = pl."patientId"
+           and consent."status" = 'SIGNED'
+           and consent."consentType" in ('GENERAL_TREATMENT', 'FINANCIAL_POLICY', 'PROCEDURE_CONSENT')
+           and (consent."expiresAt" is null or consent."expiresAt" >= current_date)
+       ) as "hasSignedConsent",
+       pc."category" in ('ORAL_SURGERY', 'ENDODONTIC', 'PERIODONTAL', 'IMPLANT', 'PROSTHODONTIC') as "requiresAttachmentEvidence",
+       exists (
+         select 1 from "PmsDocument" d
+         where d."tenantId" = $3
+           and d."patientId" = pl."patientId"
+           and d."status" in ('READY', 'REVIEWED', 'SIGNED', 'ATTACHED')
+           and d."documentType" in ('CLINICAL_PHOTO', 'XRAY', 'NARRATIVE', 'CLAIM_ATTACHMENT', 'PERIO_CHART', 'REFERRAL')
+           and (d."appointmentId" = pl."appointmentId" or d."createdAt"::date >= coalesce(pl."serviceDate", pl."createdAt")::date - interval '30 days')
+       ) as "hasAttachmentEvidence"
+     from "PmsProcedureLog" pl
+     join "PmsProcedureCode" pc on pc."id" = pl."procedureCodeId" and pc."tenantId" = $3
+     join "PmsPatient" p on p."id" = pl."patientId" and p."tenantId" = $3
+     join "PmsPatientInsurance" pi on pi."id" = $2 and pi."tenantId" = $3 and pi."patientId" = pl."patientId"
+     left join "PmsClaimLine" cl on cl."procedureLogId" = pl."id"
+     where pl."patientId" = $1
+       and pl."tenantId" = $3
+       and pl."id" = any($4::text[])
+       and pl."status" = 'COMPLETED'
+       and cl."id" is null`,
+    [input.patientId, input.patientInsuranceId, input.tenantId, input.procedureIds],
+  )).rows;
+
+  const blockers = [
+    procedures.length === input.procedureIds.length ? null : "Every selected procedure must belong to this tenant/patient, be COMPLETED, and be unclaimed.",
+    ...procedures.flatMap(claimProcedureReadinessBlockers),
+  ].filter(Boolean) as string[];
+
+  if (blockers.length) {
+    await addAudit(
+      input.tenantId,
+      input.actorRole,
+      "CLAIM_CREATED_FROM_PROCEDURES_BLOCKED_READINESS",
+      "PmsProcedureLog",
+      input.procedureIds[0] ?? input.patientId,
+      "BLOCKED",
+      { patientId: input.patientId, patientInsuranceId: input.patientInsuranceId, procedureIds: input.procedureIds, blockers },
+    );
+    throw new Error(`Claim readiness blocked: ${blockers.join(" ")}`);
+  }
+  return procedures;
+}
+
+export async function createClaimFromProcedures(input: { tenantId?: string; actorRole?: string; patientId: string; patientInsuranceId: string; procedureLogIds: string[] }) {
   const tenantId = input.tenantId ?? defaultTenantId;
+  const actorRole = input.actorRole ?? "insurance_coordinator";
   const procedureIds = input.procedureLogIds.filter(Boolean);
   if (!input.patientId || !input.patientInsuranceId || procedureIds.length === 0) {
     throw new Error("A patient, insurance coverage, and at least one procedure are required to create a claim.");
   }
-  const coverage = (await query<{ payerName: string }>(
+  const coverage = (await query<{ payerName: string; eligibilityStatus: string }>(
     `select ip."payerName"
+       , pi."eligibilityStatus"
      from "PmsPatientInsurance" pi
      join "PmsInsurancePlan" ip on ip."id" = pi."planId"
-     where pi."id" = $1 and pi."patientId" = $2`,
-    [input.patientInsuranceId, input.patientId],
+	     where pi."id" = $1 and pi."patientId" = $2 and pi."tenantId" = $3`,
+    [input.patientInsuranceId, input.patientId, tenantId],
   )).rows[0];
   if (!coverage) {
     throw new Error("Selected coverage does not belong to the selected patient.");
   }
-
-  const procedures = (await query<{
-    id: string;
-    procedureCodeId: string;
-    tooth: string | null;
-    surface: string | null;
-    feeCents: number;
-    serviceDate: string | null;
-  }>(
-    `select pl."id", pl."procedureCodeId", pl."tooth", pl."surface", pl."feeCents", pl."serviceDate"::text as "serviceDate"
-     from "PmsProcedureLog" pl
-     left join "PmsClaimLine" cl on cl."procedureLogId" = pl."id"
-     where pl."patientId" = $1 and pl."id" = any($2::text[]) and cl."id" is null`,
-    [input.patientId, procedureIds],
-  )).rows;
-  if (!procedures.length) {
-    throw new Error("No unclaimed procedures were available for the selected patient.");
-  }
+  if (coverage.eligibilityStatus !== "ACTIVE") throw new Error("Active insurance eligibility is required before claim creation.");
+  const procedures = await getClaimReadyProceduresOrThrow({ tenantId, patientId: input.patientId, patientInsuranceId: input.patientInsuranceId, procedureIds, actorRole });
 
   const billedCents = procedures.reduce((sum, procedure) => sum + Number(procedure.feeCents ?? 0), 0);
+  if (billedCents <= 0) throw new Error("Claim billed amount must be greater than zero.");
   const claimId = newId("claim");
   const claimNumber = `CLM-${new Date().getFullYear()}-${claimId.slice(-6).toUpperCase()}`;
   await query(
@@ -2944,11 +3582,11 @@ export async function createClaimFromProcedures(input: { tenantId?: string; pati
       [newId("cline"), claimId, procedure.id, procedure.procedureCodeId, procedure.tooth, procedure.surface, procedure.serviceDate, procedure.feeCents],
     );
   }
-  await addAudit(tenantId, "insurance_coordinator", "CLAIM_CREATED_FROM_PROCEDURES", "PmsClaim", claimId, "ALLOWED");
+  await addAudit(tenantId, actorRole, "CLAIM_CREATED_FROM_PROCEDURES", "PmsClaim", claimId, "ALLOWED");
   return { id: claimId, claimNumber, billedCents };
 }
 
-export async function postLedgerCharge(input: { tenantId?: string; patientId: string; description: string; amountCents: number; procedureLogId?: string; claimId?: string; serviceDate?: string }) {
+export async function postLedgerCharge(input: { tenantId?: string; actorRole?: string; patientId: string; description: string; amountCents: number; procedureLogId?: string; claimId?: string; serviceDate?: string }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const id = newId("led");
   const result = await query(
@@ -2958,11 +3596,11 @@ export async function postLedgerCharge(input: { tenantId?: string; patientId: st
      returning *`,
     [id, tenantId, input.patientId, input.claimId ?? null, input.procedureLogId ?? null, input.description.trim(), input.amountCents, input.serviceDate ?? null],
   );
-  await addAudit(tenantId, "billing_coordinator", "LEDGER_CHARGE_POSTED", "PmsLedgerEntry", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "billing_coordinator", "LEDGER_CHARGE_POSTED", "PmsLedgerEntry", id, "ALLOWED");
   return result.rows[0];
 }
 
-export async function postPatientPayment(input: { tenantId?: string; patientId: string; amountCents: number; paymentType: string; reference?: string }) {
+export async function postPatientPayment(input: { tenantId?: string; actorRole?: string; patientId: string; amountCents: number; paymentType: string; reference?: string }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const ledgerEntryId = newId("led");
   const paymentId = newId("pay");
@@ -2979,7 +3617,7 @@ export async function postPatientPayment(input: { tenantId?: string; patientId: 
      returning *`,
     [paymentId, tenantId, input.patientId, ledgerEntryId, input.paymentType.trim(), Math.abs(input.amountCents), input.reference?.trim() || null],
   );
-  await addAudit(tenantId, "billing_coordinator", "PATIENT_PAYMENT_POSTED", "PmsPayment", paymentId, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "billing_coordinator", "PATIENT_PAYMENT_POSTED", "PmsPayment", paymentId, "ALLOWED");
   return result.rows[0];
 }
 
@@ -2995,6 +3633,7 @@ export async function listDocuments(tenantId = defaultTenantId) {
 
 export async function createDocument(input: {
   tenantId?: string;
+  actorRole?: string;
   patientId?: string;
   claimId?: string;
   appointmentId?: string;
@@ -3028,16 +3667,16 @@ export async function createDocument(input: {
       input.expiresAt || null,
     ],
   );
-  await addAudit(tenantId, "front_desk", "DOCUMENT_CREATED", "PmsDocument", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "front_desk", "DOCUMENT_CREATED", "PmsDocument", id, "ALLOWED");
   return result.rows[0];
 }
 
-export async function updateDocumentStatus(documentId: string, status: string, actorRole = "front_desk") {
+export async function updateDocumentStatus(documentId: string, status: string, actorRole = "front_desk", tenantId = defaultTenantId) {
   const result = await query<{ id: string; tenantId: string }>(
     `update "PmsDocument"
      set "status" = $2, "reviewedByRole" = $3, "reviewedAt" = current_timestamp, "updatedAt" = current_timestamp
-     where "id" = $1 returning "id", "tenantId"`,
-    [documentId, status, actorRole],
+     where "id" = $1 and "tenantId" = $4 returning "id", "tenantId"`,
+    [documentId, status, actorRole, tenantId],
   );
   const row = result.rows[0] ?? null;
   if (row) await addAudit(row.tenantId, actorRole, "DOCUMENT_STATUS_UPDATED", "PmsDocument", documentId, "ALLOWED");
@@ -3058,6 +3697,7 @@ export async function listLabCases(tenantId = defaultTenantId) {
 
 export async function createLabCase(input: {
   tenantId?: string;
+  actorRole?: string;
   patientId?: string;
   appointmentId?: string;
   labName: string;
@@ -3087,17 +3727,17 @@ export async function createLabCase(input: {
       input.notes?.trim() || null,
     ],
   );
-  await addAudit(tenantId, "dental_assistant", "LAB_CASE_CREATED", "PmsLabCase", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "dental_assistant", "LAB_CASE_CREATED", "PmsLabCase", id, "ALLOWED");
   return result.rows[0];
 }
 
-export async function updateLabCaseStatus(labCaseId: string, status: string) {
+export async function updateLabCaseStatus(labCaseId: string, status: string, actorRole = "dental_assistant", tenantId = defaultTenantId) {
   const result = await query<{ id: string; tenantId: string }>(
-    `update "PmsLabCase" set "status" = $2, "updatedAt" = current_timestamp where "id" = $1 returning "id", "tenantId"`,
-    [labCaseId, status],
+    `update "PmsLabCase" set "status" = $2, "updatedAt" = current_timestamp where "id" = $1 and "tenantId" = $3 returning "id", "tenantId"`,
+    [labCaseId, status, tenantId],
   );
   const row = result.rows[0] ?? null;
-  if (row) await addAudit(row.tenantId, "dental_assistant", "LAB_CASE_STATUS_UPDATED", "PmsLabCase", labCaseId, "ALLOWED");
+  if (row) await addAudit(row.tenantId, actorRole, "LAB_CASE_STATUS_UPDATED", "PmsLabCase", labCaseId, "ALLOWED");
   return row;
 }
 
@@ -3115,6 +3755,7 @@ export async function listImagingStudies(tenantId = defaultTenantId) {
 
 export async function createImagingStudy(input: {
   tenantId?: string;
+  actorRole?: string;
   patientId: string;
   providerId?: string;
   appointmentId?: string;
@@ -3152,7 +3793,7 @@ export async function createImagingStudy(input: {
       input.takenAt || null,
     ],
   );
-  await addAudit(tenantId, "associate_provider", "IMAGING_STUDY_CREATED", "PmsImagingStudy", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "associate_provider", "IMAGING_STUDY_CREATED", "PmsImagingStudy", id, "ALLOWED");
   return result.rows[0];
 }
 
@@ -3170,6 +3811,7 @@ export async function listPrescriptions(tenantId = defaultTenantId) {
 
 export async function createPrescription(input: {
   tenantId?: string;
+  actorRole?: string;
   patientId: string;
   providerId?: string;
   medicationName: string;
@@ -3203,7 +3845,7 @@ export async function createPrescription(input: {
       input.status?.trim() || null,
     ],
   );
-  await addAudit(tenantId, "associate_provider", "PRESCRIPTION_CREATED", "PmsPrescription", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "associate_provider", "PRESCRIPTION_CREATED", "PmsPrescription", id, "ALLOWED");
   return result.rows[0];
 }
 
@@ -3221,6 +3863,7 @@ export async function listReferrals(tenantId = defaultTenantId) {
 
 export async function createReferral(input: {
   tenantId?: string;
+  actorRole?: string;
   patientId: string;
   providerId?: string;
   referralType: string;
@@ -3252,7 +3895,7 @@ export async function createReferral(input: {
       input.dueAt || null,
     ],
   );
-  await addAudit(tenantId, "associate_provider", "REFERRAL_CREATED", "PmsReferral", id, "ALLOWED");
+  await addAudit(tenantId, input.actorRole ?? "associate_provider", "REFERRAL_CREATED", "PmsReferral", id, "ALLOWED");
   return result.rows[0];
 }
 
@@ -4200,10 +4843,15 @@ export async function createReputationRecoveryCase(input: {
   return result.rows[0];
 }
 
-async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string, outcome: string) {
+async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string, outcome: string, metadata?: unknown) {
   await query(
-    `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome")
-     values ($1, $2, $3, $4, $5, $6, $7)`,
-    [newId("audit"), tenantId, actorRole, eventType, targetType, targetId, outcome],
+    `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+    [newId("audit"), tenantId, actorRole, eventType, targetType, targetId, outcome, metadata ? JSON.stringify(metadata) : null],
   );
+}
+
+async function assertPatientTenant(patientId: string, tenantId: string) {
+  const patient = (await query<{ id: string }>(`select "id" from "PmsPatient" where "id" = $1 and "tenantId" = $2`, [patientId, tenantId])).rows[0];
+  if (!patient) throw new Error("Patient not found in authenticated tenant.");
 }

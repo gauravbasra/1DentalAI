@@ -1,24 +1,26 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
-import { Money, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
-import { getRole, type RoleKey } from "@/lib/foundation-data";
+import { StatusPill } from "@/components/foundation-shell";
+import { Money, PmsCard, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
+import { getRole } from "@/lib/foundation-data";
 import { getInsuranceBoard, getLedgerBoard, getPmsDashboard, getPracticeIntelligence, listLabCases, listPatients, listSchedule, listTasks } from "@/lib/pms-repository";
 
 export const dynamic = "force-dynamic";
 
 export default async function PmsCommandPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
   const [dashboard, intelligence, schedule, patients, tasks, insurance, ledger, labs] = await Promise.all([
-    getPmsDashboard(),
-    getPracticeIntelligence(),
-    listSchedule(),
-    listPatients(),
-    listTasks(undefined, role.key),
-    getInsuranceBoard(),
-    getLedgerBoard(),
-    listLabCases(),
+    getPmsDashboard(session.tenantId),
+    getPracticeIntelligence(session.tenantId),
+    listSchedule(session.tenantId),
+    listPatients(session.tenantId),
+    listTasks(session.tenantId, role.key),
+    getInsuranceBoard(session.tenantId),
+    getLedgerBoard(session.tenantId),
+    listLabCases(session.tenantId),
   ]);
 
   const readinessItems = [
@@ -29,14 +31,47 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
   ];
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
-      <PageHeader
-        eyebrow="Cloud PMS"
-        title="Practice command center"
-        body="Production, chair time, provider pace, payer drag, service mix, readiness blockers, and the exact work that moves today’s patients through the practice."
-      />
-      <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms" />
-      <PmsSectionNav active="/app/pms" roleKey={role.key} />
+    <main className="pe-shell min-h-screen bg-[#f4f6f7] text-neutral-950">
+      <div className="flex min-h-screen">
+        <PmsGlobalRail roleKey={role.key} />
+        <PmsProductRail roleKey={role.key} dashboard={dashboard} readinessItems={readinessItems} />
+
+        <section className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-20 flex h-20 items-center gap-5 border-b border-neutral-200 bg-white px-6">
+            <Link href="/wrapper" className="text-2xl font-black tracking-tight">1DentalAI</Link>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-700">Cloud PMS</p>
+              <h1 className="truncate text-xl font-black tracking-tight text-neutral-950">Practice command center</h1>
+            </div>
+            <div className="hidden max-w-xl flex-1 lg:block">
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">⌕</span>
+                <input className="h-12 w-full rounded-xl border border-neutral-200 bg-white pl-10 pr-4 text-sm outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100" placeholder="Search patients, schedule, CDT codes, claims, balances, labs" />
+              </div>
+            </div>
+            <Link href={`/app/pms/schedule?role=${role.key}`} className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-700">Schedule</Link>
+            <Link href="/logout" className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Sign out</Link>
+          </header>
+          <MobilePmsDock roleKey={role.key} />
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+            <div className="mx-auto max-w-[1800px]">
+              <div className="mb-5 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+                <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Operating flow</p>
+                  <p className="mt-2 max-w-4xl text-sm leading-6 text-neutral-700">
+                    Same console pattern as the Phone app: work queues on the left, patient and chair flow in the center, financial and clinical risk on the right. This is not a marketing wrapper.
+                  </p>
+                </section>
+                <section className="grid gap-3 sm:grid-cols-4">
+                  {readinessItems.map((item) => (
+                    <Link key={item.label} href={item.label.includes("Coverage") ? `/app/pms/insurance?role=${role.key}` : item.label.includes("lab") ? `/app/pms/labs?role=${role.key}` : `/app/pms/schedule?role=${role.key}`} className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm hover:border-cyan-300 hover:bg-cyan-50">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{item.label}</p>
+                      <p className="mt-2 text-2xl font-black text-neutral-950">{item.value}</p>
+                    </Link>
+                  ))}
+                </section>
+              </div>
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <Metric label="Patients" value={dashboard.activePatients} detail="active charts" />
@@ -260,11 +295,130 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
           </div>
         </PmsCard>
       </section>
-    </FoundationShell>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }
 
-function Metric({ label, value, detail }: { label: string; value: React.ReactNode; detail: React.ReactNode }) {
+function PmsGlobalRail({ roleKey }: { roleKey: string }) {
+  const items = [
+    ["Command", "⌂", `/app/pms?role=${roleKey}`],
+    ["Schedule", "◷", `/app/pms/schedule?role=${roleKey}`],
+    ["Patients", "♙", `/app/pms/patients?role=${roleKey}`],
+    ["Forms", "▤", `/app/pms/forms?role=${roleKey}`],
+    ["Imaging", "▧", `/app/pms/imaging?role=${roleKey}`],
+    ["Scribe", "✎", `/app/pms/scribe?role=${roleKey}`],
+    ["Treat", "◇", `/app/pms/treatment-plans?role=${roleKey}`],
+    ["Ledger", "$", `/app/pms/ledger?role=${roleKey}`],
+    ["Insure", "▣", `/app/pms/insurance?role=${roleKey}`],
+    ["Labs", "□", `/app/pms/labs?role=${roleKey}`],
+    ["Reports", "▥", `/app/pms/reports?role=${roleKey}`],
+  ];
+
+  return (
+    <aside className="hidden w-[92px] shrink-0 border-r border-neutral-200 bg-[#e9eef2] py-4 xl:block">
+      <nav className="flex h-full flex-col items-center gap-2">
+        {items.map(([label, icon, href]) => (
+          <Link key={label} href={href} className="flex w-full flex-col items-center gap-1 px-2 py-2 text-center text-[11px] font-semibold text-neutral-600 hover:bg-white hover:text-cyan-700">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-white text-lg shadow-sm">{icon}</span>
+            {label}
+          </Link>
+        ))}
+      </nav>
+    </aside>
+  );
+}
+
+function PmsProductRail({
+  roleKey,
+  dashboard,
+  readinessItems,
+}: {
+  roleKey: string;
+  dashboard: { activePatients: ReactNode; todayAppointments: ReactNode; openClaimCount: ReactNode };
+  readinessItems: Array<{ label: string; value: ReactNode }>;
+}) {
+  const nav = [
+    ["Command", "Live operating view", `/app/pms?role=${roleKey}`],
+    ["Schedule", "Chair flow and holds", `/app/pms/schedule?role=${roleKey}`],
+    ["Patients", "Chart and family record", `/app/pms/patients?role=${roleKey}`],
+    ["Treatment", "Plans, CDT, case acceptance", `/app/pms/treatment-plans?role=${roleKey}`],
+    ["Insurance", "Eligibility and claims", `/app/pms/insurance?role=${roleKey}`],
+    ["Ledger", "Balances and payments", `/app/pms/ledger?role=${roleKey}`],
+    ["Documents", "Forms, EOBs, referrals", `/app/pms/documents?role=${roleKey}`],
+    ["Reports", "Production analytics", `/app/pms/reports?role=${roleKey}`],
+  ];
+
+  return (
+    <aside className="hidden w-[286px] shrink-0 border-r border-neutral-200 bg-white lg:block">
+      <div className="border-b border-neutral-200 p-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">PMS</p>
+        <h2 className="mt-2 text-2xl font-black tracking-tight text-neutral-950">Dental ops</h2>
+        <p className="mt-2 text-sm leading-6 text-neutral-600">Patient record, schedule, chart, treatment, insurance, ledger, and reports in one work surface.</p>
+      </div>
+      <div className="grid grid-cols-3 gap-2 border-b border-neutral-200 p-4">
+        <MiniRailMetric label="Patients" value={dashboard.activePatients} />
+        <MiniRailMetric label="Today" value={dashboard.todayAppointments} />
+        <MiniRailMetric label="Claims" value={dashboard.openClaimCount} />
+      </div>
+      <nav className="space-y-1 p-3">
+        {nav.map(([label, description, href]) => (
+          <Link key={label} href={href} className="block rounded-xl px-3 py-3 hover:bg-cyan-50">
+            <p className="text-sm font-bold text-neutral-950">{label}</p>
+            <p className="mt-0.5 text-xs text-neutral-500">{description}</p>
+          </Link>
+        ))}
+      </nav>
+      <div className="mx-3 mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-amber-800">Readiness</p>
+        <div className="mt-2 space-y-2">
+          {readinessItems.map((item) => (
+            <div key={item.label} className="flex items-center justify-between text-xs">
+              <span className="text-amber-900">{item.label}</span>
+              <span className="font-black text-amber-950">{item.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function MobilePmsDock({ roleKey }: { roleKey: string }) {
+  const items = [
+    ["Command", `/app/pms?role=${roleKey}`],
+    ["Schedule", `/app/pms/schedule?role=${roleKey}`],
+    ["Patients", `/app/pms/patients?role=${roleKey}`],
+    ["Treat", `/app/pms/treatment-plans?role=${roleKey}`],
+    ["Insurance", `/app/pms/insurance?role=${roleKey}`],
+    ["Ledger", `/app/pms/ledger?role=${roleKey}`],
+    ["Reports", `/app/pms/reports?role=${roleKey}`],
+  ];
+
+  return (
+    <nav className="flex gap-2 overflow-x-auto border-b border-neutral-200 bg-white px-4 py-3 lg:hidden">
+      {items.map(([label, href]) => (
+        <Link key={label} href={href} className="shrink-0 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs font-bold text-neutral-700">
+          {label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+function MiniRailMetric({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-xl bg-neutral-50 p-2 text-center">
+      <p className="text-lg font-black text-neutral-950">{value}</p>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">{label}</p>
+    </div>
+  );
+}
+
+function Metric({ label, value, detail }: { label: string; value: ReactNode; detail: ReactNode }) {
   return (
     <div className="rounded-lg border border-neutral-200 bg-white px-4 py-3 shadow-sm">
       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p>
@@ -274,7 +428,7 @@ function Metric({ label, value, detail }: { label: string; value: React.ReactNod
   );
 }
 
-function MiniStat({ label, value, detail }: { label: string; value: React.ReactNode; detail: React.ReactNode }) {
+function MiniStat({ label, value, detail }: { label: string; value: ReactNode; detail: ReactNode }) {
   return (
     <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
       <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-neutral-500">{label}</p>

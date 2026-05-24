@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { EmptyPmsState, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { createDocument, createPrescription, createReferral, listDocuments, listPatients, listPrescriptions, listProviders, listReferrals, updateDocumentStatus } from "@/lib/pms-repository";
 
@@ -48,7 +49,10 @@ type ReferralRow = {
 
 async function createDocumentAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await createDocument({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: String(formData.get("patientId") ?? ""),
     documentType: String(formData.get("documentType") ?? ""),
     title: String(formData.get("title") ?? ""),
@@ -63,13 +67,17 @@ async function createDocumentAction(formData: FormData) {
 
 async function updateDocumentAction(formData: FormData) {
   "use server";
-  await updateDocumentStatus(String(formData.get("documentId") ?? ""), String(formData.get("status") ?? "REVIEWED"));
+  const session = await requireAuth();
+  await updateDocumentStatus(String(formData.get("documentId") ?? ""), String(formData.get("status") ?? "REVIEWED"), session.roleKey, session.tenantId);
   revalidatePath("/app/pms/documents");
 }
 
 async function createPrescriptionAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await createPrescription({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: String(formData.get("patientId") ?? ""),
     providerId: String(formData.get("providerId") ?? ""),
     medicationName: String(formData.get("medicationName") ?? ""),
@@ -86,7 +94,10 @@ async function createPrescriptionAction(formData: FormData) {
 
 async function createReferralAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await createReferral({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: String(formData.get("patientId") ?? ""),
     providerId: String(formData.get("providerId") ?? ""),
     referralType: String(formData.get("referralType") ?? ""),
@@ -102,8 +113,15 @@ async function createReferralAction(formData: FormData) {
 
 export default async function DocumentsPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
-  const [docs, patients, providers, prescriptions, referrals] = await Promise.all([listDocuments(), listPatients(), listProviders(), listPrescriptions(), listReferrals()]);
+  const [docs, patients, providers, prescriptions, referrals] = await Promise.all([
+    listDocuments(session.tenantId),
+    listPatients(session.tenantId),
+    listProviders(session.tenantId),
+    listPrescriptions(session.tenantId),
+    listReferrals(session.tenantId),
+  ]);
 
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>

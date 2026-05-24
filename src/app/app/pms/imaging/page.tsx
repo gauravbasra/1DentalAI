@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { EmptyPmsState, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { createImagingStudy, listImagingStudies, listPatients, listProviders } from "@/lib/pms-repository";
 
@@ -25,7 +26,10 @@ type ImagingRow = {
 
 async function createImagingAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await createImagingStudy({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: String(formData.get("patientId") ?? ""),
     providerId: String(formData.get("providerId") ?? ""),
     studyType: String(formData.get("studyType") ?? ""),
@@ -43,8 +47,9 @@ async function createImagingAction(formData: FormData) {
 
 export default async function ImagingPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
-  const [studies, patients, providers] = await Promise.all([listImagingStudies(), listPatients(), listProviders()]);
+  const [studies, patients, providers] = await Promise.all([listImagingStudies(session.tenantId), listPatients(session.tenantId), listProviders(session.tenantId)]);
 
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>

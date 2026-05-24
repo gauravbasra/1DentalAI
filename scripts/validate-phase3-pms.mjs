@@ -32,8 +32,12 @@ const requiredFiles = [
   "src/app/api/pms/schedule/route.ts",
   "src/app/api/pms/chart/[patientId]/route.ts",
   "src/app/api/pms/perio/[patientId]/route.ts",
+  "src/app/api/pms/clinical-workflows/route.ts",
   "src/lib/pms-repository.ts",
+  "src/lib/pms-clinical-workflows.ts",
+  "scripts/validate-pms-clinical-workflows.mjs",
   "prisma/migrations/202605210001_pms_core/migration.sql",
+  "prisma/migrations/202605232130_pms_clinical_process_workflows/migration.sql",
 ];
 
 const requiredSchemaModels = [
@@ -65,6 +69,9 @@ const requiredSchemaModels = [
   "PmsClinicalNote",
   "PmsPerioExam",
   "PmsTreatmentPlan",
+  "PmsClinicalProcessTemplate",
+  "PmsClinicalProcessStep",
+  "PmsClinicalRecommendation",
   "PmsInsurancePlan",
   "PmsClaim",
   "PmsClaimLine",
@@ -112,6 +119,11 @@ if (missingFiles.length) {
 }
 
 execFileSync(process.execPath, ["scripts/validate-pms-production-gate.mjs"], { stdio: "inherit" });
+execFileSync(process.execPath, ["scripts/validate-pms-clinical-workflows.mjs"], { stdio: "inherit" });
+execFileSync(process.execPath, ["scripts/validate-pms-eligibility-rpa.mjs"], { stdio: "inherit" });
+execFileSync(process.execPath, ["scripts/validate-pms-eligibility-artifacts.mjs"], { stdio: "inherit" });
+execFileSync(process.execPath, ["scripts/validate-payer-portal-browser-runner.mjs"], { stdio: "inherit" });
+execFileSync(process.execPath, ["scripts/validate-rcm-payer-artifacts.mjs"], { stdio: "inherit" });
 
 const schema = fs.readFileSync("prisma/schema.prisma", "utf8");
 const missingModels = requiredSchemaModels.filter((model) => !schema.includes(`model ${model}`));
@@ -173,7 +185,7 @@ const imagingPage = fs.readFileSync("src/app/app/pms/imaging/page.tsx", "utf8");
 const labsPage = fs.readFileSync("src/app/app/pms/labs/page.tsx", "utf8");
 const documentsPage = fs.readFileSync("src/app/app/pms/documents/page.tsx", "utf8");
 const reportsPage = fs.readFileSync("src/app/app/pms/reports/page.tsx", "utf8");
-for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addToothCondition", "addProcedureLog", "Treatment plan builder", "addTreatmentPlanItem", "updateTreatmentPlanStatus"]) {
+for (const token of ["Family account", "guarantorPatientId", "Odontogram", "addToothCondition", "addProcedureLog", "Treatment plan builder", "addTreatmentPlanItem", "updateTreatmentPlanStatus", "Treatment plan was not found in this tenant", "Treatment plan acceptance requires at least one procedure item", "itemUpdate.rowCount !== itemCount", "tenantId: session.tenantId"]) {
   const haystack = `${schema}\n${patientsPage}\n${patientRecordPage}\n${chartPage}\n${treatmentPlanPage}\n${insurancePage}\n${ledgerPage}\n${fs.readFileSync("src/lib/pms-repository.ts", "utf8")}`;
   if (!haystack.includes(token)) {
     console.error(`PMS family/chart production token missing: ${token}`);

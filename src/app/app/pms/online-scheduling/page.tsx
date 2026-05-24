@@ -2,6 +2,7 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
 import { Money, PmsCard, PmsSectionNav } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { createOnlineSchedulingLink, getOnlineSchedulingWorkbench, type PmsOnlineSchedulingLinkRow, type PmsOnlineSlot } from "@/lib/pms-repository";
 
@@ -36,7 +37,10 @@ type CampaignRow = {
 
 async function linkAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await createOnlineSchedulingLink({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     title: String(formData.get("title") ?? ""),
     slug: String(formData.get("slug") ?? ""),
     audience: String(formData.get("audience") ?? "ALL_PATIENTS"),
@@ -56,8 +60,9 @@ async function linkAction(formData: FormData) {
 
 export default async function OnlineSchedulingPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
-  const workbench = await getOnlineSchedulingWorkbench();
+  const workbench = await getOnlineSchedulingWorkbench(session.tenantId);
   const links = workbench.links as PmsOnlineSchedulingLinkRow[];
   const bookings = workbench.bookings as BookingRow[];
   const campaigns = workbench.campaigns as CampaignRow[];

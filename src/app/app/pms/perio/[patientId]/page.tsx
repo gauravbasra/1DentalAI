@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
 import { EmptyPmsState, PmsCard, PmsSectionNav } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { addPerioMeasure, getPerio } from "@/lib/pms-repository";
 
@@ -17,21 +18,24 @@ type PerioMeasure = {
 
 async function addMeasureAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const patientId = String(formData.get("patientId"));
   await addPerioMeasure(patientId, {
+    actorRole: session.roleKey,
     tooth: String(formData.get("tooth") ?? ""),
     site: String(formData.get("site") ?? ""),
     probingDepth: Number(formData.get("probingDepth") ?? 0),
     bleeding: formData.get("bleeding") === "on",
     recession: formData.get("recession") ? Number(formData.get("recession")) : undefined,
-  });
+  }, session.tenantId);
   revalidatePath(`/app/pms/perio/${patientId}`);
 }
 
 export default async function PerioPage({ params, searchParams }: { params: Promise<{ patientId: string }>; searchParams: Promise<{ role?: string }> }) {
   const [{ patientId }, query] = await Promise.all([params, searchParams]);
+  const session = await requireAuth();
   const role = getRole(query.role);
-  const perio = await getPerio(patientId);
+  const perio = await getPerio(patientId, session.tenantId);
   const patient = perio.patient;
 
   if (!patient) {

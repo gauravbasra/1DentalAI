@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { EmptyPmsState, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { createLabCase, listLabCases, listPatients, updateLabCaseStatus } from "@/lib/pms-repository";
 
@@ -22,7 +23,10 @@ type LabRow = {
 
 async function createLabAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await createLabCase({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: String(formData.get("patientId") ?? ""),
     labName: String(formData.get("labName") ?? ""),
     caseType: String(formData.get("caseType") ?? ""),
@@ -37,15 +41,17 @@ async function createLabAction(formData: FormData) {
 
 async function updateStatusAction(formData: FormData) {
   "use server";
-  await updateLabCaseStatus(String(formData.get("labCaseId") ?? ""), String(formData.get("status") ?? "ORDERED"));
+  const session = await requireAuth();
+  await updateLabCaseStatus(String(formData.get("labCaseId") ?? ""), String(formData.get("status") ?? "ORDERED"), session.roleKey, session.tenantId);
   revalidatePath("/app/pms/labs");
   revalidatePath("/app/pms/schedule");
 }
 
 export default async function LabsPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
-  const [labs, patients] = await Promise.all([listLabCases(), listPatients()]);
+  const [labs, patients] = await Promise.all([listLabCases(session.tenantId), listPatients(session.tenantId)]);
 
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>

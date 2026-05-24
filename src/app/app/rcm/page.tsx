@@ -2,6 +2,7 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { Money, PmsCard, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import {
   createDenialCase,
@@ -9,7 +10,9 @@ import {
   createPriorAuthorization,
   createRcmWorkItem,
   getRcmOperatingCenter,
+  attachEobProofToEra,
   postEraToLedger,
+  stagePriorAuthorizationPacket,
   updateDenialCaseStatus,
   updatePayerFollowUpStatus,
   updatePriorAuthorizationStatus,
@@ -245,7 +248,10 @@ function evidenceList(value: FormDataEntryValue | null) {
 
 async function createAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await createRcmWorkItem({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: String(formData.get("patientId") ?? "") || undefined,
     claimId: String(formData.get("claimId") ?? "") || undefined,
     workType: String(formData.get("workType") ?? "ELIGIBILITY_AND_BENEFITS"),
@@ -262,14 +268,18 @@ async function createAction(formData: FormData) {
 
 async function statusAction(formData: FormData) {
   "use server";
-  await updateRcmWorkItemStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "OPEN"));
+  const session = await requireAuth();
+  await updateRcmWorkItemStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "OPEN"), session.roleKey, session.tenantId);
   revalidatePath("/app/rcm");
 }
 
 async function priorAuthAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const [patientId, treatmentPlanId, patientInsuranceId, payerName, amount] = String(formData.get("treatmentPlanKey") ?? "").split("|");
   await createPriorAuthorization({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId,
     treatmentPlanId,
     patientInsuranceId: patientInsuranceId || undefined,
@@ -284,14 +294,30 @@ async function priorAuthAction(formData: FormData) {
 
 async function priorAuthStatusAction(formData: FormData) {
   "use server";
-  await updatePriorAuthorizationStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "READY_FOR_REVIEW"));
+  const session = await requireAuth();
+  await updatePriorAuthorizationStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "READY_FOR_REVIEW"), session.roleKey, session.tenantId);
+  revalidatePath("/app/rcm");
+}
+
+async function priorAuthPacketAction(formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await stagePriorAuthorizationPacket({
+    id: String(formData.get("id") ?? ""),
+    tenantId: session.tenantId,
+    clinicalNarrative: String(formData.get("clinicalNarrative") ?? ""),
+    actorRole: session.roleKey,
+  });
   revalidatePath("/app/rcm");
 }
 
 async function denialAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const [claimId, patientId, payerName, billed] = String(formData.get("claimKey") ?? "").split("|");
   await createDenialCase({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     claimId,
     patientId,
     payerName,
@@ -308,14 +334,18 @@ async function denialAction(formData: FormData) {
 
 async function denialStatusAction(formData: FormData) {
   "use server";
-  await updateDenialCaseStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "APPEAL_READY"));
+  const session = await requireAuth();
+  await updateDenialCaseStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "APPEAL_READY"), session.roleKey, session.tenantId);
   revalidatePath("/app/rcm");
 }
 
 async function payerFollowUpAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const [claimId, patientId, payerName] = String(formData.get("claimKey") ?? "").split("|");
   await createPayerFollowUp({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     claimId: claimId || undefined,
     patientId: patientId || undefined,
     payerName: payerName || String(formData.get("payerName") ?? ""),
@@ -329,28 +359,44 @@ async function payerFollowUpAction(formData: FormData) {
 
 async function payerFollowUpStatusAction(formData: FormData) {
   "use server";
-  await updatePayerFollowUpStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "WAITING_ON_PAYER"), String(formData.get("outcome") ?? ""));
+  const session = await requireAuth();
+  await updatePayerFollowUpStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "WAITING_ON_PAYER"), String(formData.get("outcome") ?? ""), session.roleKey, session.tenantId);
   revalidatePath("/app/rcm");
 }
 
 async function eraPostAction(formData: FormData) {
   "use server";
-  await postEraToLedger(String(formData.get("id") ?? ""));
+  const session = await requireAuth();
+  await postEraToLedger(String(formData.get("id") ?? ""), session.roleKey, session.tenantId);
   revalidatePath("/app/rcm");
   revalidatePath("/app/pms/ledger");
 }
 
+async function eobProofAction(formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await attachEobProofToEra({
+    id: String(formData.get("id") ?? ""),
+    tenantId: session.tenantId,
+    adjustmentSummary: { staffSummary: String(formData.get("adjustmentSummary") ?? "") },
+    actorRole: session.roleKey,
+  });
+  revalidatePath("/app/rcm");
+}
+
 async function revenueStatusAction(formData: FormData) {
   "use server";
-  await updateRevenueFindingStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "IN_REVIEW"));
+  const session = await requireAuth();
+  await updateRevenueFindingStatus(String(formData.get("id") ?? ""), String(formData.get("status") ?? "IN_REVIEW"), session.roleKey, session.tenantId);
   revalidatePath("/app/rcm");
 }
 
 export default async function RcmPage({ searchParams }: { searchParams: Promise<{ role?: string; view?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
   const view = ["today", "benefits", "auth", "claims", "denials", "era", "revenue", "queue"].includes(params.view ?? "") ? String(params.view) : "today";
-  const center = await getRcmOperatingCenter();
+  const center = await getRcmOperatingCenter(session.tenantId);
   const items = center.items as RcmItemRow[];
   const claims = center.claims as ClaimRow[];
   const benefits = center.benefits as BenefitRow[];
@@ -365,6 +411,7 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
   const metrics = center.metrics;
   const openClaimDollars = claims.reduce((sum, claim) => sum + Number(claim.billedCents ?? 0) - Number(claim.paidCents ?? 0), 0);
   const eraReady = eras.filter((era) => ["READY_TO_POST", "NEEDS_REVIEW"].includes(era.status));
+  const eraCanPost = (era: EraRow) => era.status !== "POSTED" && (era.eraTraceNumber || era.eobDocumentId) && Number(era.postingVarianceCents) === 0;
 
   return (
     <FoundationShell active="/app/rcm" roleKey={role.key}>
@@ -457,6 +504,11 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
                 <Checklist title="Prior auth evidence checklist" value={auth.evidenceChecklist} itemKey="items" />
                 <p className="mt-2 text-xs leading-5 text-neutral-600"><span className="font-semibold text-neutral-800">Treatment evidence:</span> {jsonSummary(auth.treatmentPlanEvidence)}</p>
                 {auth.blockedReason ? <p className="mt-2 text-xs leading-5 text-red-700">{auth.blockedReason}</p> : null}
+                <form action={priorAuthPacketAction} className="mt-3 grid gap-2 rounded-md border border-neutral-200 bg-white p-2">
+                  <input type="hidden" name="id" value={auth.id} />
+                  <Textarea name="clinicalNarrative" label="Clinical narrative" defaultValue="Provider reviewed diagnosis, procedure codes, supporting images, and medical necessity for payer review." />
+                  <button className="rounded-md border border-neutral-300 px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50">Generate prior-auth packet</button>
+                </form>
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <PriorAuthStatusButton id={auth.id} status="READY_FOR_REVIEW" label="Ready for review" />
                   <PriorAuthStatusButton id={auth.id} status="APPROVED_STAGED" label="Stage connector packet" />
@@ -583,8 +635,14 @@ export default async function RcmPage({ searchParams }: { searchParams: Promise<
                 </div>
                 <BooleanChecklist title="ERA/EOB posting checklist" value={era.postingChecklist} />
                 <p className="mt-2 text-xs leading-5 text-neutral-600">Readiness: {jsonSummary(era.postingReadiness)}</p>
+                {Number(era.postingVarianceCents) !== 0 ? <p className="mt-1 text-xs leading-5 text-red-700">Posting blocked until EOB variance is reconciled to $0.00.</p> : null}
                 {era.blockedReason ? <p className="mt-1 text-xs leading-5 text-red-700">{era.blockedReason}</p> : null}
-                <form action={eraPostAction} className="mt-3"><input type="hidden" name="id" value={era.id} /><button disabled={era.status === "POSTED"} className="w-full rounded-md border border-neutral-300 px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 disabled:bg-neutral-100 disabled:text-neutral-400">Post to PMS ledger after review</button></form>
+                <form action={eobProofAction} className="mt-3 grid gap-2 rounded-md border border-neutral-200 bg-white p-2">
+                  <input type="hidden" name="id" value={era.id} />
+                  <Textarea name="adjustmentSummary" label="Adjustment summary" defaultValue="Review allowed, paid, patient due, adjustment, and variance against EOB before ledger posting." />
+                  <button className="rounded-md border border-neutral-300 px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50">Generate EOB proof</button>
+                </form>
+                <form action={eraPostAction} className="mt-3"><input type="hidden" name="id" value={era.id} /><button disabled={!eraCanPost(era)} className="w-full rounded-md border border-neutral-300 px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 disabled:bg-neutral-100 disabled:text-neutral-400">Post to PMS ledger after review</button></form>
               </WorkCard>
             ))}
           </div>

@@ -1,8 +1,9 @@
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
 import { EmptyPmsState, Money, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
-import { addTreatmentPlanItem, createTreatmentPlan, listPatients, listProcedureCodes, listTreatmentPlans, updateTreatmentPlanStatus } from "@/lib/pms-repository";
+import { addTreatmentPlanItem, createTreatmentPlan, listPatients, listProcedureCodes, listProviders, listTreatmentPlans, updateTreatmentPlanStatus } from "@/lib/pms-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +24,12 @@ type TreatmentPlanRow = {
 
 async function createPlanAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await createTreatmentPlan({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: String(formData.get("patientId") ?? ""),
+    providerId: String(formData.get("providerId") ?? "") || undefined,
     name: String(formData.get("name") ?? ""),
     presentationNote: String(formData.get("presentationNote") ?? ""),
   });
@@ -33,7 +38,10 @@ async function createPlanAction(formData: FormData) {
 
 async function addItemAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await addTreatmentPlanItem({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     treatmentPlanId: String(formData.get("treatmentPlanId") ?? ""),
     procedureCodeId: String(formData.get("procedureCodeId") ?? ""),
     phase: Number(formData.get("phase") ?? 1),
@@ -45,15 +53,17 @@ async function addItemAction(formData: FormData) {
 
 async function acceptPlanAction(formData: FormData) {
   "use server";
-  await updateTreatmentPlanStatus(String(formData.get("treatmentPlanId") ?? ""), "ACCEPTED");
+  const session = await requireAuth();
+  await updateTreatmentPlanStatus(String(formData.get("treatmentPlanId") ?? ""), "ACCEPTED", session.roleKey, session.tenantId);
   revalidatePath("/app/pms/treatment-plans");
   revalidatePath("/app/pms/tasks");
 }
 
 export default async function TreatmentPlansPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
-  const [plans, patients, procedureCodes] = await Promise.all([listTreatmentPlans(), listPatients(), listProcedureCodes()]);
+  const [plans, patients, procedureCodes, providers] = await Promise.all([listTreatmentPlans(session.tenantId), listPatients(session.tenantId), listProcedureCodes(session.tenantId), listProviders(session.tenantId)]);
 
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>
@@ -66,9 +76,10 @@ export default async function TreatmentPlansPage({ searchParams }: { searchParam
           <PmsCard title="Create treatment plan" eyebrow="Case presentation">
             <form action={createPlanAction} className="grid gap-3">
               <label className="grid gap-1 text-sm font-semibold text-neutral-700">Patient<select name="patientId" required className="rounded-2xl border border-neutral-300 px-4 py-3">{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.lastName}, {patient.firstName} · {patient.chartNumber}</option>)}</select></label>
+              <label className="grid gap-1 text-sm font-semibold text-neutral-700">Provider<select name="providerId" required className="rounded-2xl border border-neutral-300 px-4 py-3">{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName} · {provider.providerType}</option>)}</select></label>
               <Input name="name" label="Plan name" required />
               <label className="grid gap-1 text-sm font-semibold text-neutral-700">Presentation note<textarea name="presentationNote" rows={4} className="rounded-2xl border border-neutral-300 px-4 py-3" /></label>
-              <button className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white">Create plan</button>
+              <button disabled={!providers.length} className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white disabled:bg-neutral-300">Create plan</button>
             </form>
           </PmsCard>
 

@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
 import { Money, PmsCard, PmsSectionNav } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { createAppointmentHold, getScheduleBoard, listPatients, type PmsAppointmentRow, type PmsScheduleBoard } from "@/lib/pms-repository";
 
@@ -9,7 +10,10 @@ export const dynamic = "force-dynamic";
 
 async function holdAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await createAppointmentHold({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: String(formData.get("patientId") ?? "") || undefined,
     providerId: String(formData.get("providerId") ?? "") || undefined,
     operatoryId: String(formData.get("operatoryId") ?? "") || undefined,
@@ -27,8 +31,9 @@ const timeSlots = Array.from({ length: 21 }, (_, index) => 7 * 60 + index * 30);
 
 export default async function SchedulePage({ searchParams }: { searchParams: Promise<{ role?: string; date?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
-  const [board, patients] = await Promise.all([getScheduleBoard(undefined, params.date), listPatients()]);
+  const [board, patients] = await Promise.all([getScheduleBoard(session.tenantId, params.date), listPatients(session.tenantId)]);
 
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>

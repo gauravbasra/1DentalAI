@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { EmptyPmsState, Money, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { attachInsuranceToPatient, createClaimFromProcedures, createInsurancePlan, getInsuranceBoard, listPatients } from "@/lib/pms-repository";
 
@@ -61,6 +62,17 @@ type ReadyProcedureRow = {
   planName: string | null;
 };
 
+type CoverageGapRow = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  chartNumber: string;
+  dateOfBirth: string | null;
+  coverageCount: number;
+  activeCoverageCount: number;
+  coverageGate: string;
+};
+
 function moneyToCents(value: FormDataEntryValue | null) {
   const normalized = String(value ?? "0").replace(/[^0-9.-]/g, "");
   return Math.round(Number(normalized || "0") * 100);
@@ -72,7 +84,10 @@ function formatMoney(cents: number) {
 
 async function createPlanAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await createInsurancePlan({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     payerName: String(formData.get("payerName") ?? ""),
     payerId: String(formData.get("payerId") ?? ""),
     planName: String(formData.get("planName") ?? ""),
@@ -86,7 +101,10 @@ async function createPlanAction(formData: FormData) {
 
 async function attachCoverageAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await attachInsuranceToPatient({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: String(formData.get("patientId") ?? ""),
     planId: String(formData.get("planId") ?? ""),
     subscriberId: String(formData.get("subscriberId") ?? ""),
@@ -107,8 +125,11 @@ async function attachCoverageAction(formData: FormData) {
 
 async function createClaimAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const selected = String(formData.get("procedureKey") ?? "").split("|");
   await createClaimFromProcedures({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: selected[0] ?? "",
     patientInsuranceId: selected[1] ?? "",
     procedureLogIds: [selected[2] ?? ""],
@@ -119,12 +140,14 @@ async function createClaimAction(formData: FormData) {
 
 export default async function InsurancePage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
-  const [board, patients] = await Promise.all([getInsuranceBoard(), listPatients()]);
+  const [board, patients] = await Promise.all([getInsuranceBoard(session.tenantId), listPatients(session.tenantId)]);
   const rows = board.coverage as InsuranceRow[];
   const plans = board.plans as PlanRow[];
   const claims = board.claims as ClaimRow[];
   const readyProcedures = board.readyProcedures as ReadyProcedureRow[];
+  const coverageGaps = board.coverageGaps as CoverageGapRow[];
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>
       <PageHeader eyebrow="PMS insurance" title="Insurance and claim readiness" body="Maintain payer plans, attach patient coverage, track verified benefits, and build clean claims from posted clinical procedures." />
@@ -196,6 +219,21 @@ export default async function InsurancePage({ searchParams }: { searchParams: Pr
                 </div>
               </div>
             )) : <EmptyPmsState title="No coverage records yet" body="Create payer plans and attach coverage to patients. Benefit limits, eligibility status, and claim readiness will be calculated from these records." />}
+          </PmsCard>
+
+          <PmsCard title="Coverage onboarding gaps" eyebrow="Attachment and eligibility gate">
+            {coverageGaps.length ? coverageGaps.map((gap) => (
+              <div key={gap.id} className="mb-3 rounded-3xl bg-neutral-50 p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-neutral-950">{gap.lastName}, {gap.firstName}</p>
+                    <p className="mt-1 text-sm text-neutral-600">{gap.chartNumber} · DOB {gap.dateOfBirth ? new Date(gap.dateOfBirth).toLocaleDateString() : "not recorded"} · {gap.coverageCount} coverage record(s)</p>
+                  </div>
+                  <StatusFor value={gap.coverageGate} />
+                </div>
+                <p className="mt-3 text-sm text-neutral-700">{gap.coverageCount ? "Verify eligibility or update the attached coverage before claim creation." : "Attach a plan, subscriber ID, relationship, and eligibility status before estimate or claim work."}</p>
+              </div>
+            )) : <EmptyPmsState title="No coverage onboarding gaps" body="Every active patient has active coverage or is ready for self-pay claim and estimate workflows." />}
           </PmsCard>
 
           <PmsCard title="Payer plan library" eyebrow="Contract inventory">

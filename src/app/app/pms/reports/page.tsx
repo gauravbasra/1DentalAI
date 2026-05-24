@@ -1,5 +1,6 @@
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { Money, PmsCard, PmsSectionNav } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { getPmsReports } from "@/lib/pms-repository";
 
@@ -37,8 +38,9 @@ type Reports = Awaited<ReturnType<typeof getPmsReports>>;
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
-  const reports = await getPmsReports();
+  const reports = await getPmsReports(session.tenantId);
   const collectionRate = ratio(reports.collections.paymentsCents, reports.collections.chargesCents);
   const showRate = ratio(reports.schedule.completed, reports.schedule.scheduled);
   const restorativeAcceptance = ratio(reports.restorativeCase.acceptedCents, reports.restorativeCase.presentedCents);

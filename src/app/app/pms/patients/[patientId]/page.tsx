@@ -2,6 +2,7 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { Money, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import {
   addAllergy,
@@ -16,6 +17,7 @@ import {
   getFamilyMembers,
   getPatient,
   getPatientAccount,
+  getPatientOnboardingCompleteness,
   getPatientProfile,
   updatePatientAdministrativeProfile,
 } from "@/lib/pms-repository";
@@ -26,8 +28,10 @@ type ProfileRow = Record<string, string | number | boolean | Date | null>;
 
 async function updateProfileAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const patientId = String(formData.get("patientId") ?? "");
   await updatePatientAdministrativeProfile({
+    tenantId: session.tenantId,
     patientId,
     preferredName: String(formData.get("preferredName") ?? ""),
     phone: String(formData.get("phone") ?? ""),
@@ -39,15 +43,17 @@ async function updateProfileAction(formData: FormData) {
     referralSource: String(formData.get("referralSource") ?? ""),
     privacyLevel: String(formData.get("privacyLevel") ?? "STANDARD"),
     patientNote: String(formData.get("patientNote") ?? ""),
-    actorRole: "front_desk",
+    actorRole: session.roleKey,
   });
   revalidatePath(`/app/pms/patients/${patientId}`);
 }
 
 async function addCommunicationAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const patientId = String(formData.get("patientId") ?? "");
   await addCommunicationPreference({
+    tenantId: session.tenantId,
     patientId,
     channel: String(formData.get("channel") ?? "SMS"),
     destination: String(formData.get("destination") ?? ""),
@@ -56,14 +62,17 @@ async function addCommunicationAction(formData: FormData) {
     quietHoursStart: String(formData.get("quietHoursStart") ?? ""),
     quietHoursEnd: String(formData.get("quietHoursEnd") ?? ""),
     source: String(formData.get("source") ?? "STAFF_VERIFIED"),
+    actorRole: session.roleKey,
   });
   revalidatePath(`/app/pms/patients/${patientId}`);
 }
 
 async function addConsentAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const patientId = String(formData.get("patientId") ?? "");
   await addPatientConsent({
+    tenantId: session.tenantId,
     patientId,
     consentType: String(formData.get("consentType") ?? ""),
     status: String(formData.get("status") ?? "NEEDS_SIGNATURE"),
@@ -71,14 +80,17 @@ async function addConsentAction(formData: FormData) {
     signedAt: String(formData.get("signedAt") ?? "") || undefined,
     expiresAt: String(formData.get("expiresAt") ?? "") || undefined,
     sourceDocumentId: String(formData.get("sourceDocumentId") ?? ""),
+    actorRole: session.roleKey,
   });
   revalidatePath(`/app/pms/patients/${patientId}`);
 }
 
 async function addHistoryAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const patientId = String(formData.get("patientId") ?? "");
   await addMedicalHistoryEntry({
+    tenantId: session.tenantId,
     patientId,
     category: String(formData.get("category") ?? ""),
     condition: String(formData.get("condition") ?? ""),
@@ -87,7 +99,7 @@ async function addHistoryAction(formData: FormData) {
     onsetDate: String(formData.get("onsetDate") ?? "") || undefined,
     resolvedDate: String(formData.get("resolvedDate") ?? "") || undefined,
     notes: String(formData.get("notes") ?? ""),
-    actorRole: "associate_provider",
+    actorRole: session.roleKey,
   });
   revalidatePath(`/app/pms/patients/${patientId}`);
   revalidatePath(`/app/pms/chart/${patientId}`);
@@ -95,28 +107,35 @@ async function addHistoryAction(formData: FormData) {
 
 async function addSafetyAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const patientId = String(formData.get("patientId") ?? "");
   const recordType = String(formData.get("recordType") ?? "ALERT");
   if (recordType === "ALLERGY") {
     await addAllergy({
+      tenantId: session.tenantId,
       patientId,
       allergen: String(formData.get("title") ?? ""),
       reaction: String(formData.get("details") ?? ""),
       severity: String(formData.get("severity") ?? "MODERATE"),
+      actorRole: session.roleKey,
     });
   } else if (recordType === "MEDICATION") {
     await addMedication({
+      tenantId: session.tenantId,
       patientId,
       name: String(formData.get("title") ?? ""),
       dosage: String(formData.get("details") ?? ""),
       status: "ACTIVE",
+      actorRole: session.roleKey,
     });
   } else {
     await addMedicalAlert({
+      tenantId: session.tenantId,
       patientId,
       title: String(formData.get("title") ?? ""),
       details: String(formData.get("details") ?? ""),
       severity: String(formData.get("severity") ?? "MODERATE"),
+      actorRole: session.roleKey,
     });
   }
   revalidatePath(`/app/pms/patients/${patientId}`);
@@ -125,8 +144,10 @@ async function addSafetyAction(formData: FormData) {
 
 async function addPharmacyAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   const patientId = String(formData.get("patientId") ?? "");
   await addPatientPharmacy({
+    tenantId: session.tenantId,
     patientId,
     pharmacyName: String(formData.get("pharmacyName") ?? ""),
     phone: String(formData.get("phone") ?? ""),
@@ -137,20 +158,23 @@ async function addPharmacyAction(formData: FormData) {
     postalCode: String(formData.get("postalCode") ?? ""),
     isPreferred: String(formData.get("isPreferred") ?? "on") === "on",
     notes: String(formData.get("notes") ?? ""),
+    actorRole: session.roleKey,
   });
   revalidatePath(`/app/pms/patients/${patientId}`);
 }
 
 export default async function PatientRecordPage({ params, searchParams }: { params: Promise<{ patientId: string }>; searchParams: Promise<{ role?: string }> }) {
   const [{ patientId }, query] = await Promise.all([params, searchParams]);
+  const session = await requireAuth();
   const role = getRole(query.role);
-  const [patient, chart, family, familyMembers, account, profile] = await Promise.all([
-    getPatient(patientId),
-    getChart(patientId),
-    getFamilyAccount(patientId),
-    getFamilyMembers(patientId),
-    getPatientAccount(patientId),
-    getPatientProfile(patientId),
+  const [patient, chart, family, familyMembers, account, profile, onboarding] = await Promise.all([
+    getPatient(patientId, session.tenantId),
+    getChart(patientId, session.tenantId),
+    getFamilyAccount(patientId, session.tenantId),
+    getFamilyMembers(patientId, session.tenantId),
+    getPatientAccount(patientId, session.tenantId),
+    getPatientProfile(patientId, session.tenantId),
+    getPatientOnboardingCompleteness(patientId, session.tenantId),
   ]);
 
   if (!patient) {
@@ -224,6 +248,27 @@ export default async function PatientRecordPage({ params, searchParams }: { para
           </div>
         </PmsCard>
       </section>
+
+      {onboarding ? (
+        <section className="mt-4">
+          <PmsCard title="Onboarding completeness gates" eyebrow={onboarding.ready ? "Ready for PMS operations" : `${onboarding.completedCount}/${onboarding.totalCount} complete`}>
+            <div className="grid min-w-0 gap-3 lg:grid-cols-2">
+              {onboarding.gates.map((gate) => (
+                <div key={gate.key} className="rounded-md border border-neutral-200 bg-neutral-50 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-neutral-950">{gate.label}</p>
+                      <p className="mt-1 text-sm leading-6 text-neutral-600">{gate.detail}</p>
+                    </div>
+                    <StatusFor value={gate.status} />
+                  </div>
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-neutral-500">{gate.action}</p>
+                </div>
+              ))}
+            </div>
+          </PmsCard>
+        </section>
+      ) : null}
 
       <section className="mt-4 grid min-w-0 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
         <PmsCard title="Administrative profile" eyebrow="Demographics, privacy, emergency contact">

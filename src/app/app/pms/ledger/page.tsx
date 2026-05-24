@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { EmptyPmsState, Money, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { getLedgerBoard, listPatients, postLedgerCharge, postPatientPayment } from "@/lib/pms-repository";
 
@@ -53,7 +54,10 @@ function moneyToCents(value: FormDataEntryValue | null) {
 
 async function postChargeAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await postLedgerCharge({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: String(formData.get("patientId") ?? ""),
     description: String(formData.get("description") ?? ""),
     amountCents: moneyToCents(formData.get("amount")),
@@ -65,7 +69,10 @@ async function postChargeAction(formData: FormData) {
 
 async function postPaymentAction(formData: FormData) {
   "use server";
+  const session = await requireAuth();
   await postPatientPayment({
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
     patientId: String(formData.get("patientId") ?? ""),
     amountCents: moneyToCents(formData.get("amount")),
     paymentType: String(formData.get("paymentType") ?? "CARD"),
@@ -77,8 +84,9 @@ async function postPaymentAction(formData: FormData) {
 
 export default async function LedgerPage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
-  const [board, patients] = await Promise.all([getLedgerBoard(), listPatients()]);
+  const [board, patients] = await Promise.all([getLedgerBoard(session.tenantId), listPatients(session.tenantId)]);
   const rows = board.entries as LedgerRow[];
   const payments = board.payments as PaymentRow[];
   const claims = board.claims as ClaimRow[];

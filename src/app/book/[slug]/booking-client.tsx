@@ -294,7 +294,7 @@ export function BookingClient({ initialSlug, appointmentTypes, slotsBySlug, cust
                 {hasCustomFormStep ? <Summary label="Forms" value={`${selectedCustomForms.length} attached form${selectedCustomForms.length === 1 ? "" : "s"} completed`} /> : null}
               </div>
               {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
-              <FooterAction onBack={() => setStep(hasCustomFormStep ? 4 : 3)} onNext={submitBooking} nextLabel={submitting ? "Booking..." : "Schedule appointment"} nextDisabled={submitting} />
+              <FooterAction onBack={() => setStep(hasCustomFormStep ? 4 : 3)} onNext={submitBooking} nextLabel={submitting ? "Booking..." : "Reserve appointment"} nextDisabled={submitting} />
             </Panel>
           ) : null}
 

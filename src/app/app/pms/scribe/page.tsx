@@ -1,6 +1,7 @@
 import { FoundationShell, PageHeader, RoleSwitcher } from "@/components/foundation-shell";
 import { PmsCard, PmsSectionNav } from "@/components/pms-ui";
 import { PmsScribeWorkspace } from "@/components/pms-scribe-workspace";
+import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { listPatients, listProcedureCodes } from "@/lib/pms-repository";
 
@@ -8,8 +9,9 @@ export const dynamic = "force-dynamic";
 
 export default async function PmsScribePage({ searchParams }: { searchParams: Promise<{ role?: string }> }) {
   const params = await searchParams;
+  const session = await requireAuth();
   const role = getRole(params.role);
-  const [patients, procedureCodes] = await Promise.all([listPatients(), listProcedureCodes()]);
+  const [patients, procedureCodes] = await Promise.all([listPatients(session.tenantId), listProcedureCodes(session.tenantId)]);
 
   return (
     <FoundationShell active="/app/pms" roleKey={role.key}>
