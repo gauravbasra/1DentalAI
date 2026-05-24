@@ -34,7 +34,8 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
   const aiPolicy = await getVoiceAiReceptionPolicy(defaultTenantId);
   const aiStartUrl = `${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(input.conversationId)}&scenario=inbound_takeover&reason=no_answer`;
   const transcription = `<Start><Transcription name="onedentalai-live-${xmlEscape(input.conversationId)}" statusCallbackUrl="${xmlEscape(transcriptionUrl)}" track="both_tracks" languageCode="en-US" /></Start>`;
-  if (route?.destinationType === "PHONE_NUMBER" && route.destination) {
+  const practiceBridgeNumber = resolvePracticeBridgeNumber(route);
+  if (practiceBridgeNumber) {
     await query(
       `update "PhoneActiveCall"
        set "callControlMode" = 'TWILIO_DIRECT_DIAL',
@@ -46,7 +47,7 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
 <Response>
   ${transcription}
   <Dial action="${xmlEscape(aiStartUrl)}" method="POST" timeout="${aiPolicy.ringThreshold * 5}" record="record-from-answer-dual" recordingStatusCallback="${xmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST">
-    <Number statusCallback="${xmlEscape(statusUrl)}" statusCallbackMethod="POST">${xmlEscape(route.destination)}</Number>
+    <Number statusCallback="${xmlEscape(statusUrl)}" statusCallbackMethod="POST">${xmlEscape(practiceBridgeNumber)}</Number>
   </Dial>
   <Redirect method="POST">${xmlEscape(aiStartUrl)}</Redirect>
 </Response>`;
@@ -65,10 +66,26 @@ function voicemailTwiML(recordingUrl: string, transcriptionUrl: string, transcri
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   ${transcription}
-  <Say voice="alice">${xmlEscape(greeting)} If this is a medical emergency, please hang up and call 911.</Say>
+  <Say voice="Polly.Joanna-Neural">${xmlEscape(greeting)} If this is a medical emergency, please hang up and call 911.</Say>
   <Record maxLength="180" playBeep="true" recordingStatusCallback="${xmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST" transcribe="true" transcribeCallback="${xmlEscape(transcriptionUrl)}" />
-  <Say voice="alice">We did not receive a message. Goodbye.</Say>
+  <Say voice="Polly.Joanna-Neural">We did not receive a message. Goodbye.</Say>
 </Response>`;
+}
+
+function resolvePracticeBridgeNumber(route: { destinationType: string; destination: string } | null) {
+  if (route?.destinationType === "PHONE_NUMBER" && route.destination) return normalizePhoneNumber(route.destination);
+  const envNumber = process.env.TWILIO_OPERATOR_BRIDGE_NUMBER || process.env.PRACTICE_BRIDGE_NUMBER || "";
+  return normalizePhoneNumber(envNumber);
+}
+
+function normalizePhoneNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("+")) return trimmed;
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return "";
 }
 
 export async function formPayload(request: Request) {
