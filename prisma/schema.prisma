@@ -3872,3 +3872,118 @@ model RbacRolePermission {
   @@index([tenantId, roleKey])
   @@index([permissionKey])
 }
+
+model VoiceAgentCall {
+  id           String   @id @default(cuid())
+  tenantId     String
+  practiceId   String?
+  callerPhone  String
+  callProvider String
+  providerCallId String?
+  status       String   @default("active")
+  startedAt    DateTime @default(now())
+  endedAt      DateTime?
+  transcript   String?
+  summary      String?
+  recordingUrl String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId, practiceId])
+  @@index([tenantId, status])
+  @@map("voice_agent_calls")
+}
+
+model VoiceAgentSession {
+  id                String   @id @default(cuid())
+  callId            String
+  tenantId          String
+  practiceId        String?
+  conversationState Json     @default("{}")
+  extractedEntities Json     @default("{}")
+  missingFields     Json     @default("[]")
+  schedulingIntent  String?
+  currentStep       String?
+  confidenceScore   Float?   @default(0)
+  escalationRequired Boolean @default(false)
+  escalationReason  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantId, practiceId])
+  @@index([tenantId, callId])
+  @@map("voice_agent_sessions")
+}
+
+model AppointmentRequest {
+  id                 String   @id @default(cuid())
+  tenantId            String
+  practiceId          String?
+  callId              String?
+  patientType         String   @default("unknown")
+  firstName           String?
+  lastName            String?
+  dateOfBirth         String?
+  phone               String
+  email               String?
+  insuranceProvider   String?
+  memberId            String?
+  appointmentReason   String?
+  preferredProvider   String?
+  preferredDate       String?
+  preferredTimeWindow String?
+  selectedSlotStart   DateTime?
+  selectedSlotEnd     DateTime?
+  externalAppointmentId String?
+  status              String   @default("draft")
+  notes               String?
+  rawPayload          Json     @default("{}")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([tenantId, practiceId])
+  @@index([tenantId, status])
+  @@map("appointment_requests")
+}
+
+model PracticeSchedulingRule {
+  id                           String   @id @default(cuid())
+  tenantId                      String
+  practiceId                    String?
+  newPatientDurationMinutes     Int      @default(60)
+  existingPatientDurationMinutes Int     @default(45)
+  emergencyDurationMinutes      Int      @default(30)
+  hygieneDurationMinutes        Int      @default(60)
+  allowedServices               Json     @default("[]")
+  providerRules                 Json     @default("{}")
+  insuranceRequired             Boolean  @default(false)
+  dobRequired                   Boolean  @default(false)
+  emailRequired                 Boolean  @default(false)
+  emergencyKeywords             Json     @default("[]")
+  escalationRules               Json     @default("{}")
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+
+  @@index([tenantId, practiceId])
+  @@map("practice_scheduling_rules")
+}
+
+model AppointmentSlotCache {
+  id           String   @id @default(cuid())
+  tenantId     String
+  practiceId   String?
+  providerId   String?
+  slotStart    DateTime
+  slotEnd      DateTime
+  serviceType  String
+  sourceSystem String
+  externalSlotId String?
+  isAvailable  Boolean  @default(true)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId, practiceId, serviceType])
+  @@index([tenantId, expiresAt])
+  @@map("appointment_slots_cache")
+}

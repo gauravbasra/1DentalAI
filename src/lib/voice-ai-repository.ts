@@ -2,6 +2,10 @@ import { newId, query } from "@/lib/db";
 import { getOpenAiWebchatConfig } from "@/lib/connector-control-repository";
 import { createAppointmentHold, defaultTenantId, updateAppointmentStatus } from "@/lib/pms-repository";
 import { createTwilioCall, twilioRequest, updateTwilioCall, twilioXmlEscape } from "@/lib/twilio-provider";
+import { VoiceAgentOrchestrator } from "@/lib/voice-agent/orchestrator";
+import { OnlineSchedulingAdapter } from "@/lib/voice-agent/scheduling/adapters";
+import { ensureVoiceAgentCall, loadVoiceAgentSession, upsertVoiceAgentSession } from "@/lib/voice-agent/repository";
+import { newConversationState, computeMissingFields } from "@/lib/voice-agent/state-manager";
 
 type VoiceScenario = "recall" | "reactivation" | "appointment_reminder" | "event_greeting" | "inbound_takeover";
 type TwilioPayload = Record<string, string>;
@@ -276,11 +280,24 @@ export async function buildVoiceAiStartTwiML(input: {
   });
   const text = greetingForAgent(agent, scenario, input.reason || undefined);
   await markAiTakeover(tenantId, conversationId, scenario, text, input.payload, agent?.id, agentRunId);
-  const realtimeTwiML = await buildRealtimeStreamTwiML({ tenantId, conversationId, agentId: agent?.id, agentRunId, scenario, fallbackText: text, payload: input.payload }).catch((error) => {
-    console.error("Realtime voice TwiML failed, falling back to Gather", { error });
-    return null;
-  });
-  if (realtimeTwiML) return realtimeTwiML;
+  // Twilio <Connect><Stream> requires a websocket endpoint. In this app, the realtime bridge is an optional
+  // sidecar (`src/server/realtime-voice-bridge.cjs`). Do not advertise realtime streaming unless explicitly enabled.
+  const enableRealtime = process.env.ONE_DENTAL_ENABLE_TWILIO_REALTIME === "1";
+  if (enableRealtime) {
+    const realtimeTwiML = await buildRealtimeStreamTwiML({
+      tenantId,
+      conversationId,
+      agentId: agent?.id,
+      agentRunId,
+      scenario,
+      fallbackText: text,
+      payload: input.payload,
+    }).catch((error) => {
+      console.error("Realtime voice TwiML failed, falling back to Gather", { error });
+      return null;
+    });
+    if (realtimeTwiML) return realtimeTwiML;
+  }
   return buildGatherTwiML({ tenantId, conversationId, agentId: agent?.id, agentRunId, scenario, text });
 }
 
@@ -302,6 +319,19 @@ export async function handleVoiceAiTurn(input: {
     scenario,
   });
   const speech = (input.payload.SpeechResult || input.payload.Digits || "").trim();
+
+  // For inbound receptionist scheduling, use the stateful scheduling brain (provider-agnostic).
+  if (scenario === "inbound_takeover" && speech) {
+    const reply = await handleSchedulingBrainTurn({
+      tenantId,
+      conversationId,
+      callerPhone: input.payload.From || input.payload.Caller || "",
+      speech,
+    }).catch(() => null);
+    if (reply) {
+      return buildGatherTwiML({ tenantId, conversationId, agentId: agent?.id, agentRunId: input.agentRunId, scenario, text: reply });
+    }
+  }
   if (speech) {
     await query(
       `insert into "PhoneCallTranscriptEvent"
@@ -1105,6 +1135,45 @@ function extractLikelyCallerName(speech: string) {
   // Accept a single first name as a last resort so we can move forward and confirm later.
   if (parts.length === 1 && parts[0].length >= 2) return parts[0];
   return null;
+}
+
+async function handleSchedulingBrainTurn(input: { tenantId: string; conversationId: string; callerPhone: string; speech: string }) {
+  // Use conversationId as the stable call id so Twilio call-flow can resume across turns.
+  await ensureVoiceAgentCall({
+    id: input.conversationId,
+    tenantId: input.tenantId,
+    practiceId: null,
+    callerPhone: input.callerPhone || "unknown",
+    callProvider: "TWILIO",
+    providerCallId: null,
+  });
+
+  // Ensure a session exists with a greeting-state, then handle the caller turn.
+  const existing = await loadVoiceAgentSession(input.tenantId, input.conversationId);
+  if (!existing) {
+    const state = newConversationState({ callerPhone: input.callerPhone || null });
+    const missing = computeMissingFields(state, { insuranceRequired: false, dobRequired: false, emailRequired: false });
+    await upsertVoiceAgentSession({
+      callId: input.conversationId,
+      tenantId: input.tenantId,
+      practiceId: null,
+      conversationState: state,
+      extractedEntities: {},
+      missingFields: missing,
+      schedulingIntent: "unknown",
+      currentStep: missing[0] || null,
+      confidenceScore: 0.0,
+    });
+  }
+
+  const orchestrator = new VoiceAgentOrchestrator(new OnlineSchedulingAdapter(input.tenantId));
+  const result = await orchestrator.handleMessage({
+    tenantId: input.tenantId,
+    practiceId: null,
+    callId: input.conversationId,
+    text: input.speech,
+  });
+  return result.reply;
 }
 
 function selectSlotFromSpeech(offered: VoiceSlot[], speech: string, preferredDate?: string) {
