@@ -13,6 +13,7 @@ export async function POST(request: Request) {
     const result = await createVoiceAiTestCall({
       toNumber,
       scenario: typeof body.scenario === "string" ? body.scenario : "event_greeting",
+      agentId: typeof body.agentId === "string" ? body.agentId : undefined,
       actorRole: typeof body.actorRole === "string" ? body.actorRole : "front_desk",
     });
     return NextResponse.json({

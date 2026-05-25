@@ -9,6 +9,7 @@ declare global {
       maps: {
         Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMap;
         Marker: new (options: Record<string, unknown>) => GoogleMarker;
+        Circle: new (options: Record<string, unknown>) => GoogleCircle;
         InfoWindow: new (options?: Record<string, unknown>) => GoogleInfoWindow;
         LatLngBounds: new () => GoogleLatLngBounds;
         LatLng: new (lat: number, lng: number) => unknown;
@@ -30,8 +31,12 @@ type GoogleMarker = {
   addListener: (eventName: string, callback: () => void) => void;
   setMap: (map: GoogleMap | null) => void;
 };
+type GoogleCircle = {
+  addListener: (eventName: string, callback: () => void) => void;
+  setMap: (map: GoogleMap | null) => void;
+};
 type GoogleInfoWindow = {
-  open: (map: GoogleMap, marker: GoogleMarker) => void;
+  open: (optionsOrMap: GoogleMap | { map: GoogleMap; anchor?: GoogleMarker | GoogleCircle }) => void;
 };
 type GoogleLatLngBounds = {
   extend: (position: { lat: number; lng: number }) => void;
@@ -45,13 +50,21 @@ let googleMapsLoader: Promise<void> | null = null;
 export function PatientMapClient({ apiKey, points, mode }: { apiKey: string; points: PatientMapPoint[]; mode: string }) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const markersRef = useRef<GoogleMarker[]>([]);
+  const circlesRef = useRef<GoogleCircle[]>([]);
   const heatmapRef = useRef<GoogleHeatmapLayer | null>(null);
   const [status, setStatus] = useState(apiKey ? "Loading Google Maps..." : "Google Maps API key is not configured.");
   const center = useMemo(() => getCenter(points), [points]);
+  const mapMode = mode === "heatmap" ? "heatmap" : "markers";
 
   useEffect(() => {
     if (!apiKey || !mapRef.current) return;
     let disposed = false;
+    const clearRenderedPoints = () => {
+      markersRef.current.forEach((marker) => marker.setMap(null));
+      markersRef.current = [];
+      circlesRef.current.forEach((circle) => circle.setMap(null));
+      circlesRef.current = [];
+    };
 
     loadGoogleMaps(apiKey)
       .then(() => {
@@ -68,14 +81,13 @@ export function PatientMapClient({ apiKey, points, mode }: { apiKey: string; poi
             { featureType: "transit", stylers: [{ visibility: "off" }] },
           ],
         });
-        markersRef.current.forEach((marker) => marker.setMap(null));
-        markersRef.current = [];
+        clearRenderedPoints();
         heatmapRef.current?.setMap(null);
         heatmapRef.current = null;
         const bounds = new window.google.maps.LatLngBounds();
         const infoWindow = new window.google.maps.InfoWindow();
 
-        if (mode === "heatmap" && window.google.maps.visualization?.HeatmapLayer) {
+        if (mapMode === "heatmap" && window.google.maps.visualization?.HeatmapLayer) {
           heatmapRef.current = new window.google.maps.visualization.HeatmapLayer({
             data: points.map((point) => ({
               location: new window.google!.maps.LatLng(point.latitude, point.longitude),
@@ -89,10 +101,22 @@ export function PatientMapClient({ apiKey, points, mode }: { apiKey: string; poi
 
         for (const point of points) {
           const position = { lat: point.latitude, lng: point.longitude };
-          if (mode === "heatmap") {
+          if (mapMode === "heatmap" && window.google.maps.visualization?.HeatmapLayer) {
             bounds.extend(position);
             continue;
           }
+          const circle = new window.google.maps.Circle({
+            map,
+            center: position,
+            radius: circleRadius(point),
+            fillColor: markerColor(point),
+            fillOpacity: 0.28,
+            strokeColor: markerColor(point),
+            strokeOpacity: 0.95,
+            strokeWeight: 3,
+            clickable: true,
+            zIndex: 20 + point.opportunityScore,
+          });
           const marker = new window.google.maps.Marker({
             position,
             map,
@@ -106,11 +130,14 @@ export function PatientMapClient({ apiKey, points, mode }: { apiKey: string; poi
               scale: markerScale(point),
             },
           });
-          marker.addListener("click", () => {
+          const openInfo = () => {
             infoWindowContent(infoWindow, point);
-            infoWindow.open(map, marker);
-          });
+            infoWindow.open({ map, anchor: marker });
+          };
+          marker.addListener("click", openInfo);
+          circle.addListener("click", openInfo);
           markersRef.current.push(marker);
+          circlesRef.current.push(circle);
           bounds.extend(position);
         }
 
@@ -125,12 +152,11 @@ export function PatientMapClient({ apiKey, points, mode }: { apiKey: string; poi
 
     return () => {
       disposed = true;
-      markersRef.current.forEach((marker) => marker.setMap(null));
-      markersRef.current = [];
+      clearRenderedPoints();
       heatmapRef.current?.setMap(null);
       heatmapRef.current = null;
     };
-  }, [apiKey, center, mode, points]);
+  }, [apiKey, center, mapMode, points]);
 
   return (
     <div className="min-w-0">
@@ -204,6 +230,10 @@ function markerColor(point: PatientMapPoint) {
 
 function markerScale(point: PatientMapPoint) {
   return Math.min(2.2, 0.8 + Math.log2(point.patientCount + 1) * 0.28 + Math.min(0.7, point.productionCents / 500000));
+}
+
+function circleRadius(point: PatientMapPoint) {
+  return Math.min(4200, 850 + point.patientCount * 260 + Math.min(1800, point.opportunityScore * 18));
 }
 
 function getCenter(points: PatientMapPoint[]) {

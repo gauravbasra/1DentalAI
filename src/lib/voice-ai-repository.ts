@@ -34,6 +34,149 @@ type VoiceSlot = {
 
 const defaultOrigin = () => process.env.ONE_DENTAL_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://app.1dentalai.com";
 
+type VoiceAgentRow = {
+  id: string;
+  tenantId: string;
+  name: string;
+  roleKey: string;
+  scenario: string;
+  status: string;
+  primaryGoal: string;
+  allowedActions: string[];
+  pmsContext: unknown;
+  triggerPolicy: unknown;
+  voiceSettings: unknown;
+  systemPrompt: string;
+  voicePrompt: string;
+  pricingPolicy: string;
+  bookingPolicy: string;
+  billingPolicy: string;
+  handoffPolicy: unknown;
+};
+
+export async function ensureDefaultVoiceAgents(tenantId = defaultTenantId) {
+  for (const agent of defaultVoiceAgents(tenantId)) {
+    await query(
+      `insert into "PhoneVoiceAgent"
+        ("id", "tenantId", "name", "roleKey", "scenario", "status", "description", "primaryGoal", "allowedActions", "pmsContext", "triggerPolicy", "voiceSettings", "systemPrompt", "voicePrompt", "pricingPolicy", "bookingPolicy", "billingPolicy", "handoffPolicy", "updatedAt")
+       values ($1, $2, $3, $4, $5, 'ACTIVE', $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17::jsonb, current_timestamp)
+       on conflict ("tenantId", "roleKey") do nothing`,
+      [
+        agent.id,
+        tenantId,
+        agent.name,
+        agent.roleKey,
+        agent.scenario,
+        agent.description,
+        agent.primaryGoal,
+        agent.allowedActions,
+        JSON.stringify(agent.pmsContext),
+        JSON.stringify(agent.triggerPolicy),
+        JSON.stringify(agent.voiceSettings),
+        agent.systemPrompt,
+        agent.voicePrompt,
+        agent.pricingPolicy,
+        agent.bookingPolicy,
+        agent.billingPolicy,
+        JSON.stringify(agent.handoffPolicy),
+      ],
+    );
+  }
+}
+
+export async function getVoiceAgents(tenantId = defaultTenantId) {
+  await ensureDefaultVoiceAgents(tenantId).catch(() => undefined);
+  return (await query<VoiceAgentRow>(
+    `select *
+     from "PhoneVoiceAgent"
+     where "tenantId" = $1
+     order by case "status" when 'ACTIVE' then 0 else 1 end,
+       case "roleKey"
+         when 'inbound_receptionist' then 0
+         when 'hygiene_recall' then 1
+         when 'appointment_reminder' then 2
+         when 'patient_reactivation' then 3
+         when 'membership_reactivation' then 4
+         when 'billing_information' then 5
+         else 9
+       end, "name"`,
+    [tenantId],
+  )).rows;
+}
+
+export async function getVoiceAgent(input: { tenantId?: string; agentId?: string | null; scenario?: string | null; roleKey?: string | null }) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  await ensureDefaultVoiceAgents(tenantId).catch(() => undefined);
+  const scenario = normalizeScenario(input.scenario);
+  const result = await query<VoiceAgentRow>(
+    `select *
+     from "PhoneVoiceAgent"
+     where "tenantId" = $1
+       and "status" = 'ACTIVE'
+       and (
+         ($2::text is not null and "id" = $2)
+         or ($3::text is not null and "roleKey" = $3)
+         or ($2::text is null and $3::text is null and "scenario" = $4)
+       )
+     order by case when "id" = $2 then 0 when "roleKey" = $3 then 1 else 2 end, "updatedAt" desc
+     limit 1`,
+    [tenantId, input.agentId || null, input.roleKey || null, scenario],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function updateVoiceAgentSettings(input: {
+  tenantId?: string;
+  agentId: string;
+  actorRole?: string;
+  status: string;
+  name: string;
+  primaryGoal: string;
+  allowedActions: string[];
+  systemPrompt: string;
+  voicePrompt: string;
+  voiceSettings: Record<string, unknown>;
+  pricingPolicy: string;
+  bookingPolicy: string;
+  billingPolicy: string;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const settings = sanitizeVoiceSettings(input.voiceSettings);
+  await query(
+    `update "PhoneVoiceAgent"
+     set "status" = $3,
+       "name" = $4,
+       "primaryGoal" = $5,
+       "allowedActions" = $6,
+       "systemPrompt" = $7,
+       "voicePrompt" = $8,
+       "voiceSettings" = $9::jsonb,
+       "pricingPolicy" = $10,
+       "bookingPolicy" = $11,
+       "billingPolicy" = $12,
+       "updatedAt" = current_timestamp
+     where "tenantId" = $1 and "id" = $2`,
+    [
+      tenantId,
+      input.agentId,
+      ["ACTIVE", "PAUSED", "DRAFT"].includes(input.status) ? input.status : "ACTIVE",
+      input.name.slice(0, 140),
+      input.primaryGoal.slice(0, 300),
+      input.allowedActions.filter(Boolean),
+      input.systemPrompt,
+      input.voicePrompt,
+      JSON.stringify(settings),
+      input.pricingPolicy || "NO_PUBLIC_PRICING_HUMAN_ONLY",
+      input.bookingPolicy || "DIRECT_BOOKING_WITH_SCHEDULING_GATES",
+      input.billingPolicy || "VERIFY_IDENTITY_BEFORE_BILLING_DETAIL",
+    ],
+  );
+  await audit(tenantId, input.actorRole || "practice_manager", "VOICE_AGENT_UPDATED", "PhoneVoiceAgent", input.agentId, "ALLOWED", {
+    noSecretLogged: true,
+    allowedActions: input.allowedActions,
+  });
+}
+
 export async function getVoiceAiReceptionPolicy(tenantId = defaultTenantId) {
   const result = await query<{ ringThreshold: number; voiceSettings: unknown; bookingPolicy: string; billingPolicy: string; pricingPolicy: string }>(
     `select "ringThreshold", "voiceSettings", "bookingPolicy", "billingPolicy", "pricingPolicy"
@@ -99,6 +242,8 @@ export async function buildVoiceAiStartTwiML(input: {
   tenantId?: string;
   conversationId?: string | null;
   activeCallId?: string | null;
+  agentId?: string | null;
+  agentRunId?: string | null;
   scenario?: string | null;
   reason?: string | null;
   payload?: TwilioPayload;
@@ -114,24 +259,37 @@ export async function buildVoiceAiStartTwiML(input: {
     scenario: normalizeScenario(input.scenario),
   });
   const scenario = normalizeScenario(input.scenario);
-  const text = greetingForScenario(scenario, input.reason || undefined);
-  await markAiTakeover(tenantId, conversationId, scenario, text, input.payload);
-  const realtimeTwiML = await buildRealtimeStreamTwiML({ tenantId, conversationId, scenario, fallbackText: text, payload: input.payload }).catch((error) => {
+  const agent = await getVoiceAgent({ tenantId, agentId: input.agentId, scenario });
+  const agentRunId = input.agentRunId || await ensureVoiceAgentRun({
+    tenantId,
+    agent,
+    conversationId,
+    scenario,
+    runType: input.reason === "test_call" ? "TEST_CALL" : input.reason === "staff_takeover" ? "INBOUND_TAKEOVER" : "LIVE_CALL",
+    targetNumber: input.payload?.From || input.payload?.Caller || undefined,
+    createdByRole: "voice_router",
+  });
+  const text = greetingForAgent(agent, scenario, input.reason || undefined);
+  await markAiTakeover(tenantId, conversationId, scenario, text, input.payload, agent?.id, agentRunId);
+  const realtimeTwiML = await buildRealtimeStreamTwiML({ tenantId, conversationId, agentId: agent?.id, agentRunId, scenario, fallbackText: text, payload: input.payload }).catch((error) => {
     console.error("Realtime voice TwiML failed, falling back to Gather", { error });
     return null;
   });
   if (realtimeTwiML) return realtimeTwiML;
-  return buildGatherTwiML({ tenantId, conversationId, scenario, text });
+  return buildGatherTwiML({ tenantId, conversationId, agentId: agent?.id, agentRunId, scenario, text });
 }
 
 export async function handleVoiceAiTurn(input: {
   tenantId?: string;
   conversationId?: string | null;
+  agentId?: string | null;
+  agentRunId?: string | null;
   scenario?: string | null;
   payload: TwilioPayload;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const scenario = normalizeScenario(input.scenario);
+  const agent = await getVoiceAgent({ tenantId, agentId: input.agentId, scenario });
   const conversationId = await ensureVoiceConversation({
     tenantId,
     conversationId: input.conversationId || undefined,
@@ -168,6 +326,8 @@ export async function handleVoiceAiTurn(input: {
   await query(
     `update "PhoneConversation"
      set "aiIntent" = $3,
+       "voiceAgentId" = coalesce($6, "voiceAgentId"),
+       "voiceAgentRunId" = coalesce($7, "voiceAgentRunId"),
        "aiSentiment" = case when lower($4) like '%angry%' or lower($4) like '%upset%' then 'SERVICE_RISK' else coalesce("aiSentiment", 'NEUTRAL') end,
        "transcriptSummary" = $5,
        "followUpStatus" = 'AI_VOICE_ACTIVE',
@@ -179,19 +339,23 @@ export async function handleVoiceAiTurn(input: {
       nextMemory.appointmentIntent ? "APPOINTMENT_BOOKING" : scenario.toUpperCase(),
       speech,
       JSON.stringify({
+        agentId: agent?.id || null,
         memory: redactedVoiceMemory(nextMemory),
         lastCallerUtterance: speech || "no input",
         lastAssistantReply: reply.slice(0, 300),
       }),
+      agent?.id || null,
+      input.agentRunId || null,
     ],
   );
-  return buildGatherTwiML({ tenantId, conversationId, scenario, text: reply });
+  return buildGatherTwiML({ tenantId, conversationId, agentId: agent?.id, agentRunId: input.agentRunId, scenario, text: reply });
 }
 
 export async function createVoiceAiTestCall(input: {
   tenantId?: string;
   toNumber: string;
   scenario?: string;
+  agentId?: string;
   actorRole?: string;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
@@ -200,27 +364,46 @@ export async function createVoiceAiTestCall(input: {
   const fromNumber = await getActiveVoiceFromNumber(tenantId);
   if (!fromNumber) throw new Error("No active Twilio voice number is configured for this tenant.");
   const scenario = normalizeScenario(input.scenario);
+  const agent = await getVoiceAgent({ tenantId, agentId: input.agentId, scenario });
   const conversationId = newId("phone");
+  const agentRunId = newId("vairun");
   await query(
     `insert into "PhoneConversation"
-     ("id", "tenantId", "direction", "channel", "status", "callerNumber", "practiceNumber", "callerName", "aiIntent", "aiSentiment", "transcriptSummary", "followUpStatus", "outcome", "updatedAt")
-     values ($1, $2, 'OUTBOUND', 'VOICE', 'OPEN', $3, $4, 'Voice AI test recipient', $5, 'NEUTRAL', $6, 'VOICE_AI_TEST_CALL_CREATED', 'VOICE_AI_TEST_CALL', current_timestamp)`,
-    [conversationId, tenantId, toNumber, fromNumber, scenario.toUpperCase(), `Voice AI ${scenario.replaceAll("_", " ")} test call created by ${input.actorRole || "front_desk"}.`],
+     ("id", "tenantId", "voiceAgentId", "voiceAgentRunId", "direction", "channel", "status", "callerNumber", "practiceNumber", "callerName", "aiIntent", "aiSentiment", "transcriptSummary", "followUpStatus", "outcome", "updatedAt")
+     values ($1, $2, $3, $4, 'OUTBOUND', 'VOICE', 'OPEN', $5, $6, 'Voice AI test recipient', $7, 'NEUTRAL', $8, 'VOICE_AI_TEST_CALL_CREATED', 'VOICE_AI_TEST_CALL', current_timestamp)`,
+    [conversationId, tenantId, agent?.id ?? null, agentRunId, toNumber, fromNumber, (agent?.roleKey || scenario).toUpperCase(), `Voice AI ${agent?.name || scenario.replaceAll("_", " ")} test call created by ${input.actorRole || "front_desk"}.`],
+  );
+  await query(
+    `insert into "PhoneVoiceAgentRun"
+     ("id", "tenantId", "agentId", "conversationId", "scenario", "runType", "status", "targetNumber", "goal", "contextSnapshot", "providerStatus", "createdByRole", "startedAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, 'TEST_CALL', 'CALL_REQUESTED', $6, $7, $8::jsonb, 'READY_FOR_PROVIDER', $9, current_timestamp, current_timestamp)`,
+    [
+      agentRunId,
+      tenantId,
+      agent?.id ?? "agent_inbound_receptionist",
+      conversationId,
+      scenario,
+      toNumber,
+      agent?.primaryGoal ?? "Run a live Voice AI test call.",
+      JSON.stringify({ agentRole: agent?.roleKey, scenario, targetNumber: toNumber }),
+      input.actorRole || "front_desk",
+    ],
   );
   const activeCallId = newId("pcall");
   await query(
     `insert into "PhoneActiveCall"
-     ("id", "tenantId", "conversationId", "fromNumber", "toNumber", "direction", "callState", "callControlMode", "updatedAt")
-     values ($1, $2, $3, $4, $5, 'OUTBOUND', 'INITIATED', 'TWILIO_AI_VOICE', current_timestamp)`,
-    [activeCallId, tenantId, conversationId, fromNumber, toNumber],
+     ("id", "tenantId", "conversationId", "voiceAgentId", "voiceAgentRunId", "fromNumber", "toNumber", "direction", "callState", "callControlMode", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, 'OUTBOUND', 'INITIATED', 'TWILIO_AI_VOICE', current_timestamp)`,
+    [activeCallId, tenantId, conversationId, agent?.id ?? null, agentRunId, fromNumber, toNumber],
   );
   const origin = defaultOrigin();
+  const startUrl = `${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(conversationId)}&agentRunId=${encodeURIComponent(agentRunId)}&scenario=${encodeURIComponent(scenario)}&reason=test_call${agent?.id ? `&agentId=${encodeURIComponent(agent.id)}` : ""}`;
   const result = await createTwilioCall({
     tenantId,
     from: fromNumber,
     to: toNumber,
     statusCallback: `${origin}/api/twilio/voice/status`,
-    twiml: `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${twilioXmlEscape(`${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(conversationId)}&scenario=${encodeURIComponent(scenario)}&reason=test_call`)}</Redirect></Response>`,
+    twiml: `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${twilioXmlEscape(startUrl)}</Redirect></Response>`,
   });
   await query(
     `update "PhoneActiveCall"
@@ -230,8 +413,20 @@ export async function createVoiceAiTestCall(input: {
      where "tenantId" = $1 and "id" = $2`,
     [tenantId, activeCallId, result.sid || null, result.providerStatus],
   );
+  await query(
+    `update "PhoneVoiceAgentRun"
+     set "providerCallId" = $3,
+       "providerStatus" = $4,
+       "status" = case when $5 then 'IN_PROGRESS' else 'FAILED' end,
+       "blockedReason" = $6,
+       "updatedAt" = current_timestamp
+     where "tenantId" = $1 and "id" = $2`,
+    [tenantId, agentRunId, result.sid || null, result.providerStatus, result.ok, result.ok ? null : result.error ?? "Twilio provider execution failed."],
+  );
   await audit(tenantId, input.actorRole || "front_desk", "VOICE_AI_TEST_CALL_REQUESTED", "PhoneConversation", conversationId, result.ok ? "ALLOWED" : "BLOCKED", {
     scenario,
+    agentId: agent?.id,
+    agentRunId,
     toNumber,
     providerStatus: result.providerStatus,
     providerError: result.error,
@@ -240,6 +435,8 @@ export async function createVoiceAiTestCall(input: {
   return {
     conversationId,
     activeCallId,
+    agentId: agent?.id ?? null,
+    agentRunId,
     providerStatus: result.providerStatus,
     sid: result.sid || null,
     status: result.status || null,
@@ -253,10 +450,20 @@ export async function redirectLiveCallToVoiceAi(input: {
   callSid: string;
   conversationId: string;
   scenario?: string;
+  agentId?: string;
 }) {
   const origin = defaultOrigin();
   const scenario = normalizeScenario(input.scenario || "inbound_takeover");
-  const url = `${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(input.conversationId)}&scenario=${encodeURIComponent(scenario)}&reason=staff_takeover`;
+  const agent = await getVoiceAgent({ tenantId: input.tenantId, agentId: input.agentId, scenario });
+  const agentRunId = await ensureVoiceAgentRun({
+    tenantId: input.tenantId,
+    agent,
+    conversationId: input.conversationId,
+    scenario,
+    runType: "LIVE_TRANSFER",
+    createdByRole: "front_desk",
+  });
+  const url = `${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(input.conversationId)}&agentRunId=${encodeURIComponent(agentRunId)}&scenario=${encodeURIComponent(scenario)}&reason=staff_takeover${agent?.id ? `&agentId=${encodeURIComponent(agent.id)}` : ""}`;
   const result = await updateTwilioCall({
     tenantId: input.tenantId,
     callSid: input.callSid,
@@ -275,7 +482,224 @@ export async function redirectLiveCallToVoiceAi(input: {
   return result;
 }
 
-async function buildGatherTwiML(input: { tenantId: string; conversationId: string; scenario: VoiceScenario; text: string }) {
+export async function deployVoiceAgentCampaign(input: {
+  tenantId?: string;
+  agentId: string;
+  actorRole?: string;
+  mode?: "QUEUE_ONLY" | "CALL_NOW";
+  limit?: number;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const agent = await getVoiceAgent({ tenantId, agentId: input.agentId });
+  if (!agent) throw new Error("Active voice agent not found.");
+  const mode = input.mode === "CALL_NOW" ? "CALL_NOW" : "QUEUE_ONLY";
+  const limit = Math.max(1, Math.min(25, Math.round(Number(input.limit || 10))));
+  const fromNumber = mode === "CALL_NOW" ? await getActiveVoiceFromNumber(tenantId) : null;
+  if (mode === "CALL_NOW" && !fromNumber) throw new Error("No active Twilio voice number is configured for this tenant.");
+  const targets = await loadVoiceAgentTargets({ tenantId, agent, limit });
+  const origin = defaultOrigin();
+  const created = [];
+  for (const target of targets) {
+    const phone = normalizePhoneNumber(target.phone || "");
+    if (!phone) {
+      created.push({ patientId: target.patientId, status: "SKIPPED", blockedReason: "MISSING_PHONE" });
+      continue;
+    }
+    const conversationId = newId("phone");
+    const agentRunId = newId("vairun");
+    await query(
+      `insert into "PhoneConversation"
+       ("id", "tenantId", "patientId", "appointmentId", "voiceAgentId", "voiceAgentRunId", "direction", "channel", "status", "callerNumber", "practiceNumber", "callerName", "aiIntent", "aiSentiment", "transcriptSummary", "followUpStatus", "outcome", "updatedAt")
+       values ($1, $2, $3, $4, $5, $6, 'OUTBOUND', 'VOICE', 'OPEN', $7, $8, $9, $10, 'NEUTRAL', $11, $12, $13, current_timestamp)`,
+      [
+        conversationId,
+        tenantId,
+        target.patientId || null,
+        target.appointmentId || null,
+        agent.id,
+        agentRunId,
+        phone,
+        fromNumber || null,
+        target.patientName || "Voice agent target",
+        agent.roleKey.toUpperCase(),
+        JSON.stringify({ target, agentRole: agent.roleKey }),
+        mode === "CALL_NOW" ? "VOICE_AGENT_CALL_REQUESTED" : "VOICE_AGENT_RUN_QUEUED",
+        mode,
+      ],
+    );
+    await query(
+      `insert into "PhoneVoiceAgentRun"
+       ("id", "tenantId", "agentId", "conversationId", "patientId", "appointmentId", "scenario", "runType", "status", "targetNumber", "scheduledFor", "goal", "contextSnapshot", "providerStatus", "createdByRole", "updatedAt")
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, current_timestamp, $11, $12::jsonb, $13, $14, current_timestamp)`,
+      [
+        agentRunId,
+        tenantId,
+        agent.id,
+        conversationId,
+        target.patientId || null,
+        target.appointmentId || null,
+        normalizeScenario(agent.scenario),
+        campaignRunType(agent.roleKey),
+        mode === "CALL_NOW" ? "CALL_REQUESTED" : "QUEUED",
+        phone,
+        agent.primaryGoal,
+        JSON.stringify({ ...target, agentRole: agent.roleKey, source: "voice_agent_campaign_launcher" }),
+        mode === "CALL_NOW" ? "READY_FOR_PROVIDER" : "NOT_REQUESTED",
+        input.actorRole || "front_desk",
+      ],
+    );
+    let providerResult: { ok?: boolean; sid?: string | null; providerStatus?: string; error?: string | null; status?: string | null; data?: unknown } | null = null;
+    if (mode === "CALL_NOW" && fromNumber) {
+      const startUrl = `${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(conversationId)}&agentRunId=${encodeURIComponent(agentRunId)}&agentId=${encodeURIComponent(agent.id)}&scenario=${encodeURIComponent(normalizeScenario(agent.scenario))}&reason=agent_campaign`;
+      providerResult = await createTwilioCall({
+        tenantId,
+        from: fromNumber,
+        to: phone,
+        statusCallback: `${origin}/api/twilio/voice/status`,
+        twiml: `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${twilioXmlEscape(startUrl)}</Redirect></Response>`,
+      });
+      await query(
+        `update "PhoneVoiceAgentRun"
+         set "providerCallId" = $3,
+           "providerStatus" = $4,
+           "status" = case when $5 then 'IN_PROGRESS' else 'FAILED' end,
+           "blockedReason" = $6,
+           "updatedAt" = current_timestamp
+         where "tenantId" = $1 and "id" = $2`,
+        [tenantId, agentRunId, providerResult.sid || null, providerResult.providerStatus || "UNKNOWN", Boolean(providerResult.ok), providerResult.ok ? null : providerResult.error || "Twilio provider execution failed."],
+      );
+      await query(
+        `insert into "PhoneActiveCall"
+         ("id", "tenantId", "conversationId", "voiceAgentId", "voiceAgentRunId", "fromNumber", "toNumber", "direction", "callState", "callControlMode", "providerCallId", "updatedAt")
+         values ($1, $2, $3, $4, $5, $6, $7, 'OUTBOUND', $8, 'TWILIO_AI_VOICE', $9, current_timestamp)`,
+        [newId("pcall"), tenantId, conversationId, agent.id, agentRunId, fromNumber, phone, providerResult.ok ? "RINGING" : "FAILED", providerResult.sid || null],
+      );
+    }
+    created.push({
+      conversationId,
+      agentRunId,
+      patientId: target.patientId,
+      appointmentId: target.appointmentId,
+      patientName: target.patientName,
+      targetNumber: phone,
+      status: providerResult ? (providerResult.ok ? "CALL_ACCEPTED" : "CALL_FAILED") : "QUEUED",
+      providerStatus: providerResult?.providerStatus ?? "NOT_REQUESTED",
+      providerSid: providerResult?.sid ?? null,
+      blockedReason: providerResult?.ok === false ? providerResult.error : null,
+    });
+  }
+  await audit(tenantId, input.actorRole || "front_desk", "VOICE_AGENT_CAMPAIGN_DEPLOYED", "PhoneVoiceAgent", agent.id, "ALLOWED", {
+    mode,
+    agentId: agent.id,
+    roleKey: agent.roleKey,
+    requestedLimit: limit,
+    targetCount: targets.length,
+    createdCount: created.length,
+    noSecretLogged: true,
+  });
+  return {
+    agentId: agent.id,
+    roleKey: agent.roleKey,
+    mode,
+    targetsReviewed: targets.length,
+    created,
+  };
+}
+
+async function loadVoiceAgentTargets(input: { tenantId: string; agent: VoiceAgentRow; limit: number }) {
+  const role = input.agent.roleKey;
+  if (role === "hygiene_recall") {
+    return (await query<VoiceCampaignTarget>(
+      `select p."id" as "patientId",
+              null::text as "appointmentId",
+              concat_ws(' ', p."firstName", p."lastName") as "patientName",
+              p."phone" as "phone",
+              r."recallType" as "reason",
+              r."dueDate" as "dueAt"
+       from "PmsRecall" r
+       join "PmsPatient" p on p."id" = r."patientId" and p."tenantId" = r."tenantId"
+       where r."tenantId" = $1
+         and r."status" in ('DUE','OVERDUE','OPEN')
+         and r."dueDate" <= current_timestamp + interval '30 days'
+         and coalesce(p."phone", '') <> ''
+       order by r."dueDate" asc
+       limit $2`,
+      [input.tenantId, input.limit],
+    )).rows;
+  }
+  if (role === "appointment_reminder") {
+    return (await query<VoiceCampaignTarget>(
+      `select p."id" as "patientId",
+              a."id" as "appointmentId",
+              concat_ws(' ', p."firstName", p."lastName") as "patientName",
+              p."phone" as "phone",
+              a."appointmentType" as "reason",
+              a."startsAt" as "dueAt"
+       from "PmsAppointment" a
+       join "PmsPatient" p on p."id" = a."patientId" and p."tenantId" = a."tenantId"
+       where a."tenantId" = $1
+         and a."status" in ('SCHEDULED','CONFIRMED','READY')
+         and a."startsAt" between current_timestamp and current_timestamp + interval '7 days'
+         and coalesce(p."phone", '') <> ''
+       order by a."startsAt" asc
+       limit $2`,
+      [input.tenantId, input.limit],
+    )).rows;
+  }
+  if (role === "billing_information") {
+    return (await query<VoiceCampaignTarget>(
+      `select p."id" as "patientId",
+              null::text as "appointmentId",
+              concat_ws(' ', p."firstName", p."lastName") as "patientName",
+              p."phone" as "phone",
+              'balance_follow_up' as "reason",
+              max(l."postedAt") as "dueAt"
+       from "PmsPatient" p
+       join "PmsLedgerEntry" l on l."patientId" = p."id" and l."tenantId" = p."tenantId"
+       where p."tenantId" = $1 and coalesce(p."phone", '') <> ''
+       group by p."id", p."firstName", p."lastName", p."phone"
+       having sum(l."balanceCents") > 0
+       order by sum(l."balanceCents") desc
+       limit $2`,
+      [input.tenantId, input.limit],
+    )).rows;
+  }
+  return (await query<VoiceCampaignTarget>(
+    `select p."id" as "patientId",
+            null::text as "appointmentId",
+            concat_ws(' ', p."firstName", p."lastName") as "patientName",
+            p."phone" as "phone",
+            $3 as "reason",
+            max(a."startsAt") as "dueAt"
+     from "PmsPatient" p
+     left join "PmsAppointment" a on a."patientId" = p."id" and a."tenantId" = p."tenantId"
+     where p."tenantId" = $1 and coalesce(p."phone", '') <> ''
+     group by p."id", p."firstName", p."lastName", p."phone"
+     having max(a."startsAt") is null or max(a."startsAt") < current_timestamp - interval '9 months'
+     order by max(a."startsAt") nulls first
+     limit $2`,
+    [input.tenantId, input.limit, role === "membership_reactivation" ? "membership_reactivation" : "patient_reactivation"],
+  )).rows;
+}
+
+type VoiceCampaignTarget = {
+  patientId: string | null;
+  appointmentId: string | null;
+  patientName: string | null;
+  phone: string | null;
+  reason: string | null;
+  dueAt: string | Date | null;
+};
+
+function campaignRunType(roleKey: string) {
+  if (roleKey === "hygiene_recall") return "RECALL_CAMPAIGN";
+  if (roleKey === "appointment_reminder") return "APPOINTMENT_REMINDER";
+  if (roleKey === "billing_information") return "BILLING_FOLLOW_UP";
+  if (roleKey === "membership_reactivation") return "MEMBERSHIP_REACTIVATION";
+  return "PATIENT_REACTIVATION";
+}
+
+async function buildGatherTwiML(input: { tenantId: string; conversationId: string; agentId?: string | null; agentRunId?: string | null; scenario: VoiceScenario; text: string }) {
   const origin = defaultOrigin();
   const policy = await getVoiceAiReceptionPolicy(input.tenantId).catch(() => null);
   const voiceSettings = sanitizeVoiceSettings(policy?.voiceSettings ?? {});
@@ -286,7 +710,7 @@ async function buildGatherTwiML(input: { tenantId: string; conversationId: strin
     scenario: input.scenario,
     text: input.text,
   });
-  const action = `${origin}/api/twilio/voice/ai/turn?conversationId=${encodeURIComponent(input.conversationId)}&scenario=${encodeURIComponent(input.scenario)}`;
+  const action = `${origin}/api/twilio/voice/ai/turn?conversationId=${encodeURIComponent(input.conversationId)}&scenario=${encodeURIComponent(input.scenario)}${input.agentId ? `&agentId=${encodeURIComponent(input.agentId)}` : ""}${input.agentRunId ? `&agentRunId=${encodeURIComponent(input.agentRunId)}` : ""}`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather input="speech dtmf" action="${twilioXmlEscape(action)}" method="POST" speechTimeout="auto" timeout="6" language="en-US">
@@ -296,7 +720,7 @@ async function buildGatherTwiML(input: { tenantId: string; conversationId: strin
 </Response>`;
 }
 
-async function buildRealtimeStreamTwiML(input: { tenantId: string; conversationId: string; scenario: VoiceScenario; fallbackText: string; payload?: TwilioPayload }) {
+async function buildRealtimeStreamTwiML(input: { tenantId: string; conversationId: string; agentId?: string | null; agentRunId?: string | null; scenario: VoiceScenario; fallbackText: string; payload?: TwilioPayload }) {
   const openAi = await getOpenAiWebchatConfig(input.tenantId).catch(() => null);
   if (!openAi?.apiKey) return null;
   const origin = defaultOrigin();
@@ -314,6 +738,8 @@ async function buildRealtimeStreamTwiML(input: { tenantId: string; conversationI
     <Stream url="${twilioXmlEscape(streamUrl)}">
       <Parameter name="tenantId" value="${twilioXmlEscape(input.tenantId)}" />
       <Parameter name="conversationId" value="${twilioXmlEscape(input.conversationId)}" />
+      <Parameter name="agentId" value="${twilioXmlEscape(input.agentId || "")}" />
+      <Parameter name="agentRunId" value="${twilioXmlEscape(input.agentRunId || "")}" />
       <Parameter name="scenario" value="${twilioXmlEscape(input.scenario)}" />
       <Parameter name="callerPhone" value="${twilioXmlEscape(input.payload?.From || input.payload?.Caller || "")}" />
     </Stream>
@@ -895,6 +1321,16 @@ function ruleBasedVoiceReply(scenario: VoiceScenario, speech: string, memory?: V
   return "Thanks for sharing that. Would you like me to help with scheduling, forms, insurance follow-up, or a staff callback?";
 }
 
+function greetingForAgent(agent: VoiceAgentRow | null, scenario: VoiceScenario, reason?: string) {
+  if (agent?.roleKey === "billing_information") {
+    return "Hi, this is the dental office billing team. I can help with general billing questions and get the right team member involved for account-specific details. How can I help?";
+  }
+  if (agent?.roleKey === "membership_reactivation") {
+    return "Hi, this is your dental office. I’m checking in because we may have membership options that make ongoing care easier. Would you like help getting back on the schedule or speaking with our team?";
+  }
+  return greetingForScenario(scenario, reason);
+}
+
 function greetingForScenario(scenario: VoiceScenario, reason?: string) {
   if (scenario === "appointment_reminder") {
     return "Hi, this is your dental office calling with a quick appointment reminder. I can help you confirm, ask for a reschedule, or connect you with the front desk. How can I help?";
@@ -937,18 +1373,70 @@ async function ensureVoiceConversation(input: { tenantId: string; conversationId
   return id;
 }
 
-async function markAiTakeover(tenantId: string, conversationId: string, scenario: VoiceScenario, text: string, payload?: TwilioPayload) {
+async function ensureVoiceAgentRun(input: {
+  tenantId: string;
+  agent: VoiceAgentRow | null;
+  conversationId: string;
+  scenario: VoiceScenario;
+  runType: string;
+  targetNumber?: string;
+  createdByRole: string;
+}) {
+  const existing = await query<{ id: string }>(
+    `select "voiceAgentRunId" as id
+     from "PhoneConversation"
+     where "tenantId" = $1 and "id" = $2 and "voiceAgentRunId" is not null
+     limit 1`,
+    [input.tenantId, input.conversationId],
+  );
+  if (existing.rows[0]?.id) return existing.rows[0].id;
+  const id = newId("vairun");
+  const agentId = input.agent?.id ?? (await getVoiceAgent({ tenantId: input.tenantId, scenario: input.scenario }))?.id ?? "agent_inbound_receptionist";
+  await query(
+    `insert into "PhoneVoiceAgentRun"
+     ("id", "tenantId", "agentId", "conversationId", "scenario", "runType", "status", "targetNumber", "goal", "contextSnapshot", "providerStatus", "createdByRole", "startedAt", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, 'IN_PROGRESS', $7, $8, $9::jsonb, 'STREAM_CONNECTING', $10, current_timestamp, current_timestamp)
+     on conflict ("id") do nothing`,
+    [
+      id,
+      input.tenantId,
+      agentId,
+      input.conversationId,
+      input.scenario,
+      input.runType,
+      input.targetNumber || null,
+      input.agent?.primaryGoal ?? `Handle ${input.scenario.replaceAll("_", " ")} voice conversation.`,
+      JSON.stringify({ source: "twilio_voice_start", agentRole: input.agent?.roleKey, targetNumber: input.targetNumber || null }),
+      input.createdByRole,
+    ],
+  );
+  await query(
+    `update "PhoneConversation"
+     set "voiceAgentId" = coalesce($3, "voiceAgentId"),
+       "voiceAgentRunId" = $4,
+       "updatedAt" = current_timestamp
+     where "tenantId" = $1 and "id" = $2`,
+    [input.tenantId, input.conversationId, agentId, id],
+  );
+  return id;
+}
+
+async function markAiTakeover(tenantId: string, conversationId: string, scenario: VoiceScenario, text: string, payload?: TwilioPayload, agentId?: string | null, agentRunId?: string | null) {
   await query(
     `update "PhoneConversation"
      set "followUpStatus" = 'AI_VOICE_ACTIVE',
        "outcome" = 'AI_VOICE_ACTIVE',
        "aiIntent" = $3,
+       "voiceAgentId" = coalesce($4, "voiceAgentId"),
+       "voiceAgentRunId" = coalesce($5, "voiceAgentRunId"),
        "updatedAt" = current_timestamp
      where "tenantId" = $1 and "id" = $2`,
-    [tenantId, conversationId, scenario.toUpperCase()],
+    [tenantId, conversationId, scenario.toUpperCase(), agentId || null, agentRunId || null],
   );
   await audit(tenantId, "voice_ai", "VOICE_AI_STARTED", "PhoneConversation", conversationId, "ALLOWED", {
     scenario,
+    agentId,
+    agentRunId,
     callSid: payload?.CallSid || null,
     promptPreview: text.slice(0, 180),
   });
@@ -1100,6 +1588,126 @@ function sanitizeVoiceReply(text: string) {
 
 function objectValue(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function defaultVoiceAgents(tenantId: string) {
+  const commonSettings = { realtimeModel: "gpt-realtime-mini", transcriptionModel: "gpt-4o-transcribe", voice: "alloy", temperature: 0.35 };
+  return [
+    {
+      id: "agent_inbound_receptionist",
+      tenantId,
+      name: "Inbound AI receptionist",
+      roleKey: "inbound_receptionist",
+      scenario: "inbound_takeover",
+      description: "Answers when front desk is busy, qualifies calls, books appointments, and routes sensitive work.",
+      primaryGoal: "Resolve inbound calls without losing patient context.",
+      allowedActions: ["BOOK_APPOINTMENT", "RESCHEDULE_APPOINTMENT", "CREATE_TASK", "STAGE_SMS_CONFIRMATION", "ROUTE_TO_STAFF"],
+      pmsContext: { patients: true, appointments: true, recalls: true, balances: true, insurance: true, forms: true },
+      triggerPolicy: { answerAfterRings: 3, afterHours: true, busyFallback: true },
+      voiceSettings: commonSettings,
+      systemPrompt: "You are the dental practice inbound receptionist. Sound warm, calm, and human. Remember details already provided during the call. Use PMS context before asking questions.",
+      voicePrompt: "Ask one question at a time. Book directly when name, service, date, and time are known. For pricing, diagnosis, prescriptions, or guaranteed insurance answers, route to staff.",
+      pricingPolicy: "NO_PUBLIC_PRICING_HUMAN_ONLY",
+      bookingPolicy: "DIRECT_BOOKING_WITH_SCHEDULING_GATES",
+      billingPolicy: "VERIFY_IDENTITY_BEFORE_BILLING_DETAIL",
+      handoffPolicy: { fallbackOwner: "front_desk", warmTransfer: true },
+    },
+    {
+      id: "agent_hygiene_recall",
+      tenantId,
+      name: "Hygiene recall coordinator",
+      roleKey: "hygiene_recall",
+      scenario: "recall",
+      description: "Calls due and overdue hygiene patients and books recall slots.",
+      primaryGoal: "Recover due and overdue recall production from PMS recall queues.",
+      allowedActions: ["BOOK_APPOINTMENT", "RESCHEDULE_APPOINTMENT", "CREATE_TASK", "STAGE_SMS_CONFIRMATION"],
+      pmsContext: { patients: true, recalls: true, appointments: true, providers: true, operatories: true },
+      triggerPolicy: { source: "PmsRecall", statuses: ["DUE", "OVERDUE"], quietHours: true },
+      voiceSettings: { ...commonSettings, temperature: 0.32 },
+      systemPrompt: "You are the hygiene recall coordinator. You are calling because the patient is due for continuing care. Be helpful, brief, and never pressure the patient.",
+      voicePrompt: "Confirm the patient, explain they are due for recall, offer specific times from the schedule, and book if they agree.",
+      pricingPolicy: "NO_PUBLIC_PRICING_HUMAN_ONLY",
+      bookingPolicy: "BOOK_RECALL_WITH_PROVIDER_AVAILABILITY",
+      billingPolicy: "ROUTE_BILLING_TO_STAFF",
+      handoffPolicy: { fallbackOwner: "front_desk" },
+    },
+    {
+      id: "agent_patient_reactivation",
+      tenantId,
+      name: "Patient reactivation coordinator",
+      roleKey: "patient_reactivation",
+      scenario: "reactivation",
+      description: "Reactivates inactive patients, broken visits, and unscheduled treatment opportunities.",
+      primaryGoal: "Bring inactive or unscheduled patients back into care.",
+      allowedActions: ["BOOK_APPOINTMENT", "CREATE_TASK", "STAGE_SMS_CONFIRMATION", "ROUTE_TO_STAFF"],
+      pmsContext: { patients: true, appointments: true, treatmentPlans: true, recalls: true, balances: false },
+      triggerPolicy: { source: "PmsPatient", inactiveMonths: 12, includeBrokenAppointments: true, includeUnscheduledTreatment: true },
+      voiceSettings: { ...commonSettings, voice: "verse", temperature: 0.38 },
+      systemPrompt: "You are the patient reactivation coordinator. Be respectful and warm. The goal is to make returning to care easy.",
+      voicePrompt: "Ask what the patient would like help with, offer appointment options, and create a staff task if the patient needs pricing, clinical advice, or special accommodation.",
+      pricingPolicy: "NO_PUBLIC_PRICING_HUMAN_ONLY",
+      bookingPolicy: "DIRECT_BOOKING_WITH_SCHEDULING_GATES",
+      billingPolicy: "ROUTE_BILLING_TO_STAFF",
+      handoffPolicy: { fallbackOwner: "front_desk" },
+    },
+    {
+      id: "agent_appointment_reminder",
+      tenantId,
+      name: "Appointment reminder agent",
+      roleKey: "appointment_reminder",
+      scenario: "appointment_reminder",
+      description: "Confirms upcoming visits, handles reschedule requests, and escalates same-day changes.",
+      primaryGoal: "Protect scheduled production by confirming or safely routing appointment changes.",
+      allowedActions: ["RESCHEDULE_APPOINTMENT", "CREATE_TASK", "STAGE_SMS_CONFIRMATION", "ROUTE_TO_STAFF"],
+      pmsContext: { patients: true, appointments: true, forms: true, insurance: true },
+      triggerPolicy: { source: "PmsAppointment", windowDays: [1, 7], sameDayRescheduleRequiresStaff: true },
+      voiceSettings: { ...commonSettings, voice: "sage", temperature: 0.28 },
+      systemPrompt: "You are the appointment reminder agent. You help patients confirm, complete forms, and request changes without losing schedule safety.",
+      voicePrompt: "If the appointment is same-day or the caller asks to cancel, route to staff. Otherwise offer safe reschedule options and record the request.",
+      pricingPolicy: "NO_PUBLIC_PRICING_HUMAN_ONLY",
+      bookingPolicy: "RESCHEDULE_WITH_SAME_DAY_STAFF_GATE",
+      billingPolicy: "ROUTE_BILLING_TO_STAFF",
+      handoffPolicy: { fallbackOwner: "front_desk", sameDayEscalation: true },
+    },
+    {
+      id: "agent_billing_information",
+      tenantId,
+      name: "Billing information assistant",
+      roleKey: "billing_information",
+      scenario: "event_greeting",
+      description: "Answers verified billing workflow questions and routes sensitive details to billing staff.",
+      primaryGoal: "Reduce billing call volume while protecting sensitive financial details.",
+      allowedActions: ["CREATE_TASK", "STAGE_SMS_CONFIRMATION", "ROUTE_TO_STAFF", "PROVIDE_BILLING_SUMMARY"],
+      pmsContext: { patients: true, balances: true, payments: true, claims: true, insurance: true },
+      triggerPolicy: { identityVerificationRequired: true, paymentDisputesRouteToStaff: true },
+      voiceSettings: { ...commonSettings, voice: "ash", temperature: 0.25 },
+      systemPrompt: "You are the billing information assistant. Be careful with identity verification and never expose sensitive billing details before verification.",
+      voicePrompt: "Give high-level next steps. If the patient needs exact balances, payment disputes, insurance claim details, or refunds, create a billing task or warm transfer.",
+      pricingPolicy: "NO_PUBLIC_PRICING_HUMAN_ONLY",
+      bookingPolicy: "BOOKING_ALLOWED_AFTER_BILLING_CONTEXT",
+      billingPolicy: "VERIFY_IDENTITY_BEFORE_BILLING_DETAIL",
+      handoffPolicy: { fallbackOwner: "billing_rcm", warmTransfer: true },
+    },
+    {
+      id: "agent_membership_reactivation",
+      tenantId,
+      name: "Membership reactivation coordinator",
+      roleKey: "membership_reactivation",
+      scenario: "reactivation",
+      description: "Follows up with lapsed or likely practice-plan patients without quoting unsupported pricing.",
+      primaryGoal: "Recover membership and practice-plan opportunities.",
+      allowedActions: ["BOOK_APPOINTMENT", "CREATE_TASK", "STAGE_SMS_CONFIRMATION", "ROUTE_TO_STAFF"],
+      pmsContext: { patients: true, appointments: true, membershipSignals: true, balances: false },
+      triggerPolicy: { source: "membershipSignals", pricingRequiresStaff: true },
+      voiceSettings: { ...commonSettings, voice: "coral", temperature: 0.34 },
+      systemPrompt: "You are the membership reactivation coordinator. You can explain that the office has membership options but cannot quote pricing.",
+      voicePrompt: "Offer to schedule a visit or connect the patient with the team to review membership options. Never give membership prices.",
+      pricingPolicy: "NO_PUBLIC_PRICING_HUMAN_ONLY",
+      bookingPolicy: "DIRECT_BOOKING_WITH_SCHEDULING_GATES",
+      billingPolicy: "ROUTE_BILLING_TO_STAFF",
+      handoffPolicy: { fallbackOwner: "treatment_coordinator" },
+    },
+  ];
 }
 
 function redactTwilio(payload: TwilioPayload) {

@@ -352,6 +352,84 @@ model ConnectorCostEvent {
   @@index([definitionId, capabilityKey])
 }
 
+model PmsConnectorCapability {
+  id                 String    @id
+  tenantId           String
+  connectorInstanceId String
+  capabilityKey      String
+  resourceType       String
+  operation          String
+  status             String    @default("UNKNOWN")
+  requiresApproval   Boolean   @default(true)
+  requiredEvidence   Json      @default("[]")
+  lastSmokeTestAt    DateTime?
+  lastSmokeTestStatus String?
+  lastSmokeTestSummary String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([tenantId, connectorInstanceId, capabilityKey])
+  @@index([tenantId, status, operation])
+}
+
+model PmsExternalRecordLink {
+  id                  String   @id
+  tenantId            String
+  localType           String
+  localId             String
+  connectorInstanceId String
+  externalType        String
+  externalId          String
+  externalUrl         String?
+  lastSyncedAt        DateTime?
+  metadata            Json     @default("{}")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([tenantId, localType, localId, connectorInstanceId, externalType])
+  @@index([tenantId, connectorInstanceId, externalType, externalId])
+}
+
+model PmsWritebackJob {
+  id                  String    @id
+  tenantId            String
+  connectorInstanceId String
+  capabilityKey       String
+  localType           String
+  localId             String
+  externalType        String
+  status              String    @default("PENDING_APPROVAL")
+  idempotencyKey      String
+  requestedByRole     String
+  approvedByRole      String?
+  approvedAt          DateTime?
+  payload             Json
+  evidence            Json      @default("[]")
+  blockedReason       String?
+  externalResponse    Json?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, localType, localId])
+}
+
+model PmsWritebackAttempt {
+  id              String    @id
+  tenantId        String
+  writebackJobId  String
+  status          String
+  requestPayload  Json
+  responsePayload Json?
+  statusCode      Int?
+  errorMessage    String?
+  startedAt       DateTime  @default(now())
+  finishedAt      DateTime?
+
+  @@index([writebackJobId, startedAt])
+}
+
 model WorkbenchAuditEvent {
   id          String                  @id @default(cuid())
   tenantId    String
@@ -2610,6 +2688,8 @@ model PhoneConversation {
   tenantId        String
   patientId       String?
   appointmentId   String?
+  voiceAgentId    String?
+  voiceAgentRunId String?
   direction       String
   channel         String   @default("VOICE")
   status          String   @default("OPEN")
@@ -2630,6 +2710,8 @@ model PhoneConversation {
   @@index([tenantId, status, startedAt])
   @@index([patientId, startedAt])
   @@index([tenantId, aiIntent])
+  @@index([voiceAgentId, startedAt])
+  @@index([voiceAgentRunId])
 }
 
 model PhoneOutboundMessage {
@@ -2818,6 +2900,8 @@ model PhoneActiveCall {
   id              String   @id @default(cuid())
   tenantId        String
   conversationId  String?
+  voiceAgentId    String?
+  voiceAgentRunId String?
   phoneNumberId   String?
   fromNumber      String
   toNumber        String
@@ -2840,6 +2924,8 @@ model PhoneActiveCall {
   @@index([conversationId])
   @@index([currentExtensionId])
   @@index([tenantId, providerConferenceName])
+  @@index([voiceAgentId, startedAt])
+  @@index([voiceAgentRunId])
 }
 
 model PhoneVideoSession {
@@ -2951,6 +3037,88 @@ model PhoneAiReceptionPolicy {
   updatedAt     DateTime @updatedAt
 
   @@index([tenantId, status])
+}
+
+model PhoneVoiceAgent {
+  id             String   @id
+  tenantId       String
+  locationId     String?
+  name           String
+  roleKey        String
+  scenario       String
+  status         String   @default("ACTIVE")
+  description    String?
+  primaryGoal    String
+  allowedActions String[] @default([])
+  pmsContext     Json     @default("{}")
+  triggerPolicy  Json     @default("{}")
+  voiceSettings  Json     @default("{}")
+  systemPrompt   String
+  voicePrompt    String
+  pricingPolicy  String   @default("NO_PUBLIC_PRICING_HUMAN_ONLY")
+  bookingPolicy  String   @default("DIRECT_BOOKING_WITH_SCHEDULING_GATES")
+  billingPolicy  String   @default("VERIFY_IDENTITY_BEFORE_BILLING_DETAIL")
+  handoffPolicy  Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, roleKey])
+  @@index([tenantId, status, scenario])
+  @@index([tenantId, roleKey, status])
+}
+
+model PhoneVoiceAgentRun {
+  id                String   @id
+  tenantId          String
+  agentId           String
+  campaignId        String?
+  conversationId    String?
+  patientId         String?
+  appointmentId     String?
+  scenario          String
+  runType           String
+  status            String   @default("QUEUED")
+  targetNumber      String?
+  scheduledFor      DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  goal              String
+  contextSnapshot   Json     @default("{}")
+  actionSummary     Json     @default("{}")
+  providerStatus    String   @default("NOT_REQUESTED")
+  providerCallId    String?
+  blockedReason     String?
+  createdByRole     String   @default("front_desk")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantId, status, scheduledFor])
+  @@index([agentId, status, createdAt])
+  @@index([conversationId])
+  @@index([patientId, status])
+  @@index([campaignId, status])
+}
+
+model PhoneVoiceAgentAction {
+  id             String   @id
+  tenantId       String
+  agentId        String?
+  agentRunId     String?
+  conversationId String?
+  patientId      String?
+  appointmentId  String?
+  actionType     String
+  status         String   @default("RECORDED")
+  inputJson      Json     @default("{}")
+  resultJson     Json     @default("{}")
+  blockedReason  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, actionType, status])
+  @@index([agentRunId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([patientId, createdAt])
 }
 
 model PhoneCallControlAction {

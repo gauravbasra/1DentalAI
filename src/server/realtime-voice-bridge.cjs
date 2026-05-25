@@ -48,6 +48,8 @@ async function runRealtimeCallBridge(twilioSocket, request) {
   const url = new URL(request.url || "/", "http://127.0.0.1");
   let tenantId = url.searchParams.get("tenantId") || TENANT_ID;
   let conversationId = url.searchParams.get("conversationId") || "";
+  let agentId = url.searchParams.get("agentId") || "";
+  let agentRunId = url.searchParams.get("agentRunId") || "";
   let scenario = normalizeScenario(url.searchParams.get("scenario"));
   let openAiSocket = null;
   let streamSid = null;
@@ -70,9 +72,11 @@ async function runRealtimeCallBridge(twilioSocket, request) {
   const startOpenAi = async () => {
     if (openAiSocket) return;
     if (!conversationId) conversationId = newId("phone");
-    const [openAiKey, policy, transcript, knowledge] = await Promise.all([
+    const [openAiKey, policy, agent, pmsContext, transcript, knowledge] = await Promise.all([
       getOpenAiKey(tenantId),
       getReceptionPolicy(tenantId),
+      getVoiceAgent(tenantId, { agentId, scenario }),
+      getVoicePmsContext(tenantId, conversationId, callerPhone),
       getTranscriptContext(tenantId, conversationId),
       getKnowledgeContext(tenantId, "appointment schedule dental insurance forms billing"),
     ]);
@@ -81,7 +85,8 @@ async function runRealtimeCallBridge(twilioSocket, request) {
       twilioSocket.close(1011, "OpenAI key unavailable");
       return;
     }
-    const voiceSettings = sanitizeVoiceSettings(policy.voiceSettings || {});
+    if (agent?.id && !agentId) agentId = agent.id;
+    const voiceSettings = mergeVoiceSettings(policy.voiceSettings || {}, agent?.voiceSettings || {});
     const model = voiceSettings.realtimeModel || "gpt-realtime-mini";
     openAiSocket = new WebSocket(`wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`, {
       headers: {
@@ -89,7 +94,7 @@ async function runRealtimeCallBridge(twilioSocket, request) {
         "OpenAI-Beta": "realtime=v1",
       },
     });
-    attachOpenAiHandlers({ openAiSocket, twilioSocket, tenantId, conversationId, scenario, streamSid, callSid, callerPhone, getLastCallerTranscript: () => lastCallerTranscript, setLastCallerTranscript: (value) => { lastCallerTranscript = value; }, policy, voiceSettings, transcript, knowledge, closeBoth });
+    attachOpenAiHandlers({ openAiSocket, twilioSocket, tenantId, conversationId, agent, agentRunId, scenario, streamSid, callSid, callerPhone, getLastCallerTranscript: () => lastCallerTranscript, setLastCallerTranscript: (value) => { lastCallerTranscript = value; }, policy, voiceSettings, pmsContext, transcript, knowledge, closeBoth });
   };
 
   twilioSocket.on("message", async (raw) => {
@@ -101,9 +106,11 @@ async function runRealtimeCallBridge(twilioSocket, request) {
       const params = event.start?.customParameters || {};
       tenantId = params.tenantId || tenantId;
       conversationId = params.conversationId || conversationId || newId("phone");
+      agentId = params.agentId || agentId;
+      agentRunId = params.agentRunId || agentRunId;
       scenario = normalizeScenario(params.scenario || scenario);
       callerPhone = params.callerPhone || params.From || callerPhone;
-      await markRealtimeStarted(tenantId, conversationId, { streamSid, callSid, callerPhone, scenario });
+      await markRealtimeStarted(tenantId, conversationId, { streamSid, callSid, callerPhone, scenario, agentId, agentRunId });
       await startOpenAi();
       return;
     }
@@ -119,19 +126,19 @@ async function runRealtimeCallBridge(twilioSocket, request) {
 
 }
 
-function attachOpenAiHandlers({ openAiSocket, twilioSocket, tenantId, conversationId, scenario, streamSid, callSid, callerPhone, getLastCallerTranscript, setLastCallerTranscript, policy, voiceSettings, transcript, knowledge, closeBoth }) {
+function attachOpenAiHandlers({ openAiSocket, twilioSocket, tenantId, conversationId, agent, agentRunId, scenario, streamSid, callSid, callerPhone, getLastCallerTranscript, setLastCallerTranscript, policy, voiceSettings, pmsContext, transcript, knowledge, closeBoth }) {
   openAiSocket.on("open", () => {
     openAiSocket.send(JSON.stringify({
       type: "session.update",
       session: {
         type: "realtime",
-        instructions: buildInstructions({ policy, voiceSettings, scenario, transcript, knowledge }),
+        instructions: buildInstructions({ policy, agent, voiceSettings, scenario, pmsContext, transcript, knowledge }),
         voice: normalizeRealtimeVoice(voiceSettings.voice),
         input_audio_format: "g711_ulaw",
         output_audio_format: "g711_ulaw",
         input_audio_transcription: { model: voiceSettings.transcriptionModel || "gpt-4o-transcribe" },
         turn_detection: { type: "server_vad", threshold: 0.52, prefix_padding_ms: 350, silence_duration_ms: 650 },
-        tools: [appointmentToolSchema()],
+        tools: voiceToolSchemas(agent),
         tool_choice: "auto",
         temperature: voiceSettings.temperature,
       },
@@ -139,7 +146,7 @@ function attachOpenAiHandlers({ openAiSocket, twilioSocket, tenantId, conversati
     openAiSocket.send(JSON.stringify({
       type: "response.create",
       response: {
-        instructions: "Greet the caller warmly in one sentence, say the front desk is helping another patient, and ask how you can help. Do not mention AI.",
+        instructions: firstUtteranceForAgent(agent, scenario),
       },
     }));
   });
@@ -162,7 +169,7 @@ function attachOpenAiHandlers({ openAiSocket, twilioSocket, tenantId, conversati
     }
     const toolCall = extractToolCall(event);
     if (toolCall) {
-      const output = await handleRealtimeToolCall({ tenantId, conversationId, callSid, callerPhone, lastCallerTranscript: getLastCallerTranscript(), toolCall });
+      const output = await handleRealtimeToolCall({ tenantId, conversationId, agent, agentRunId, callSid, callerPhone, lastCallerTranscript: getLastCallerTranscript(), toolCall });
       if (openAiSocket.readyState === WebSocket.OPEN) {
         openAiSocket.send(JSON.stringify({
           type: "conversation.item.create",
@@ -175,9 +182,9 @@ function attachOpenAiHandlers({ openAiSocket, twilioSocket, tenantId, conversati
         openAiSocket.send(JSON.stringify({
           type: "response.create",
           response: {
-            instructions: output.ok
-              ? "Confirm the appointment in a warm, natural sentence. Mention that a text confirmation is being sent. Ask if they need anything else."
-              : "Apologize briefly and offer to have the front desk find the closest appointment time. Do not sound technical.",
+            instructions: output.nextInstructions || (output.ok
+              ? "Confirm the completed action in a warm, natural sentence. Ask if they need anything else."
+              : "Apologize briefly and offer to have the right team member follow up. Do not sound technical."),
           },
         }));
       }
@@ -195,21 +202,49 @@ function attachOpenAiHandlers({ openAiSocket, twilioSocket, tenantId, conversati
   });
 }
 
-function buildInstructions({ voiceSettings, scenario, transcript, knowledge }) {
+function buildInstructions({ voiceSettings, agent, scenario, pmsContext, transcript, knowledge }) {
   const now = new Date().toLocaleString("en-US", { timeZone: "America/Denver", weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const allowedActions = Array.isArray(agent?.allowedActions) && agent.allowedActions.length ? agent.allowedActions.join(", ") : "BOOK_APPOINTMENT, CREATE_TASK";
+  const roleName = agent?.name || "AI dental receptionist";
   return [
+    agent?.systemPrompt,
+    agent?.voicePrompt,
     voiceSettings.systemPrompt,
     voiceSettings.voicePrompt,
-    `Current practice time is ${now} Mountain Time. Scenario: ${scenario}.`,
-    "You are the dental office receptionist on a live phone call. Sound like a patient, warm human, not a script.",
-    "Keep memory inside the call: once the caller gives name, service, insurance answer, date, or time, do not ask for that same detail again.",
-    "For appointment booking, collect first and last name, visit type, requested day, and requested time. Then call the book_appointment tool. Do not say the front desk will confirm if the tool can book it.",
+    `Current practice time is ${now} Mountain Time. Scenario: ${scenario}. Voice agent: ${roleName}. Goal: ${agent?.primaryGoal || "Help the caller and route safely."}`,
+    `Allowed backend actions for this agent: ${allowedActions}. Use a tool for every real booking, reschedule request, billing handoff, recall disposition, or staff task.`,
+    "You are on a live phone call for a dental office. Sound warm, natural, and patient. Do not sound like a form, IVR, script, dashboard, or demo.",
+    "Keep state inside the call: once the caller gives name, service, insurance answer, date, time, phone, or intent, do not ask for that same detail again.",
+    "When booking, collect first and last name, visit type, requested day, and requested time. Then call book_appointment. If a requested slot is unavailable, apologize and offer a staff follow-up or another nearby option.",
+    "For rescheduling, verify identity and use reschedule_appointment only when a patient match and appointment context are available. Same-day changes require staff follow-up.",
+    "For billing, provide only general billing process help unless identity is verified and PMS context includes balance data. Do not reveal sensitive details to an unverified caller.",
     "If the caller asks for price, quote, diagnosis, prescriptions, emergency medical advice, or guaranteed insurance benefits, be empathetic and route to staff. Do not provide pricing.",
     "Use only the approved local knowledge below for dental process explanations. If the answer is not in the knowledge, offer a staff follow-up.",
     "Speak in short phone-friendly sentences. Ask one question at a time.",
+    `PMS context available to you:\n${JSON.stringify(pmsContext || {}, null, 2)}`,
     `Recent transcript:\n${transcript || "No earlier transcript."}`,
     `Approved local knowledge:\n${knowledge || "No matching approved knowledge was available."}`,
   ].filter(Boolean).join("\n\n");
+}
+
+function firstUtteranceForAgent(agent, scenario) {
+  if (agent?.roleKey === "hygiene_recall") return "Warmly tell the patient you are calling from their dental office because they may be due for hygiene care. Ask if they would like help finding a time. Do not mention AI.";
+  if (agent?.roleKey === "patient_reactivation") return "Warmly say you are checking in from their dental office because it has been a while since their last visit. Ask if they would like help getting back on the schedule. Do not mention AI.";
+  if (agent?.roleKey === "appointment_reminder") return "Warmly say you are calling from the dental office about an appointment reminder. Ask whether they would like to confirm, reschedule, or speak with the team. Do not mention AI.";
+  if (agent?.roleKey === "billing_information") return "Warmly say you are calling from the dental office billing team and can help with general billing questions or route account-specific questions after verification. Do not mention AI.";
+  if (scenario === "inbound_takeover") return "Greet the caller warmly in one sentence, say the front desk is helping another patient, and ask how you can help. Do not mention AI.";
+  return "Greet the caller warmly, explain the dental office is calling, and ask how you can help. Do not mention AI.";
+}
+
+function voiceToolSchemas(agent) {
+  const allowed = new Set(Array.isArray(agent?.allowedActions) ? agent.allowedActions : ["BOOK_APPOINTMENT", "CREATE_TASK"]);
+  const tools = [];
+  if (allowed.has("BOOK_APPOINTMENT")) tools.push(appointmentToolSchema());
+  if (allowed.has("RESCHEDULE_APPOINTMENT")) tools.push(rescheduleToolSchema());
+  if (allowed.has("CREATE_TASK") || allowed.has("STAFF_HANDOFF")) tools.push(followUpTaskToolSchema());
+  if (allowed.has("ANSWER_BILLING_STATUS") || allowed.has("STAGE_BILLING_CALLBACK") || allowed.has("PROVIDE_BILLING_SUMMARY")) tools.push(billingSummaryToolSchema());
+  if (!tools.length) tools.push(followUpTaskToolSchema());
+  return tools;
 }
 
 function appointmentToolSchema() {
@@ -232,8 +267,136 @@ function appointmentToolSchema() {
   };
 }
 
-async function handleRealtimeToolCall({ tenantId, conversationId, callerPhone, toolCall }) {
+function rescheduleToolSchema() {
+  return {
+    type: "function",
+    name: "reschedule_appointment",
+    description: "Request a safe appointment reschedule after the caller gives identity, current appointment context, and preferred new date/time.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        callerName: { type: "string" },
+        callerPhone: { type: "string" },
+        appointmentId: { type: "string" },
+        requestedDate: { type: "string", description: "Requested local date in YYYY-MM-DD." },
+        requestedTime: { type: "string", description: "Requested local time in 24-hour HH:MM." },
+        reason: { type: "string" },
+      },
+      required: ["callerName", "requestedDate", "requestedTime"],
+    },
+  };
+}
+
+function followUpTaskToolSchema() {
+  return {
+    type: "function",
+    name: "create_follow_up_task",
+    description: "Create a staff work task tied to this voice call when a human must review, call back, approve, or complete a request.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        taskType: { type: "string", description: "appointment, billing, insurance, membership, recall, service_recovery, or general." },
+        priority: { type: "string", enum: ["LOW", "NORMAL", "HIGH", "URGENT"] },
+        note: { type: "string" },
+        ownerRole: { type: "string", description: "front_desk, billing_rcm, practice_manager, provider, or marketing." },
+      },
+      required: ["taskType", "priority", "note"],
+    },
+  };
+}
+
+function billingSummaryToolSchema() {
+  return {
+    type: "function",
+    name: "stage_billing_summary",
+    description: "Prepare a billing callback or general billing explanation. Sensitive account details require identity verification.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        callerName: { type: "string" },
+        callerPhone: { type: "string" },
+        verifiedIdentity: { type: "boolean" },
+        request: { type: "string" },
+      },
+      required: ["request", "verifiedIdentity"],
+    },
+  };
+}
+
+async function handleRealtimeToolCall({ tenantId, conversationId, agent, agentRunId, callerPhone, toolCall }) {
   const args = parseJson(toolCall.arguments) || {};
+  if (toolCall.name === "create_follow_up_task") {
+    const task = await createTask(tenantId, conversationId, String(args.note || "Voice AI requested staff follow-up."), {
+      taskType: String(args.taskType || "general"),
+      priority: String(args.priority || "HIGH"),
+      ownerRole: String(args.ownerRole || "front_desk"),
+    });
+    await logVoiceAgentAction({ tenantId, agent, agentRunId, conversationId, actionType: "CREATE_TASK", status: "COMPLETED", input: args, result: task });
+    return {
+      ok: true,
+      taskId: task.id,
+      nextInstructions: "Tell the caller warmly that you created a note for the right team and ask if there is anything else they want included.",
+    };
+  }
+  if (toolCall.name === "stage_billing_summary") {
+    if (!args.verifiedIdentity) {
+      const task = await createTask(tenantId, conversationId, `Billing request requires identity verification: ${String(args.request || "").slice(0, 500)}`, {
+        taskType: "billing",
+        priority: "HIGH",
+        ownerRole: "billing_rcm",
+      });
+      await logVoiceAgentAction({ tenantId, agent, agentRunId, conversationId, actionType: "STAGE_BILLING_CALLBACK", status: "STAFF_REQUIRED", input: args, result: task, blockedReason: "IDENTITY_VERIFICATION_REQUIRED" });
+      return {
+        ok: false,
+        reason: "identity_verification_required",
+        taskId: task.id,
+        nextInstructions: "Explain kindly that for privacy the billing team must verify identity before discussing account details, and that you have asked them to follow up.",
+      };
+    }
+    await logVoiceAgentAction({ tenantId, agent, agentRunId, conversationId, actionType: "ANSWER_BILLING_STATUS", status: "COMPLETED", input: args, result: { verifiedIdentity: true } });
+    return {
+      ok: true,
+      nextInstructions: "Give a general billing process answer only. Do not quote diagnosis or treatment price. Offer a billing team follow-up for detailed questions.",
+    };
+  }
+  if (toolCall.name === "reschedule_appointment") {
+    const requestedDate = String(args.requestedDate || "").slice(0, 10);
+    const requestedTime = String(args.requestedTime || "").slice(0, 5);
+    const sameDay = requestedDate === new Date().toISOString().slice(0, 10);
+    if (sameDay) {
+      const task = await createTask(tenantId, conversationId, `Same-day reschedule request for ${args.callerName || "caller"} to ${requestedDate} ${requestedTime}. Staff approval required.`, {
+        taskType: "appointment_reschedule",
+        priority: "URGENT",
+        ownerRole: "front_desk",
+      });
+      await logVoiceAgentAction({ tenantId, agent, agentRunId, conversationId, actionType: "RESCHEDULE_APPOINTMENT", status: "STAFF_REQUIRED", input: args, result: task, blockedReason: "SAME_DAY_RESCHEDULE_REQUIRES_STAFF" });
+      return {
+        ok: false,
+        reason: "same_day_staff_required",
+        taskId: task.id,
+        nextInstructions: "Tell the caller same-day changes need the front desk to verify the schedule, and that you marked it urgent.",
+      };
+    }
+    const task = await createTask(tenantId, conversationId, `Reschedule request for ${args.callerName || "caller"} to ${requestedDate} ${requestedTime}. Verify patient and move appointment in PMS.`, {
+      taskType: "appointment_reschedule",
+      priority: "HIGH",
+      ownerRole: "front_desk",
+    });
+    await logVoiceAgentAction({ tenantId, agent, agentRunId, conversationId, actionType: "RESCHEDULE_APPOINTMENT", status: "STAFF_REQUIRED", input: args, result: task, blockedReason: "RESCHEDULE_REQUIRES_ACCOUNT_VERIFICATION" });
+    return {
+      ok: false,
+      reason: "verification_required",
+      taskId: task.id,
+      nextInstructions: "Tell the caller you started the reschedule request and the team will verify the account before changing the appointment.",
+    };
+  }
+  if (toolCall.name !== "book_appointment") {
+    await logVoiceAgentAction({ tenantId, agent, agentRunId, conversationId, actionType: String(toolCall.name || "UNKNOWN_TOOL").toUpperCase(), status: "BLOCKED", input: args, result: {}, blockedReason: "UNSUPPORTED_TOOL" });
+    return { ok: false, reason: "unsupported_tool", nextInstructions: "Apologize briefly and offer to have a staff member follow up." };
+  }
   const name = splitName(args.callerName || "Voice Patient");
   const service = String(args.service || "Dental visit").slice(0, 120);
   const requestedDate = String(args.requestedDate || "").slice(0, 10);
@@ -241,13 +404,19 @@ async function handleRealtimeToolCall({ tenantId, conversationId, callerPhone, t
   const phone = normalizePhoneNumber(args.callerPhone || callerPhone || "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate) || !/^\d{2}:\d{2}$/.test(requestedTime)) {
     await logAssistEvent(tenantId, conversationId, "REALTIME_BOOKING_NEEDS_CLARIFICATION", "WARN", "Realtime booking tool was missing a valid date/time.", { args });
+    await logVoiceAgentAction({ tenantId, agent, agentRunId, conversationId, actionType: "BOOK_APPOINTMENT", status: "BLOCKED", input: args, result: {}, blockedReason: "MISSING_DATE_OR_TIME" });
     return { ok: false, reason: "missing_date_or_time" };
   }
   const start = `${requestedDate} ${requestedTime}:00`;
   const end = addMinutes(start, defaultDuration(service));
   const slot = await findSlot(tenantId, start, end, service);
   if (!slot) {
-    await createTask(tenantId, conversationId, `Caller requested ${service} on ${requestedDate} at ${requestedTime}, but no available PMS slot was found.`);
+    const task = await createTask(tenantId, conversationId, `Caller requested ${service} on ${requestedDate} at ${requestedTime}, but no available PMS slot was found.`, {
+      taskType: "appointment",
+      priority: "HIGH",
+      ownerRole: "front_desk",
+    });
+    await logVoiceAgentAction({ tenantId, agent, agentRunId, conversationId, actionType: "BOOK_APPOINTMENT", status: "STAFF_REQUIRED", input: args, result: task, blockedReason: "NO_AVAILABLE_SLOT" });
     return { ok: false, reason: "no_slot", requestedDate, requestedTime, service };
   }
   const patient = await ensurePatient(tenantId, { ...name, phone });
@@ -273,6 +442,31 @@ async function handleRealtimeToolCall({ tenantId, conversationId, callerPhone, t
   );
   await logAssistEvent(tenantId, conversationId, "REALTIME_APPOINTMENT_BOOKED", "INFO", `Booked ${service} for ${patient.firstName} ${patient.lastName}.`, { appointmentId, patientId: patient.id, slot });
   await stageSmsConfirmation({ tenantId, conversationId, patientId: patient.id, appointmentId, phone: phone || patient.phone, service, startsAt: start });
+  await logVoiceAgentAction({
+    tenantId,
+    agent,
+    agentRunId,
+    conversationId,
+    patientId: patient.id,
+    appointmentId,
+    actionType: "BOOK_APPOINTMENT",
+    status: "COMPLETED",
+    input: args,
+    result: { appointmentId, patientId: patient.id, slot, confirmation: "SMS_STAGED" },
+  });
+  if (agentRunId) {
+    await getPool().query(
+      `update "PhoneVoiceAgentRun"
+       set "patientId" = $3,
+         "appointmentId" = $4,
+         "status" = 'COMPLETED',
+         "actionSummary" = $5::jsonb,
+         "completedAt" = current_timestamp,
+         "updatedAt" = current_timestamp
+       where "tenantId" = $1 and "id" = $2`,
+      [tenantId, agentRunId, patient.id, appointmentId, JSON.stringify({ booked: true, service, requestedDate, requestedTime })],
+    );
+  }
   return { ok: true, appointmentId, patientId: patient.id, service, requestedDate, requestedTime, providerName: slot.providerName, operatoryName: slot.operatoryName };
 }
 
@@ -347,6 +541,88 @@ async function getReceptionPolicy(tenantId) {
   return result.rows[0] || { voiceSettings: {} };
 }
 
+async function getVoiceAgent(tenantId, input = {}) {
+  const scenario = normalizeScenario(input.scenario);
+  const result = await getPool().query(
+    `select *
+     from "PhoneVoiceAgent"
+     where "tenantId" = $1
+       and "status" = 'ACTIVE'
+       and (
+         ($2::text is not null and "id" = $2)
+         or ($2::text is null and "scenario" = $3)
+       )
+     order by case when "id" = $2 then 0 else 1 end, "updatedAt" desc
+     limit 1`,
+    [tenantId, input.agentId || null, scenario],
+  ).catch(() => ({ rows: [] }));
+  return result.rows[0] || null;
+}
+
+async function getVoicePmsContext(tenantId, conversationId, callerPhone) {
+  const digits = onlyDigits(callerPhone || "");
+  const conversation = await getPool().query(
+    `select c."patientId", c."appointmentId", c."callerNumber"
+     from "PhoneConversation" c
+     where c."tenantId" = $1 and c."id" = $2
+     limit 1`,
+    [tenantId, conversationId],
+  ).catch(() => ({ rows: [] }));
+  const patientId = conversation.rows[0]?.patientId || null;
+  const phoneDigits = digits || onlyDigits(conversation.rows[0]?.callerNumber || "");
+  const patient = await getPool().query(
+    `select "id", "firstName", "lastName", "phone", "email", "status", "patientNote"
+     from "PmsPatient"
+     where "tenantId" = $1 and (
+       ($2::text is not null and "id" = $2)
+       or ($3 <> '' and right(regexp_replace(coalesce("phone", ''), '[^0-9]', '', 'g'), 10) = right($3, 10))
+     )
+     order by "updatedAt" desc
+     limit 1`,
+    [tenantId, patientId, phoneDigits],
+  ).catch(() => ({ rows: [] }));
+  const row = patient.rows[0];
+  if (!row) return { matchedPatient: false, callerPhone: phoneDigits ? `***${phoneDigits.slice(-4)}` : null };
+  const [appointments, recalls, balances] = await Promise.all([
+    getPool().query(
+      `select "id", "startsAt", "endsAt", "status", "appointmentType", "readinessStatus"
+       from "PmsAppointment"
+       where "tenantId" = $1 and "patientId" = $2
+       order by "startsAt" desc
+       limit 5`,
+      [tenantId, row.id],
+    ).catch(() => ({ rows: [] })),
+    getPool().query(
+      `select "id", "recallType", "status", "dueDate", "lastCompletedAt"
+       from "PmsRecall"
+       where "tenantId" = $1 and "patientId" = $2
+       order by "dueDate" desc
+       limit 3`,
+      [tenantId, row.id],
+    ).catch(() => ({ rows: [] })),
+    getPool().query(
+      `select coalesce(sum("balanceCents"), 0) / 100.0 as balance
+       from "PmsLedgerEntry"
+       where "tenantId" = $1 and "patientId" = $2`,
+      [tenantId, row.id],
+    ).catch(() => ({ rows: [] })),
+  ]);
+  return {
+    matchedPatient: true,
+    patient: {
+      id: row.id,
+      name: `${row.firstName || ""} ${row.lastName || ""}`.trim(),
+      phone: row.phone ? `***${onlyDigits(row.phone).slice(-4)}` : null,
+      email: row.email ? maskEmail(row.email) : null,
+      status: row.status,
+    },
+    upcomingAppointments: appointments.rows.filter((appointment) => new Date(appointment.startsAt) >= new Date()).slice(0, 3),
+    recentAppointments: appointments.rows.slice(0, 3),
+    recalls: recalls.rows,
+    balanceSummary: { approximateBalance: Number(balances.rows[0]?.balance || 0) },
+  };
+}
+
 async function getOpenAiKey(tenantId) {
   if (process.env.OPENAI_API_KEY && process.env.OPENAI_BAA_ENABLED === "true" && process.env.OPENAI_PHI_ALLOWED === "true") return process.env.OPENAI_API_KEY;
   const result = await getPool().query(
@@ -407,10 +683,24 @@ async function markRealtimeStarted(tenantId, conversationId, metadata) {
     `update "PhoneConversation"
      set "followUpStatus" = 'OPENAI_REALTIME_ACTIVE',
        "outcome" = 'OPENAI_REALTIME_ACTIVE',
+       "voiceAgentId" = coalesce($3, "voiceAgentId"),
+       "voiceAgentRunId" = coalesce($4, "voiceAgentRunId"),
        "updatedAt" = current_timestamp
      where "tenantId" = $1 and "id" = $2`,
-    [tenantId, conversationId],
+    [tenantId, conversationId, metadata.agentId || null, metadata.agentRunId || null],
   );
+  if (metadata.agentRunId) {
+    await getPool().query(
+      `update "PhoneVoiceAgentRun"
+       set "status" = 'IN_PROGRESS',
+         "providerCallId" = coalesce($3, "providerCallId"),
+         "providerStatus" = 'STREAM_CONNECTED',
+         "startedAt" = coalesce("startedAt", current_timestamp),
+         "updatedAt" = current_timestamp
+       where "tenantId" = $1 and "id" = $2`,
+      [tenantId, metadata.agentRunId, metadata.callSid || null],
+    ).catch((error) => console.error("Realtime run update failed", error));
+  }
   await logAssistEvent(tenantId, conversationId, "OPENAI_REALTIME_STARTED", "INFO", "OpenAI Realtime voice bridge connected.", metadata);
 }
 
@@ -433,13 +723,45 @@ async function logAssistEvent(tenantId, conversationId, type, severity, body, me
   ).catch((error) => console.error("Realtime assist log failed", error));
 }
 
-async function createTask(tenantId, conversationId, nextAction) {
-  await getPool().query(
+async function createTask(tenantId, conversationId, nextAction, options = {}) {
+  const result = await getPool().query(
     `insert into "PhoneCallTask"
        ("id", "tenantId", "conversationId", "taskType", "priority", "status", "dueAt", "ownerRoleKey", "nextAction", "sourceModule", "updatedAt")
-     values ($1, $2, $3, 'AI_VOICE_FOLLOW_UP', 'HIGH', 'OPEN', current_timestamp + interval '15 minutes', 'front_desk', $4, 'VOICE_AI', current_timestamp)`,
-    [newId("ptask"), tenantId, conversationId, nextAction],
+     values ($1, $2, $3, $4, $5, 'OPEN', current_timestamp + interval '15 minutes', $6, $7, 'VOICE_AI', current_timestamp)
+     returning "id", "taskType", "priority", "ownerRoleKey", "nextAction"`,
+    [
+      newId("ptask"),
+      tenantId,
+      conversationId,
+      stringValue(options.taskType, "AI_VOICE_FOLLOW_UP").slice(0, 80),
+      normalizePriority(options.priority),
+      stringValue(options.ownerRole, "front_desk").slice(0, 80),
+      nextAction,
+    ],
   );
+  return result.rows[0];
+}
+
+async function logVoiceAgentAction(input) {
+  await getPool().query(
+    `insert into "PhoneVoiceAgentAction"
+       ("id", "tenantId", "agentId", "agentRunId", "conversationId", "patientId", "appointmentId", "actionType", "status", "inputJson", "resultJson", "blockedReason", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, current_timestamp)`,
+    [
+      newId("vaiact"),
+      input.tenantId,
+      input.agent?.id || "agent_inbound_receptionist",
+      input.agentRunId || null,
+      input.conversationId || null,
+      input.patientId || null,
+      input.appointmentId || null,
+      input.actionType,
+      input.status,
+      JSON.stringify(input.input || {}),
+      JSON.stringify(input.result || {}),
+      input.blockedReason || null,
+    ],
+  ).catch((error) => console.error("Voice agent action log failed", error));
 }
 
 function extractToolCall(event) {
@@ -462,6 +784,13 @@ function sanitizeVoiceSettings(value) {
     systemPrompt: stringValue(input.systemPrompt, "You are the dental practice phone receptionist. Be warm, concise, and remember details across the call."),
     voicePrompt: stringValue(input.voicePrompt, "Book appointments directly when the caller gives name, visit type, date, and time. Do not ask twice for information already provided."),
   };
+}
+
+function mergeVoiceSettings(base, override) {
+  return sanitizeVoiceSettings({
+    ...(base && typeof base === "object" ? base : {}),
+    ...(override && typeof override === "object" ? override : {}),
+  });
 }
 
 function normalizeRealtimeVoice(value) {
@@ -509,8 +838,19 @@ function onlyDigits(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function maskEmail(value) {
+  const [local, domain] = String(value || "").split("@");
+  if (!local || !domain) return "";
+  return `${local.slice(0, 1)}***@${domain}`;
+}
+
 function stringValue(value, fallback) {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function normalizePriority(value) {
+  const priority = String(value || "").toUpperCase();
+  return ["LOW", "NORMAL", "HIGH", "URGENT"].includes(priority) ? priority : "HIGH";
 }
 
 function boundedNumber(value, fallback, min, max) {

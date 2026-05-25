@@ -210,6 +210,7 @@ export default async function PatientRecordPage({ params, searchParams }: { para
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
             <Link href={`/app/pms/chart/${patient.id}?role=${role.key}`} className="rounded-2xl bg-neutral-950 px-4 py-3 text-center text-sm font-semibold text-white">Open chart</Link>
             <Link href={`/app/pms/perio/${patient.id}?role=${role.key}`} className="rounded-2xl border border-neutral-300 px-4 py-3 text-center text-sm font-semibold text-neutral-800">Open perio</Link>
+            <Link href={`/app/pms/patients/${patient.id}/timeline?role=${role.key}`} className="rounded-2xl border border-neutral-300 px-4 py-3 text-center text-sm font-semibold text-neutral-800">Open timeline</Link>
           </div>
         </PmsCard>
 

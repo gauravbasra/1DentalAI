@@ -1071,7 +1071,7 @@ export async function updateRevenueFindingStatus(id: string, status: string, act
 }
 
 export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
-  const [conversations, messages, routes, tasks, analytics, numbers, extensions, devices, providers, activeCalls, controls, voicemails, screenPops, transcriptEvents, aiAssistEvents, aiReceptionPolicies, channelSettings, knowledgeSources, webChats, webChatMessages, leadForms, formPackets, schedulingRules, videoSessions, metrics, patients] = await Promise.all([
+  const [conversations, messages, routes, tasks, analytics, numbers, extensions, devices, providers, activeCalls, controls, voicemails, screenPops, transcriptEvents, aiAssistEvents, aiReceptionPolicies, voiceAgents, voiceAgentRuns, voiceAgentActions, channelSettings, knowledgeSources, webChats, webChatMessages, leadForms, formPackets, schedulingRules, videoSessions, metrics, patients] = await Promise.all([
     query(
       `select c.*, p."firstName", p."lastName", p."chartNumber", p."phone", p."email",
         a."appointmentType", a."startsAt",
@@ -1314,6 +1314,25 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
       [tenantId],
     ),
     query(`select * from "PhoneAiReceptionPolicy" where "tenantId" = $1 order by "locationId" nulls first, "name"`, [tenantId]),
+    query(`select * from "PhoneVoiceAgent" where "tenantId" = $1 order by case "status" when 'ACTIVE' then 0 else 1 end, "roleKey", "name"`, [tenantId]),
+    query(
+      `select r.*, a."name" as "agentName", a."roleKey"
+       from "PhoneVoiceAgentRun" r
+       left join "PhoneVoiceAgent" a on a."id" = r."agentId"
+       where r."tenantId" = $1
+       order by r."createdAt" desc
+       limit 40`,
+      [tenantId],
+    ),
+    query(
+      `select va.*, a."name" as "agentName"
+       from "PhoneVoiceAgentAction" va
+       left join "PhoneVoiceAgent" a on a."id" = va."agentId"
+       where va."tenantId" = $1
+       order by va."createdAt" desc
+       limit 40`,
+      [tenantId],
+    ),
     query(`select * from "PatientEngagementChannelSetting" where "tenantId" = $1 order by "channel"`, [tenantId]),
     query(`select * from "PatientEngagementKnowledgeSource" where "tenantId" = $1 order by case "status" when 'NEEDS_REVIEW' then 0 else 1 end, "sourceModule", "title"`, [tenantId]),
     query(
@@ -1424,6 +1443,9 @@ export async function getPhoneOperatingCenter(tenantId = defaultTenantId) {
     transcriptEvents: transcriptEvents.rows,
     aiAssistEvents: aiAssistEvents.rows,
     aiReceptionPolicies: aiReceptionPolicies.rows,
+    voiceAgents: voiceAgents.rows,
+    voiceAgentRuns: voiceAgentRuns.rows,
+    voiceAgentActions: voiceAgentActions.rows,
     channelSettings: channelSettings.rows,
     knowledgeSources: knowledgeSources.rows,
     webChats: webChats.rows,
@@ -2139,6 +2161,7 @@ export async function createSoftphoneOutboundDial(input: {
   fromNumberId?: string;
   requestedByRole?: string;
   mode?: "OPERATOR_BRIDGE" | "VOICE_AI";
+  voiceAgentId?: string;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
   const targetNumber = normalizePhoneNumber(input.targetNumber);
@@ -2148,9 +2171,11 @@ export async function createSoftphoneOutboundDial(input: {
   const operatorNumber = input.operatorNumber ? normalizePhoneNumber(input.operatorNumber) : null;
   const fromNumber = input.fromNumber ? normalizePhoneNumber(input.fromNumber) : await getActiveVoiceFromNumber(tenantId, input.fromNumberId);
   const mode = input.mode ?? "OPERATOR_BRIDGE";
+  const voiceAgentId = input.voiceAgentId || null;
   const id = newId("pctrl");
   const conversationId = newId("phone");
   const activeCallId = newId("pcall");
+  const voiceAgentRunId = mode === "VOICE_AI" ? newId("vairun") : null;
   const patientMatch = await findPatientByPhone(tenantId, targetNumber);
   const credentials = await getTwilioCredentials(tenantId);
   const missing = [
@@ -2159,15 +2184,20 @@ export async function createSoftphoneOutboundDial(input: {
     !targetNumber ? "target phone number" : null,
     mode === "OPERATOR_BRIDGE" && !operatorNumber ? "operator callback number" : null,
   ].filter(Boolean) as string[];
+  let providerStatus = missing.length ? "BLOCKED_CONNECTOR_REQUIRED" : "READY_FOR_PROVIDER";
+  let blockedReason = missing.length ? `Softphone dial is blocked until ${missing.join(", ")} are configured.` : null;
+  let resultSummary = missing.length ? "Outbound dial recorded but not sent to Twilio." : "Outbound dial ready for Twilio.";
 
   await query(
     `insert into "PhoneConversation"
-       ("id", "tenantId", "patientId", "direction", "channel", "status", "callerNumber", "practiceNumber", "callerName", "aiIntent", "aiSentiment", "transcriptSummary", "followUpStatus", "outcome", "updatedAt")
-     values ($1, $2, $3, 'OUTBOUND', 'VOICE', 'OPEN', $4, $5, $6, $7, 'NEEDS_REVIEW', $8, 'NEEDS_REVIEW', 'SOFTPHONE_DIAL_CREATED', current_timestamp)`,
+       ("id", "tenantId", "patientId", "voiceAgentId", "voiceAgentRunId", "direction", "channel", "status", "callerNumber", "practiceNumber", "callerName", "aiIntent", "aiSentiment", "transcriptSummary", "followUpStatus", "outcome", "updatedAt")
+     values ($1, $2, $3, $4, $5, 'OUTBOUND', 'VOICE', 'OPEN', $6, $7, $8, $9, 'NEEDS_REVIEW', $10, 'NEEDS_REVIEW', 'SOFTPHONE_DIAL_CREATED', current_timestamp)`,
     [
       conversationId,
       tenantId,
       patientMatch?.id ?? null,
+      voiceAgentId,
+      voiceAgentRunId,
       targetNumber || null,
       fromNumber || null,
       patientMatch ? `${patientMatch.firstName ?? ""} ${patientMatch.lastName ?? ""}`.trim() : targetNumber,
@@ -2180,14 +2210,31 @@ export async function createSoftphoneOutboundDial(input: {
 
   await query(
     `insert into "PhoneActiveCall"
-       ("id", "tenantId", "conversationId", "phoneNumberId", "fromNumber", "toNumber", "direction", "callState", "callControlMode", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, 'OUTBOUND', $7, $8, current_timestamp)`,
-    [activeCallId, tenantId, conversationId, input.fromNumberId || null, fromNumber || "unknown", targetNumber || "unknown", missing.length ? "BLOCKED" : "QUEUED", mode === "VOICE_AI" ? "TWILIO_VOICE_AI" : "TWILIO_OPERATOR_BRIDGE"],
+       ("id", "tenantId", "conversationId", "voiceAgentId", "voiceAgentRunId", "phoneNumberId", "fromNumber", "toNumber", "direction", "callState", "callControlMode", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, 'OUTBOUND', $9, $10, current_timestamp)`,
+    [activeCallId, tenantId, conversationId, voiceAgentId, voiceAgentRunId, input.fromNumberId || null, fromNumber || "unknown", targetNumber || "unknown", missing.length ? "BLOCKED" : "QUEUED", mode === "VOICE_AI" ? "TWILIO_VOICE_AI" : "TWILIO_OPERATOR_BRIDGE"],
   );
+  if (mode === "VOICE_AI" && voiceAgentRunId) {
+    await query(
+      `insert into "PhoneVoiceAgentRun"
+       ("id", "tenantId", "agentId", "conversationId", "patientId", "scenario", "runType", "status", "targetNumber", "goal", "contextSnapshot", "providerStatus", "blockedReason", "createdByRole", "startedAt", "updatedAt")
+       values ($1, $2, coalesce($3, 'agent_inbound_receptionist'), $4, $5, 'event_greeting', 'OUTBOUND_CALL', $6, $7, 'Outbound patient voice agent call from softphone console.', $8::jsonb, $9, $10, $11, current_timestamp, current_timestamp)`,
+      [
+        voiceAgentRunId,
+        tenantId,
+        voiceAgentId,
+        conversationId,
+        patientMatch?.id ?? null,
+        missing.length ? "BLOCKED" : "CALL_REQUESTED",
+        targetNumber,
+        JSON.stringify({ patientMatch, mode, fromNumber }),
+        providerStatus,
+        blockedReason,
+        input.requestedByRole || "front_desk",
+      ],
+    );
+  }
 
-  let providerStatus = missing.length ? "BLOCKED_CONNECTOR_REQUIRED" : "READY_FOR_PROVIDER";
-  let blockedReason = missing.length ? `Softphone dial is blocked until ${missing.join(", ")} are configured.` : null;
-  let resultSummary = missing.length ? "Outbound dial recorded but not sent to Twilio." : "Outbound dial ready for Twilio.";
   let providerRequest: Record<string, unknown> | null = null;
   let providerResponse: Record<string, unknown> | null = null;
   let providerCallId: string | null = null;
@@ -2198,7 +2245,7 @@ export async function createSoftphoneOutboundDial(input: {
     const statusCallback = `${origin}/api/twilio/voice/status`;
     const recordingUrl = `${origin}/api/twilio/voice/recording`;
     const transcriptionUrl = `${origin}/api/twilio/voice/transcription`;
-    const aiUrl = `${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(conversationId)}&scenario=event_greeting&reason=softphone_voice_ai`;
+    const aiUrl = `${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(conversationId)}&scenario=event_greeting&reason=softphone_voice_ai${voiceAgentId ? `&agentId=${encodeURIComponent(voiceAgentId)}` : ""}${voiceAgentRunId ? `&agentRunId=${encodeURIComponent(voiceAgentRunId)}` : ""}`;
     const twiml = mode === "VOICE_AI"
       ? `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${twilioXmlEscape(aiUrl)}</Redirect></Response>`
       : `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">1DentalAI is connecting your outbound call now.</Say><Dial callerId="${twilioXmlEscape(fromNumber)}" record="record-from-answer-dual" recordingStatusCallback="${twilioXmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST"><Number statusCallback="${twilioXmlEscape(statusCallback)}" statusCallbackMethod="POST">${twilioXmlEscape(targetNumber)}</Number></Dial><Say voice="alice">The call has ended.</Say><Record maxLength="120" playBeep="false" transcribe="true" transcribeCallback="${twilioXmlEscape(transcriptionUrl)}" /></Response>`;
@@ -2233,6 +2280,18 @@ export async function createSoftphoneOutboundDial(input: {
        where "tenantId" = $1 and "id" = $2`,
       [tenantId, activeCallId, providerCallId, result.ok ? "QUEUED" : "PROVIDER_ERROR"],
     );
+    if (voiceAgentRunId) {
+      await query(
+        `update "PhoneVoiceAgentRun"
+         set "providerCallId" = $3,
+           "providerStatus" = $4,
+           "status" = case when $5 then 'IN_PROGRESS' else 'FAILED' end,
+           "blockedReason" = $6,
+           "updatedAt" = current_timestamp
+         where "tenantId" = $1 and "id" = $2`,
+        [tenantId, voiceAgentRunId, providerCallId, providerStatus, Boolean(result.ok), blockedReason],
+      );
+    }
   }
 
   await query(
@@ -2247,6 +2306,8 @@ export async function createSoftphoneOutboundDial(input: {
     operatorNumber,
     fromNumber,
     mode,
+    voiceAgentId,
+    voiceAgentRunId,
     providerStatus,
     blockedReason,
     providerRequest,

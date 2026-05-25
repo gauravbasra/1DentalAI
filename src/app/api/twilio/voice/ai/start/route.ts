@@ -9,6 +9,8 @@ export async function POST(request: Request) {
   try {
     return twiml(await buildVoiceAiStartTwiML({
       conversationId: url.searchParams.get("conversationId"),
+      agentId: url.searchParams.get("agentId"),
+      agentRunId: url.searchParams.get("agentRunId"),
       scenario: cleanScenario(url.searchParams.get("scenario")),
       reason: url.searchParams.get("reason"),
       payload,
@@ -24,6 +26,8 @@ export async function GET(request: Request) {
   try {
     return twiml(await buildVoiceAiStartTwiML({
       conversationId: url.searchParams.get("conversationId"),
+      agentId: url.searchParams.get("agentId"),
+      agentRunId: url.searchParams.get("agentRunId"),
       scenario: cleanScenario(url.searchParams.get("scenario")),
       reason: url.searchParams.get("reason"),
     }));

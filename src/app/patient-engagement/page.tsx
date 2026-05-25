@@ -15,7 +15,7 @@ import {
   updatePhoneConversationStatus,
   updatePhoneOutboundMessageApproval,
 } from "@/lib/operating-system-repository";
-import { updateVoiceAiReceptionPolicySettings } from "@/lib/voice-ai-repository";
+import { deployVoiceAgentCampaign, updateVoiceAgentSettings, updateVoiceAiReceptionPolicySettings } from "@/lib/voice-ai-repository";
 import { DraggableCallPop } from "./draggable-call-pop";
 import { ThemeModeControl } from "./theme-mode-control";
 
@@ -101,6 +101,7 @@ async function softphoneDialAction(formData: FormData) {
     operatorNumber: String(formData.get("operatorNumber") ?? "") || undefined,
     fromNumberId: String(formData.get("fromNumberId") ?? "") || undefined,
     mode: String(formData.get("mode") ?? "OPERATOR_BRIDGE") === "VOICE_AI" ? "VOICE_AI" : "OPERATOR_BRIDGE",
+    voiceAgentId: String(formData.get("voiceAgentId") ?? "") || undefined,
     requestedByRole: "front_desk",
   });
   revalidatePath("/patient-engagement");
@@ -159,6 +160,42 @@ async function updateVoiceAiSettingsAction(formData: FormData) {
   revalidatePath("/patient-engagement");
 }
 
+async function updateVoiceAgentAction(formData: FormData) {
+  "use server";
+  await updateVoiceAgentSettings({
+    agentId: String(formData.get("agentId") ?? ""),
+    actorRole: "practice_manager",
+    status: String(formData.get("status") ?? "ACTIVE"),
+    name: String(formData.get("name") ?? ""),
+    primaryGoal: String(formData.get("primaryGoal") ?? ""),
+    allowedActions: String(formData.get("allowedActions") ?? "").split(",").map((item) => item.trim()).filter(Boolean),
+    systemPrompt: String(formData.get("systemPrompt") ?? ""),
+    voicePrompt: String(formData.get("voicePrompt") ?? ""),
+    pricingPolicy: String(formData.get("pricingPolicy") ?? "NO_PUBLIC_PRICING_HUMAN_ONLY"),
+    bookingPolicy: String(formData.get("bookingPolicy") ?? "DIRECT_BOOKING_WITH_SCHEDULING_GATES"),
+    billingPolicy: String(formData.get("billingPolicy") ?? "VERIFY_IDENTITY_BEFORE_BILLING_DETAIL"),
+    voiceSettings: {
+      realtimeModel: String(formData.get("realtimeModel") ?? "gpt-realtime-mini"),
+      transcriptionModel: String(formData.get("transcriptionModel") ?? "gpt-4o-transcribe"),
+      voice: String(formData.get("voice") ?? "alloy"),
+      temperature: Number(formData.get("temperature") ?? 0.35),
+      speed: Number(formData.get("speed") ?? 1),
+    },
+  });
+  revalidatePath("/patient-engagement");
+}
+
+async function deployVoiceAgentAction(formData: FormData) {
+  "use server";
+  await deployVoiceAgentCampaign({
+    agentId: String(formData.get("agentId") ?? ""),
+    mode: formData.get("mode") === "CALL_NOW" ? "CALL_NOW" : "QUEUE_ONLY",
+    limit: Number(formData.get("limit") ?? 10),
+    actorRole: "practice_manager",
+  });
+  revalidatePath("/patient-engagement");
+}
+
 export default async function PatientEngagementHome({
   searchParams,
 }: {
@@ -207,6 +244,9 @@ export default async function PatientEngagementHome({
   const activeCalls = center.activeCalls as Record<string, unknown>[];
   const controls = center.controls as Record<string, unknown>[];
   const aiReceptionPolicies = center.aiReceptionPolicies as Record<string, unknown>[];
+  const voiceAgents = center.voiceAgents as Record<string, unknown>[];
+  const voiceAgentRuns = center.voiceAgentRuns as Record<string, unknown>[];
+  const voiceAgentActions = center.voiceAgentActions as Record<string, unknown>[];
   const channelSettings = center.channelSettings as Record<string, unknown>[];
   const knowledgeSources = center.knowledgeSources as Record<string, unknown>[];
   const webChats = center.webChats as Record<string, unknown>[];
@@ -233,7 +273,7 @@ export default async function PatientEngagementHome({
               <Link href="/logout" className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Sign out</Link>
             </header>
             <div className="min-h-0 flex-1 overflow-hidden p-3">
-              <PhonePanel conversation={selectedConversation} patient={patient} metrics={metrics} activeCalls={activeCalls} controls={controls} numbers={numbers} extensions={extensions} providers={providers} routes={routes} videoSessions={videoSessions} />
+              <PhonePanel conversation={selectedConversation} patient={patient} metrics={metrics} activeCalls={activeCalls} controls={controls} numbers={numbers} extensions={extensions} providers={providers} routes={routes} videoSessions={videoSessions} voiceAgents={voiceAgents} voiceAgentRuns={voiceAgentRuns} />
             </div>
           </section>
         </div>
@@ -338,6 +378,9 @@ export default async function PatientEngagementHome({
         activeCalls={activeCalls}
         controls={controls}
         aiReceptionPolicies={aiReceptionPolicies}
+        voiceAgents={voiceAgents}
+        voiceAgentRuns={voiceAgentRuns}
+        voiceAgentActions={voiceAgentActions}
         channelSettings={channelSettings}
         knowledgeSources={knowledgeSources}
         webChats={webChats}
@@ -666,6 +709,9 @@ function FlowOverlay({
   activeCalls,
   controls,
   aiReceptionPolicies,
+  voiceAgents,
+  voiceAgentRuns,
+  voiceAgentActions,
   channelSettings,
   knowledgeSources,
   webChats,
@@ -699,6 +745,9 @@ function FlowOverlay({
   activeCalls: Record<string, unknown>[];
   controls: Record<string, unknown>[];
   aiReceptionPolicies: Record<string, unknown>[];
+  voiceAgents: Record<string, unknown>[];
+  voiceAgentRuns: Record<string, unknown>[];
+  voiceAgentActions: Record<string, unknown>[];
   channelSettings: Record<string, unknown>[];
   knowledgeSources: Record<string, unknown>[];
   webChats: Record<string, unknown>[];
@@ -750,7 +799,7 @@ function FlowOverlay({
           {panel === "payment" ? <PaymentPanel conversation={selectedConversation} patient={patient} /> : null}
           {panel === "insurance" ? <InsurancePanel patient={patient} insurancePlans={insurancePlans} benefits={benefits} /> : null}
           {panel === "forms" ? <FormsPanel conversation={selectedConversation} patient={patient} forms={forms} /> : null}
-          {panel === "phone" ? <PhonePanel conversation={selectedConversation} patient={patient} metrics={metrics} activeCalls={activeCalls} controls={controls} numbers={numbers} extensions={extensions} providers={providers} routes={routes} videoSessions={videoSessions} /> : null}
+          {panel === "phone" ? <PhonePanel conversation={selectedConversation} patient={patient} metrics={metrics} activeCalls={activeCalls} controls={controls} numbers={numbers} extensions={extensions} providers={providers} routes={routes} videoSessions={videoSessions} voiceAgents={voiceAgents} voiceAgentRuns={voiceAgentRuns} /> : null}
           {panel === "sms" ? <SmsPanel conversation={selectedConversation} patient={patient} messages={messages} /> : null}
           {panel === "webchat" ? <WebchatPanel metrics={metrics} webChats={webChats} webChatMessages={webChatMessages} knowledgeSources={knowledgeSources} leadForms={leadForms} schedulingRules={schedulingRules} channelSettings={channelSettings} /> : null}
           {panel === "automessages" ? <AutoMessagesPanel messages={messages} channelSettings={channelSettings} formPackets={formPackets} schedulingRules={schedulingRules} /> : null}
@@ -759,7 +808,7 @@ function FlowOverlay({
           {panel === "reviews" ? <ModuleFlowPanel title="Review recovery" body="Review requests, private surveys, response approval, and service recovery belong in this same patient engagement workspace." rows={["Visit-completed eligibility", "Recovery hold review", "AI response approval", "Public review connector status"]} /> : null}
           {panel === "analytics" ? <AnalyticsPanel metrics={metrics} analytics={analytics} tasks={allTasks} controls={controls} messages={messages} /> : null}
           {panel === "marketing" ? <ModuleFlowPanel title="Marketing handoff" body="Campaigns should start from PMS audiences and write back outcomes to conversations, appointments, production, and collections." rows={["Unscheduled treatment audience", "Recall and reactivation queue", "Landing page conversion", "Attribution to booked production"]} /> : null}
-          {panel === "settings" ? <SettingsPanel providers={providers} numbers={numbers} extensions={extensions} devices={devices} channelSettings={channelSettings} aiReceptionPolicies={aiReceptionPolicies} knowledgeSources={knowledgeSources} /> : null}
+          {panel === "settings" ? <SettingsPanel providers={providers} numbers={numbers} extensions={extensions} devices={devices} channelSettings={channelSettings} aiReceptionPolicies={aiReceptionPolicies} voiceAgents={voiceAgents} voiceAgentRuns={voiceAgentRuns} voiceAgentActions={voiceAgentActions} knowledgeSources={knowledgeSources} /> : null}
           {!["filters", "patient", "call", "payment", "insurance", "forms", "phone", "sms", "webchat", "automessages", "fax", "schedule", "reviews", "analytics", "marketing", "settings"].includes(panel) ? (
             <EmptyBlock title="Tool not found" body="Choose a conversation action from the toolbar." />
           ) : null}
@@ -780,6 +829,8 @@ function PhonePanel({
   providers,
   routes,
   videoSessions,
+  voiceAgents,
+  voiceAgentRuns,
 }: {
   conversation: ConversationRow | null;
   patient: PatientContext;
@@ -791,10 +842,14 @@ function PhonePanel({
   providers: Record<string, unknown>[];
   routes: Record<string, unknown>[];
   videoSessions: Record<string, unknown>[];
+  voiceAgents: Record<string, unknown>[];
+  voiceAgentRuns: Record<string, unknown>[];
 }) {
   const selectedActiveCall = activeCalls.find((call) => String(call.conversationId) === conversation?.id) ?? activeCalls[0];
   const activeNumberOptions = numbers.filter((number) => String(number.status) === "ACTIVE" && String(number.voiceStatus) === "ACTIVE");
   const selectedVideoSession = videoSessions.find((session) => String(session.conversationId) === String(conversation?.id)) ?? videoSessions[0];
+  const selectedVoiceAgentId = String(selectedActiveCall?.voiceAgentId ?? conversation?.voiceAgentId ?? voiceAgents[0]?.id ?? "");
+  const recentAgentRuns = voiceAgentRuns.filter((run) => !conversation?.id || String(run.conversationId) === conversation.id || String(run.agentId) === selectedVoiceAgentId).slice(0, 3);
   const dialKeys = ["1", "2 ABC", "3 DEF", "4 GHI", "5 JKL", "6 MNO", "7 PQRS", "8 TUV", "9 WXYZ", "*", "0 +", "#"];
   const hasConferenceBridge = Boolean(selectedActiveCall?.providerConferenceName || selectedActiveCall?.providerConferenceId);
   const liveControlActions = [
@@ -855,6 +910,11 @@ function PhonePanel({
           </select>
           <input name="targetNumber" required defaultValue={conversation?.callerNumber ?? ""} className="h-10 rounded-xl border border-neutral-200 bg-white px-3 text-center text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Patient number" />
           <input name="operatorNumber" className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-center text-xs outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Your phone for bridge calls" />
+          <select name="voiceAgentId" defaultValue={selectedVoiceAgentId} className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-xs font-semibold text-neutral-800">
+            {voiceAgents.map((agent) => (
+              <option key={String(agent.id)} value={String(agent.id)}>{String(agent.name)} · {clean(agent.scenario)}</option>
+            ))}
+          </select>
           <div className="grid grid-cols-3 gap-2">
             {dialKeys.map((key) => {
               const [digit, letters] = key.split(" ");
@@ -947,11 +1007,11 @@ function PhonePanel({
             </div>
 
             <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              <section className="rounded-2xl border border-neutral-200 bg-white p-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-semibold">Carrier result</h3>
-                  <SmallTag tone={statusTone(selectedActiveCall?.callState)}>{clean(selectedActiveCall?.callState ?? "NO_CALL")}</SmallTag>
-                </div>
+            <section className="rounded-2xl border border-neutral-200 bg-white p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold">Carrier result</h3>
+                <SmallTag tone={statusTone(selectedActiveCall?.callState)}>{clean(selectedActiveCall?.callState ?? "NO_CALL")}</SmallTag>
+              </div>
                 <p className="mt-1 truncate text-xs text-neutral-500">Provider SID: {String(selectedActiveCall?.providerCallId ?? "not assigned")}</p>
                 <div className="mt-3 max-h-32 space-y-2 overflow-y-auto">
                   {controls.slice(0, 3).map((control) => (
@@ -960,6 +1020,13 @@ function PhonePanel({
                       <p className="mt-1 line-clamp-2 text-xs leading-5 text-neutral-500">{String(control.resultSummary ?? "No provider result recorded.")}</p>
                     </div>
                   ))}
+                </div>
+              </section>
+              <section className="rounded-2xl border border-neutral-200 bg-white p-4">
+                <h3 className="text-base font-semibold">Voice agent run</h3>
+                <div className="mt-3 space-y-2">
+                  {recentAgentRuns.map((run) => <RecordLine key={String(run.id)} title={`${String(run.agentName ?? run.roleKey ?? "Voice agent")} · ${clean(run.status)}`} meta={`${clean(run.runType)} · ${String(run.targetNumber ?? "no target")} · ${clean(run.providerStatus)}`} />)}
+                  {!recentAgentRuns.length ? <p className="rounded-xl bg-neutral-50 p-3 text-xs leading-5 text-neutral-500">Choose a voice agent before dialing. Every call creates a run record and action log.</p> : null}
                 </div>
               </section>
               <section className="rounded-2xl border border-neutral-200 bg-white p-4">
@@ -1209,7 +1276,7 @@ function AnalyticsPanel({ metrics, analytics, tasks, controls, messages }: { met
   );
 }
 
-function SettingsPanel({ providers, numbers, extensions, devices, channelSettings, aiReceptionPolicies, knowledgeSources }: { providers: Record<string, unknown>[]; numbers: Record<string, unknown>[]; extensions: Record<string, unknown>[]; devices: Record<string, unknown>[]; channelSettings: Record<string, unknown>[]; aiReceptionPolicies: Record<string, unknown>[]; knowledgeSources: Record<string, unknown>[] }) {
+function SettingsPanel({ providers, numbers, extensions, devices, channelSettings, aiReceptionPolicies, voiceAgents, voiceAgentRuns, voiceAgentActions, knowledgeSources }: { providers: Record<string, unknown>[]; numbers: Record<string, unknown>[]; extensions: Record<string, unknown>[]; devices: Record<string, unknown>[]; channelSettings: Record<string, unknown>[]; aiReceptionPolicies: Record<string, unknown>[]; voiceAgents: Record<string, unknown>[]; voiceAgentRuns: Record<string, unknown>[]; voiceAgentActions: Record<string, unknown>[]; knowledgeSources: Record<string, unknown>[] }) {
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-neutral-200 bg-white p-6">
@@ -1232,8 +1299,135 @@ function SettingsPanel({ providers, numbers, extensions, devices, channelSetting
         {aiReceptionPolicies.map((policy) => <RecordLine key={String(policy.id)} title={`${String(policy.name)} · ring ${String(policy.ringThreshold)}`} meta={`${clean(policy.status)} · ${clean(policy.mode)} · ${clean(policy.pricingPolicy)}`} />)}
         {knowledgeSources.map((source) => <RecordLine key={String(source.id)} title={`${String(source.title)} · ${String(source.sourceModule)}`} meta={`${clean(source.status)} · ${String(source.nextAction ?? "")}`} />)}
       </ActionCard>
+      <VoiceAgentsSettings agents={voiceAgents} runs={voiceAgentRuns} actions={voiceAgentActions} />
       <VoiceAiSettingsForm policy={aiReceptionPolicies[0]} />
     </div>
+  );
+}
+
+function VoiceAgentsSettings({ agents, runs, actions }: { agents: Record<string, unknown>[]; runs: Record<string, unknown>[]; actions: Record<string, unknown>[] }) {
+  return (
+    <section className="rounded-2xl border border-neutral-200 bg-white p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h3 className="text-3xl font-semibold">Voice agents</h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-500">
+            Each role has its own prompt, model, voice, PMS context, allowed actions, and run history. Calls are not a generic receptionist anymore.
+          </p>
+        </div>
+        <SmallTag tone="green">{agents.filter((agent) => agent.status === "ACTIVE").length} active</SmallTag>
+      </div>
+      <div className="mt-5 grid gap-4">
+        {agents.map((agent) => {
+          const settings = objectValue(agent.voiceSettings);
+          const agentRuns = runs.filter((run) => String(run.agentId) === String(agent.id)).slice(0, 2);
+          const agentActions = actions.filter((action) => String(action.agentId) === String(agent.id)).slice(0, 2);
+          return (
+            <details key={String(agent.id)} className="rounded-2xl border border-neutral-200 bg-[#fbfcff] p-4" open={String(agent.roleKey) === "inbound_receptionist"}>
+              <summary className="cursor-pointer list-none">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-lg font-semibold">{String(agent.name)}</p>
+                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-neutral-400">{String(agent.roleKey)} · {clean(agent.scenario)}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <SmallTag tone={statusTone(agent.status)}>{clean(agent.status)}</SmallTag>
+                    <SmallTag tone="blue">{arrayValue(agent.allowedActions).length} actions</SmallTag>
+                  </div>
+                </div>
+              </summary>
+              <div className="mt-5 grid gap-3 rounded-2xl border border-neutral-200 bg-white p-4 lg:grid-cols-[1fr_auto_auto]">
+                <div>
+                  <p className="text-sm font-semibold">Deploy from PMS targets</p>
+                  <p className="mt-1 text-xs leading-5 text-neutral-500">
+                    Builds auditable runs from real PMS data for this role: recall queues, appointment reminders, inactive patients, billing balances, or membership reactivation.
+                  </p>
+                </div>
+                <form action={deployVoiceAgentAction} className="flex items-center gap-2">
+                  <input type="hidden" name="agentId" value={String(agent.id)} />
+                  <input type="hidden" name="mode" value="QUEUE_ONLY" />
+                  <input name="limit" type="number" min="1" max="25" defaultValue="10" className="h-10 w-20 rounded-xl border border-neutral-200 px-3 text-sm font-semibold" />
+                  <button className="h-10 rounded-xl border border-neutral-200 px-4 text-sm font-semibold">Queue runs</button>
+                </form>
+                <form action={deployVoiceAgentAction} className="flex items-center gap-2">
+                  <input type="hidden" name="agentId" value={String(agent.id)} />
+                  <input type="hidden" name="mode" value="CALL_NOW" />
+                  <input name="limit" type="number" min="1" max="10" defaultValue="1" className="h-10 w-20 rounded-xl border border-neutral-200 px-3 text-sm font-semibold" />
+                  <button className="h-10 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white">Call now</button>
+                </form>
+              </div>
+              <form action={updateVoiceAgentAction} className="mt-5 grid gap-4">
+                <input type="hidden" name="agentId" value={String(agent.id)} />
+                <div className="grid gap-3 lg:grid-cols-3">
+                  <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+                    Agent name
+                    <input name="name" defaultValue={String(agent.name ?? "")} className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-neutral-950" />
+                  </label>
+                  <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+                    Status
+                    <select name="status" defaultValue={String(agent.status ?? "ACTIVE")} className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-neutral-950">
+                      <option value="ACTIVE">Active</option>
+                      <option value="PAUSED">Paused</option>
+                      <option value="DRAFT">Draft</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+                    Voice
+                    <input name="voice" defaultValue={String(settings.voice ?? "alloy")} className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-neutral-950" />
+                  </label>
+                  <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+                    Realtime model
+                    <input name="realtimeModel" defaultValue={String(settings.realtimeModel ?? "gpt-realtime-mini")} className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-neutral-950" />
+                  </label>
+                  <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+                    Transcription
+                    <input name="transcriptionModel" defaultValue={String(settings.transcriptionModel ?? "gpt-4o-transcribe")} className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-neutral-950" />
+                  </label>
+                  <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+                    Temperature
+                    <input name="temperature" type="number" step="0.05" min="0" max="1.2" defaultValue={String(settings.temperature ?? 0.35)} className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-neutral-950" />
+                  </label>
+                </div>
+                <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+                  Primary goal
+                  <input name="primaryGoal" defaultValue={String(agent.primaryGoal ?? "")} className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-neutral-950" />
+                </label>
+                <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+                  Allowed actions
+                  <input name="allowedActions" defaultValue={arrayValue(agent.allowedActions).join(", ")} className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-neutral-950" />
+                </label>
+                <div className="grid gap-3 lg:grid-cols-3">
+                  <input name="pricingPolicy" defaultValue={String(agent.pricingPolicy ?? "NO_PUBLIC_PRICING_HUMAN_ONLY")} className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold" />
+                  <input name="bookingPolicy" defaultValue={String(agent.bookingPolicy ?? "DIRECT_BOOKING_WITH_SCHEDULING_GATES")} className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold" />
+                  <input name="billingPolicy" defaultValue={String(agent.billingPolicy ?? "VERIFY_IDENTITY_BEFORE_BILLING_DETAIL")} className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-semibold" />
+                </div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+                    System prompt
+                    <textarea name="systemPrompt" defaultValue={String(agent.systemPrompt ?? "")} className="min-h-32 rounded-xl border border-neutral-200 bg-white p-3 text-sm font-medium normal-case leading-6 tracking-normal text-neutral-950" />
+                  </label>
+                  <label className="grid gap-2 text-xs font-bold uppercase tracking-[0.14em] text-neutral-400">
+                    Voice workflow prompt
+                    <textarea name="voicePrompt" defaultValue={String(agent.voicePrompt ?? "")} className="min-h-32 rounded-xl border border-neutral-200 bg-white p-3 text-sm font-medium normal-case leading-6 tracking-normal text-neutral-950" />
+                  </label>
+                </div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <ActionCard title="Recent runs" empty="No runs yet for this agent.">
+                    {agentRuns.map((run) => <RecordLine key={String(run.id)} title={`${clean(run.runType)} · ${clean(run.status)}`} meta={`${String(run.targetNumber ?? "no target")} · ${clean(run.providerStatus)}`} />)}
+                  </ActionCard>
+                  <ActionCard title="Recent actions" empty="No recorded actions yet.">
+                    {agentActions.map((action) => <RecordLine key={String(action.id)} title={`${clean(action.actionType)} · ${clean(action.status)}`} meta={String(action.blockedReason ?? "allowed")} />)}
+                  </ActionCard>
+                </div>
+                <div className="flex justify-end">
+                  <button className="rounded-xl bg-neutral-950 px-5 py-3 text-sm font-semibold text-white">Save agent</button>
+                </div>
+              </form>
+            </details>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -1878,6 +2072,8 @@ type ConversationRow = {
   id: string;
   patientId: string | null;
   appointmentId: string | null;
+  voiceAgentId?: string | null;
+  voiceAgentRunId?: string | null;
   firstName: string | null;
   lastName: string | null;
   chartNumber: string | null;

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { StatusPill } from "@/components/foundation-shell";
+import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
 import { Money, PmsCard, StatusFor } from "@/components/pms-ui";
 import { requireAuth } from "@/lib/auth";
-import { getRole } from "@/lib/foundation-data";
+import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { getInsuranceBoard, getLedgerBoard, getPmsDashboard, getPmsDataSourceStatus, getPracticeIntelligence, listLabCases, listPatients, listSchedule, listTasks } from "@/lib/pms-repository";
 
 export const dynamic = "force-dynamic";
@@ -32,30 +32,22 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
   ];
 
   return (
-    <main className="pe-shell min-h-screen bg-[#f4f6f7] text-neutral-950">
-      <div className="flex min-h-screen">
-        <PmsGlobalRail roleKey={role.key} dashboard={dashboard} readinessItems={readinessItems} />
-
-        <section className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 flex h-20 items-center gap-5 border-b border-neutral-200 bg-white px-6">
-            <Link href="/wrapper" className="text-2xl font-black tracking-tight">1DentalAI</Link>
-            <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-700">Cloud PMS</p>
-              <h1 className="truncate text-xl font-black tracking-tight text-neutral-950">Practice command center</h1>
-            </div>
-            <div className="hidden max-w-xl flex-1 lg:block">
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">⌕</span>
-                <input className="h-12 w-full rounded-xl border border-neutral-200 bg-white pl-10 pr-4 text-sm outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100" placeholder="Search patients, schedule, CDT codes, claims, balances, labs" />
-              </div>
-            </div>
-            <Link href={`/app/pms/schedule?role=${role.key}`} className="rounded-xl border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-700">Schedule</Link>
-            <Link href="/logout" className="rounded-xl bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Sign out</Link>
-          </header>
-          <MobilePmsDock roleKey={role.key} />
-
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-            <div className="mx-auto max-w-[1800px]">
+    <FoundationShell active="/app/pms" roleKey={role.key}>
+      <PageHeader
+        eyebrow="Cloud PMS"
+        title="Practice command center"
+        body="Real PMS operations for schedule readiness, patient flow, treatment, claims, ledger, labs, documents, analytics, and role-owned work."
+      />
+      <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms" />
+      <div className="mx-auto max-w-[1800px]">
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-white p-3 shadow-sm">
+          <div className="relative min-w-[260px] flex-1">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">⌕</span>
+            <input className="h-12 w-full rounded-md border border-neutral-200 bg-white pl-10 pr-4 text-sm outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100" placeholder="Search patients, schedule, CDT codes, claims, balances, labs" />
+          </div>
+          <Link href={`/app/pms/schedule?role=${role.key}`} className="rounded-md border border-neutral-200 px-4 py-3 text-sm font-semibold text-neutral-700">Schedule</Link>
+          <Link href={`/app/pms/patients?role=${role.key}`} className="rounded-md bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">Patients</Link>
+        </div>
               <PmsSourceBanner dataSource={dataSource} />
               <div className="mb-5 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
                 <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
@@ -296,109 +288,8 @@ export default async function PmsCommandPage({ searchParams }: { searchParams: P
           </div>
         </PmsCard>
       </section>
-            </div>
-          </div>
-        </section>
       </div>
-    </main>
-  );
-}
-
-function PmsGlobalRail({
-  roleKey,
-  dashboard,
-  readinessItems,
-}: {
-  roleKey: string;
-  dashboard: { activePatients: ReactNode; todayAppointments: ReactNode; openClaimCount: ReactNode };
-  readinessItems: Array<{ label: string; value: ReactNode }>;
-}) {
-  const items = [
-    ["Command", "⌂", "Live operating view", `/app/pms?role=${roleKey}`],
-    ["Schedule", "◷", "Chair flow and holds", `/app/pms/schedule?role=${roleKey}`],
-    ["Patients", "♙", "Chart and family record", `/app/pms/patients?role=${roleKey}`],
-    ["Forms", "▤", "Intake, consents, mapped fields", `/app/pms/forms?role=${roleKey}`],
-    ["Imaging", "▧", "X-rays and study attachments", `/app/pms/imaging?role=${roleKey}`],
-    ["Scribe", "✎", "Clinical notes and AI draft", `/app/pms/scribe?role=${roleKey}`],
-    ["Treatment", "◇", "Plans, CDT, case acceptance", `/app/pms/treatment-plans?role=${roleKey}`],
-    ["Ledger", "$", "Balances and payments", `/app/pms/ledger?role=${roleKey}`],
-    ["Insurance", "▣", "Eligibility and claims", `/app/pms/insurance?role=${roleKey}`],
-    ["Inventory", "▦", "Supplies, assets, vendors", `/app/pms/inventory?role=${roleKey}`],
-    ["Labs", "□", "Cases and delivery risk", `/app/pms/labs?role=${roleKey}`],
-    ["Documents", "▤", "Forms, EOBs, referrals", `/app/pms/documents?role=${roleKey}`],
-    ["Map", "◎", "Geographic demand", `/app/pms/patient-map?role=${roleKey}`],
-    ["Reports", "▥", "Production analytics", `/app/pms/reports?role=${roleKey}`],
-  ];
-
-  return (
-    <aside className="group hidden h-screen w-[92px] shrink-0 overflow-hidden border-r border-neutral-200 bg-[#e9eef2] transition-[width] duration-200 ease-out hover:w-[330px] focus-within:w-[330px] lg:block">
-      <div className="flex h-full min-w-[330px] flex-col">
-        <div className="border-b border-neutral-200 px-4 py-4">
-          <Link href={`/app/pms?role=${roleKey}`} className="flex items-center gap-3">
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white text-sm font-black text-cyan-800 shadow-sm">PMS</span>
-            <span className="min-w-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
-              <span className="block text-[11px] font-black uppercase tracking-[0.18em] text-cyan-700">PMS</span>
-              <span className="mt-1 block text-xl font-black tracking-tight text-neutral-950">Dental ops</span>
-            </span>
-          </Link>
-        </div>
-        <div className="grid grid-cols-3 gap-2 border-b border-neutral-200 px-3 py-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
-          <MiniRailMetric label="Patients" value={dashboard.activePatients} />
-          <MiniRailMetric label="Today" value={dashboard.todayAppointments} />
-          <MiniRailMetric label="Claims" value={dashboard.openClaimCount} />
-        </div>
-        <nav className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3" aria-label="PMS navigation">
-          <div className="grid gap-1">
-            {items.map(([label, icon, description, href]) => (
-              <Link key={label} href={href} title={label} className="grid min-h-14 grid-cols-[56px_1fr] items-center rounded-2xl text-neutral-600 transition hover:bg-white hover:text-cyan-800 hover:shadow-sm focus:bg-white focus:outline-none focus:ring-4 focus:ring-cyan-100">
-                <span className="grid h-11 w-11 place-items-center justify-self-center rounded-xl bg-white text-lg shadow-sm group-hover:bg-neutral-50 group-focus-within:bg-neutral-50">{icon}</span>
-                <span className="min-w-0 pr-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
-                  <span className="block truncate text-sm font-black text-neutral-950">{label}</span>
-                  <span className="mt-0.5 block truncate text-xs font-medium text-neutral-500">{description}</span>
-                </span>
-              </Link>
-            ))}
-          </div>
-        </nav>
-        <div className="border-t border-neutral-200 p-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-amber-800">Readiness</p>
-            <div className="mt-2 space-y-2">
-              {readinessItems.map((item) => (
-                <div key={item.label} className="flex items-center justify-between gap-3 text-xs">
-                  <span className="truncate text-amber-900">{item.label}</span>
-                  <span className="font-black text-amber-950">{item.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </aside>
-  );
-}
-
-function MobilePmsDock({ roleKey }: { roleKey: string }) {
-  const items = [
-    ["Command", `/app/pms?role=${roleKey}`],
-    ["Schedule", `/app/pms/schedule?role=${roleKey}`],
-    ["Patients", `/app/pms/patients?role=${roleKey}`],
-    ["Treat", `/app/pms/treatment-plans?role=${roleKey}`],
-    ["Insurance", `/app/pms/insurance?role=${roleKey}`],
-    ["Ledger", `/app/pms/ledger?role=${roleKey}`],
-    ["Inventory", `/app/pms/inventory?role=${roleKey}`],
-    ["Map", `/app/pms/patient-map?role=${roleKey}`],
-    ["Reports", `/app/pms/reports?role=${roleKey}`],
-  ];
-
-  return (
-    <nav className="flex gap-2 overflow-x-auto border-b border-neutral-200 bg-white px-4 py-3 lg:hidden">
-      {items.map(([label, href]) => (
-        <Link key={label} href={href} className="shrink-0 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs font-bold text-neutral-700">
-          {label}
-        </Link>
-      ))}
-    </nav>
+    </FoundationShell>
   );
 }
 
@@ -436,15 +327,6 @@ function PmsSourceBanner({
         </div>
       </div>
     </section>
-  );
-}
-
-function MiniRailMetric({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="rounded-xl bg-neutral-50 p-2 text-center">
-      <p className="text-lg font-black text-neutral-950">{value}</p>
-      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">{label}</p>
-    </div>
   );
 }
 

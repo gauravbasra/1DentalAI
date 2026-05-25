@@ -9,6 +9,8 @@ export async function POST(request: Request) {
   try {
     return twiml(await handleVoiceAiTurn({
       conversationId: url.searchParams.get("conversationId"),
+      agentId: url.searchParams.get("agentId"),
+      agentRunId: url.searchParams.get("agentRunId"),
       scenario: cleanScenario(url.searchParams.get("scenario")),
       payload,
     }));
