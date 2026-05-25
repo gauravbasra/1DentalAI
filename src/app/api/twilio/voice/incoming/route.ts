@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   <Gather input="speech dtmf" timeout="5" speechTimeout="auto" language="en-US">
     <Say voice="Polly.Joanna-Neural">Hi, thank you for calling. The front desk is helping another patient, but I can still collect your request. Please say appointment, billing, forms, or staff.</Say>
   </Gather>
-  <Say voice="Polly.Joanna-Neural">Thank you. A team member will follow up if needed. Goodbye.</Say>
+  <Say voice="Polly.Joanna-Neural">Thank you. If this is urgent, I have moved this to the team queue and someone will continue with you in this call path.</Say>
 </Response>`);
   }
 }

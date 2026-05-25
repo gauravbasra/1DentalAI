@@ -2641,7 +2641,7 @@ async function executeTwilioCallControl(input: {
     result = await updateTwilioCall({
       tenantId: input.tenantId,
       callSid: input.activeCallProviderId,
-      twiml: `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">Please leave a message after the tone and a team member will follow up.</Say><Record maxLength="180" playBeep="true" recordingStatusCallback="${twilioXmlEscape(origin)}/api/twilio/voice/recording" recordingStatusCallbackMethod="POST" transcribe="true" transcribeCallback="${twilioXmlEscape(origin)}/api/twilio/voice/transcription" /></Response>`,
+      twiml: `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">Please leave a message after the tone and our team will continue from your message.</Say><Record maxLength="180" playBeep="true" recordingStatusCallback="${twilioXmlEscape(origin)}/api/twilio/voice/recording" recordingStatusCallbackMethod="POST" transcribe="true" transcribeCallback="${twilioXmlEscape(origin)}/api/twilio/voice/transcription" /></Response>`,
     });
   } else if (input.actionType === "HOLD" || input.actionType === "CALL_PARK") {
     if (!conferenceSid) return blockedTwilioExecution("Twilio conference is not active yet; cannot hold or park this call.", providerRequest);

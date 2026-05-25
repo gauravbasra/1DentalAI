@@ -42,5 +42,5 @@ function cleanScenario(value: string | null) {
 }
 
 function fallbackVoiceTwiML() {
-  return `<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech dtmf" timeout="5" speechTimeout="auto"><Say voice="Polly.Joanna-Neural">Hi, this is one dental AI. I can help with appointments, reminders, and follow up requests. How can I help today?</Say></Gather><Say voice="Polly.Joanna-Neural">I can’t stay on the live line right now, so I’ve routed this to the front desk queue. Please tell them what you need when we connect.</Say></Response>`;
+  return `<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech dtmf" timeout="5" speechTimeout="auto"><Say voice="Polly.Joanna-Neural">Hi, this is one dental AI. I can help with appointments, reminders, and follow up requests. How can I help today?</Say></Gather><Say voice="Polly.Joanna-Neural">The AI line is unavailable right now. I’m transferring you to our team queue so someone can continue with you in one-touch support.</Say></Response>`;
 }

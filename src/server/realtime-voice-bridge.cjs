@@ -5,6 +5,12 @@ const { WebSocketServer, WebSocket } = require("ws");
 
 const TENANT_ID = "tenant_1dentalai_production";
 const REALTIME_PATH = "/api/twilio/voice/realtime";
+const FALLBACK_REALTIME_MODELS = [
+  "gpt-4o-realtime-preview",
+  "gpt-4o-mini-realtime-preview",
+  "gpt-realtime-mini",
+  "gpt-realtime",
+];
 
 let pool;
 const truthy = (value) => {
@@ -92,7 +98,8 @@ async function runRealtimeCallBridge(twilioSocket, request) {
     }
     if (agent?.id && !agentId) agentId = agent.id;
     const voiceSettings = mergeVoiceSettings(policy.voiceSettings || {}, agent?.voiceSettings || {});
-    const model = normalizeRealtimeModel(realtimeModel || voiceSettings.realtimeModel || voiceSettings.model || "gpt-4o-realtime-preview");
+    const requestedModel = realtimeModel || voiceSettings.realtimeModel || voiceSettings.model || "gpt-4o-realtime-preview";
+    const model = await resolveRealtimeModel(openAiKey, requestedModel).catch(() => normalizeRealtimeModel(requestedModel));
     openAiSocket = new WebSocket(`wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`, {
       headers: {
         Authorization: `Bearer ${openAiKey}`,
@@ -201,7 +208,17 @@ function attachOpenAiHandlers({ openAiSocket, twilioSocket, tenantId, conversati
     }
   });
 
-  openAiSocket.on("close", closeBoth);
+  openAiSocket.on("close", async (code, reason) => {
+    await logAssistEvent(
+      tenantId,
+      conversationId,
+      "OPENAI_REALTIME_SOCKET_CLOSE",
+      code === 1000 ? "INFO" : "WARN",
+      `OpenAI realtime socket closed. code=${code}, reason=${String(reason || "").slice(0, 200)}`,
+      { callSid, streamSid },
+    );
+    closeBoth();
+  });
   openAiSocket.on("error", async (error) => {
     await logAssistEvent(tenantId, conversationId, "OPENAI_REALTIME_SOCKET_ERROR", "ERROR", error.message || "Realtime socket error.", { callSid, streamSid });
     closeBoth();
@@ -810,8 +827,28 @@ function normalizeRealtimeVoice(value) {
 function normalizeRealtimeModel(value) {
   const candidate = String(value || "").trim();
   if (!candidate) return "gpt-4o-realtime-preview";
-  if (/realtime/.test(candidate)) return candidate;
+  if (FALLBACK_REALTIME_MODELS.includes(candidate)) return candidate;
+  if (/realtime/.test(candidate)) return "gpt-4o-realtime-preview";
   return "gpt-4o-realtime-preview";
+}
+
+async function resolveRealtimeModel(apiKey, preferredModel) {
+  if (!apiKey) return normalizeRealtimeModel(preferredModel);
+  const response = await fetch("https://api.openai.com/v1/models", {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    cache: "no-store",
+  }).catch(() => null);
+  if (!response || !response.ok) return normalizeRealtimeModel(preferredModel);
+  const data = await response.json().catch(() => ({}));
+  const ids = Array.isArray(data?.data)
+    ? data.data.map((item) => (typeof item?.id === "string" ? item.id : "")).filter(Boolean)
+    : [];
+  const requested = normalizeRealtimeModel(preferredModel);
+  if (ids.includes(requested)) return requested;
+  for (const candidate of FALLBACK_REALTIME_MODELS) {
+    if (ids.includes(candidate)) return candidate;
+  }
+  return requested || "gpt-4o-realtime-preview";
 }
 
 function normalizeScenario(value) {

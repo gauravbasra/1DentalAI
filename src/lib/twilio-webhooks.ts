@@ -36,7 +36,8 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
   const transcription = `<Start><Transcription name="onedentalai-live-${xmlEscape(input.conversationId)}" statusCallbackUrl="${xmlEscape(transcriptionUrl)}" track="both_tracks" languageCode="en-US" /></Start>`;
   const practiceBridgeNumber = resolvePracticeBridgeNumber(route);
   const callerNumber = normalizePhoneNumber(input.payload.From || "");
-  if (practiceBridgeNumber && callerNumber === practiceBridgeNumber) {
+  const isInternalTransfer = input.payload.Direction !== "inbound" && practiceBridgeNumber && callerNumber === practiceBridgeNumber;
+  if (isInternalTransfer) {
     await markInboundCallForAiTakeover(input.conversationId);
     return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -62,9 +63,9 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
 </Response>`;
   }
   if (route?.destinationType === "VOICEMAIL") {
-    return voicemailTwiML(recordingUrl, transcriptionUrl, transcription, "Thank you for calling. Please leave a message after the tone and a team member will follow up.");
+    return voicemailTwiML(recordingUrl, transcriptionUrl, transcription, "Thank you for calling. Please leave a message and our team will be notified for follow-up.");
   }
-  return voicemailTwiML(recordingUrl, transcriptionUrl, transcription, "Thank you for calling. Your call reached 1DentalAI, but live routing is not configured yet. Please leave a message after the tone and a team member will follow up.");
+  return voicemailTwiML(recordingUrl, transcriptionUrl, transcription, "Thank you for calling. Live routing is being prepared. Leave a message and the team will continue from your request.");
 }
 
 function conferenceNameForConversation(conversationId: string) {

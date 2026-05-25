@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     }));
   } catch (error) {
     console.error("Voice AI turn failed", { error });
-    return twiml(`<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech dtmf" timeout="5" speechTimeout="auto"><Say voice="Polly.Joanna-Neural">I’m still here to help. I can collect your request for the front desk or try scheduling again.</Say></Gather><Say voice="Polly.Joanna-Neural">I can’t stay on this line right now. I’ve put this in the front desk queue and someone will follow up quickly.</Say></Response>`);
+    return twiml(`<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech dtmf" timeout="5" speechTimeout="auto"><Say voice="Polly.Joanna-Neural">I’m still here to help. I can collect your request for the team or try scheduling again.</Say></Gather><Say voice="Polly.Joanna-Neural">The AI line is temporarily unavailable. I’ve moved this to the team queue so a staff member can continue with you right away.</Say></Response>`);
   }
 }
 
