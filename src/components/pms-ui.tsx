@@ -21,26 +21,9 @@ export const pmsNav = [
 ];
 
 export function PmsSectionNav({ active, roleKey }: { active: string; roleKey: string }) {
-  return (
-    <nav
-      aria-label="PMS section navigation"
-      className="app-scrollbar sticky top-0 z-40 -mx-4 mb-4 flex gap-1 overflow-x-auto border-b border-neutral-200 bg-white/95 px-4 py-2 shadow-sm backdrop-blur sm:-mx-6 sm:px-6 xl:-mx-8 xl:px-8"
-    >
-      {pmsNav.map((item) => (
-        <Link
-          key={item.href}
-          href={`${item.href}?role=${roleKey}`}
-          className={`min-h-9 shrink-0 rounded-md px-3 py-2 text-xs font-semibold leading-5 transition ${
-            active === item.href
-              ? "bg-neutral-950 text-white"
-              : "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950"
-          }`}
-        >
-          {item.label}
-        </Link>
-      ))}
-    </nav>
-  );
+  void active;
+  void roleKey;
+  return null;
 }
 
 export function PmsCard({
