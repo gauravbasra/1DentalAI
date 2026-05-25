@@ -36,6 +36,7 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
   const transcription = `<Start><Transcription name="onedentalai-live-${xmlEscape(input.conversationId)}" statusCallbackUrl="${xmlEscape(transcriptionUrl)}" track="both_tracks" languageCode="en-US" /></Start>`;
   const practiceBridgeNumber = resolvePracticeBridgeNumber(route);
   const callerNumber = normalizePhoneNumber(input.payload.From || "");
+  const hasValidBridgeNumber = Boolean(practiceBridgeNumber && practiceBridgeNumber !== callerNumber);
   const isInternalTransfer = input.payload.Direction !== "inbound" && practiceBridgeNumber && callerNumber === practiceBridgeNumber;
   if (isInternalTransfer) {
     await markInboundCallForAiTakeover(input.conversationId);
@@ -45,7 +46,15 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
   <Redirect method="POST">${xmlEscape(aiStartUrl)}</Redirect>
 </Response>`;
   }
-  if (practiceBridgeNumber) {
+  if (practiceBridgeNumber && !hasValidBridgeNumber) {
+    await markInboundCallForAiTakeover(input.conversationId);
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  ${transcription}
+  <Redirect method="POST">${xmlEscape(aiStartUrl)}</Redirect>
+</Response>`;
+  }
+  if (hasValidBridgeNumber) {
     await query(
       `update "PhoneActiveCall"
        set "callControlMode" = 'TWILIO_DIRECT_DIAL',
@@ -63,9 +72,21 @@ export async function buildInboundVoiceTwiML(input: { request: Request; payload:
 </Response>`;
   }
   if (route?.destinationType === "VOICEMAIL") {
-    return voicemailTwiML(recordingUrl, transcriptionUrl, transcription, "Thank you for calling. Please leave a message and our team will be notified for follow-up.");
+    // If AI receptionist is active, prefer AI takeover even when the configured route is voicemail.
+    // Voicemail remains the fallback when AI is unavailable.
+    await markInboundCallForAiTakeover(input.conversationId);
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  ${transcription}
+  <Redirect method="POST">${xmlEscape(aiStartUrl)}</Redirect>
+</Response>`;
   }
-  return voicemailTwiML(recordingUrl, transcriptionUrl, transcription, "Thank you for calling. Live routing is being prepared. Leave a message and the team will continue from your request.");
+  await markInboundCallForAiTakeover(input.conversationId);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  ${transcription}
+  <Redirect method="POST">${xmlEscape(aiStartUrl)}</Redirect>
+</Response>`;
 }
 
 function conferenceNameForConversation(conversationId: string) {
@@ -231,11 +252,12 @@ export async function ingestVoiceStatus(payload: TwilioPayload, tenantId = defau
   const result = await query<{ conversationId: string | null }>(
     `update "PhoneActiveCall"
      set "callState" = $3,
+       "providerConferenceId" = coalesce($4, "providerConferenceId"),
        "endedAt" = case when $3 in ('COMPLETED','FAILED','BUSY','NO_ANSWER','CANCELED') then current_timestamp else "endedAt" end,
        "updatedAt" = current_timestamp
-     where "tenantId" = $1 and "providerCallId" = $2
+     where "tenantId" = $1 and ("providerCallId" = $2 or "bridgeCallSid" = $2)
      returning "conversationId"`,
-    [tenantId, callSid, callState],
+    [tenantId, callSid, callState, payload.ConferenceSid || null],
   );
   const conversationId = result.rows[0]?.conversationId ?? null;
   if (conversationId) {

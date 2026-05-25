@@ -42,5 +42,5 @@ function cleanScenario(value: string | null) {
 }
 
 function fallbackVoiceTwiML() {
-  return `<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech dtmf" timeout="5" speechTimeout="auto"><Say voice="Polly.Joanna-Neural">Hi, this is one dental AI. I can help with appointments, reminders, and follow up requests. How can I help today?</Say></Gather><Say voice="Polly.Joanna-Neural">The AI line is unavailable right now. I’m transferring you to our team queue so someone can continue with you in one-touch support.</Say></Response>`;
+  return `<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech dtmf" timeout="6" speechTimeout="auto"><Say voice="Polly.Joanna-Neural">Hi, you’ve reached 1DentalAI. I’m here with you. Tell me what you need help with today, like booking an appointment, rescheduling, or a billing question.</Say></Gather><Redirect method="POST">/api/twilio/voice/ai/turn?scenario=inbound_takeover&amp;reason=start_fallback</Redirect></Response>`;
 }

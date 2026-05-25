@@ -188,7 +188,8 @@ export async function getVoiceAiReceptionPolicy(tenantId = defaultTenantId) {
   );
   const row = result.rows[0];
   return {
-    ringThreshold: Math.max(2, Math.min(8, Number(row?.ringThreshold ?? 4) || 4)),
+    // Default to 2 rings for production receptionist behavior unless a tenant overrides it.
+    ringThreshold: Math.max(2, Math.min(8, Number(row?.ringThreshold ?? 2) || 2)),
     voiceSettings: objectValue(row?.voiceSettings),
     bookingPolicy: row?.bookingPolicy || "BOOK_WITH_PROVIDER_AVAILABILITY",
     billingPolicy: row?.billingPolicy || "ANSWER_BALANCE_QUESTIONS_WITH_IDENTITY_CHECK",
@@ -727,6 +728,7 @@ async function buildRealtimeStreamTwiML(input: { tenantId: string; conversationI
   const origin = defaultOrigin();
   const websocketOrigin = origin.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
   const streamUrl = `${websocketOrigin}/api/twilio/voice/realtime`;
+  const gatherFallbackUrl = `${origin}/api/twilio/voice/ai/turn?conversationId=${encodeURIComponent(input.conversationId)}&scenario=${encodeURIComponent(input.scenario)}${input.agentId ? `&agentId=${encodeURIComponent(input.agentId)}` : ""}${input.agentRunId ? `&agentRunId=${encodeURIComponent(input.agentRunId)}` : ""}&reason=realtime_disconnect`;
   await createVoicePromptEvent({
     tenantId: input.tenantId,
     conversationId: input.conversationId,
@@ -735,6 +737,7 @@ async function buildRealtimeStreamTwiML(input: { tenantId: string; conversationI
   });
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
+  <Say voice="Polly.Joanna-Neural">${twilioXmlEscape(input.fallbackText)}</Say>
   <Connect>
     <Stream url="${twilioXmlEscape(streamUrl)}">
       <Parameter name="tenantId" value="${twilioXmlEscape(input.tenantId)}" />
@@ -746,7 +749,7 @@ async function buildRealtimeStreamTwiML(input: { tenantId: string; conversationI
       <Parameter name="callerPhone" value="${twilioXmlEscape(input.payload?.From || input.payload?.Caller || "")}" />
     </Stream>
   </Connect>
-  <Say voice="Polly.Joanna-Neural">The AI line is currently unavailable. I’m transferring you to the team queue now so this can continue in real time.</Say>
+  <Redirect method="POST">${twilioXmlEscape(gatherFallbackUrl)}</Redirect>
 </Response>`;
 }
 
