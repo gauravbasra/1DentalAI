@@ -9,6 +9,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
+RUN mkdir -p .next/standalone/node_modules \
+  && cp -R node_modules/ws .next/standalone/node_modules/ws \
+  && cp src/server/realtime-voice-bridge.cjs .next/standalone/realtime-voice-bridge.cjs \
+  && node scripts/patch-standalone-realtime-server.mjs
 
 FROM node:22-alpine AS runner
 WORKDIR /app

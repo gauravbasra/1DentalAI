@@ -116,6 +116,11 @@ export async function buildVoiceAiStartTwiML(input: {
   const scenario = normalizeScenario(input.scenario);
   const text = greetingForScenario(scenario, input.reason || undefined);
   await markAiTakeover(tenantId, conversationId, scenario, text, input.payload);
+  const realtimeTwiML = await buildRealtimeStreamTwiML({ tenantId, conversationId, scenario, fallbackText: text, payload: input.payload }).catch((error) => {
+    console.error("Realtime voice TwiML failed, falling back to Gather", { error });
+    return null;
+  });
+  if (realtimeTwiML) return realtimeTwiML;
   return buildGatherTwiML({ tenantId, conversationId, scenario, text });
 }
 
@@ -288,6 +293,32 @@ async function buildGatherTwiML(input: { tenantId: string; conversationId: strin
     <Say voice="${twilioXmlEscape(voice)}">${twilioXmlEscape(input.text)}</Say>
   </Gather>
   <Say voice="${twilioXmlEscape(voice)}">I did not catch that. I will keep the note for the front desk so they can follow up if needed. Goodbye.</Say>
+</Response>`;
+}
+
+async function buildRealtimeStreamTwiML(input: { tenantId: string; conversationId: string; scenario: VoiceScenario; fallbackText: string; payload?: TwilioPayload }) {
+  const openAi = await getOpenAiWebchatConfig(input.tenantId).catch(() => null);
+  if (!openAi?.apiKey) return null;
+  const origin = defaultOrigin();
+  const websocketOrigin = origin.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+  const streamUrl = `${websocketOrigin}/api/twilio/voice/realtime`;
+  await createVoicePromptEvent({
+    tenantId: input.tenantId,
+    conversationId: input.conversationId,
+    scenario: input.scenario,
+    text: `OpenAI Realtime stream started. Fallback greeting: ${input.fallbackText}`,
+  });
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="${twilioXmlEscape(streamUrl)}">
+      <Parameter name="tenantId" value="${twilioXmlEscape(input.tenantId)}" />
+      <Parameter name="conversationId" value="${twilioXmlEscape(input.conversationId)}" />
+      <Parameter name="scenario" value="${twilioXmlEscape(input.scenario)}" />
+      <Parameter name="callerPhone" value="${twilioXmlEscape(input.payload?.From || input.payload?.Caller || "")}" />
+    </Stream>
+  </Connect>
+  <Say voice="Polly.Joanna-Neural">The voice assistant is no longer connected. A team member will follow up if needed. Goodbye.</Say>
 </Response>`;
 }
 
