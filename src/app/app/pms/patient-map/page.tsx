@@ -47,6 +47,8 @@ export default async function PatientMapPage({ searchParams }: { searchParams: P
   const filters = parsePatientMapFilters(params);
   const analytics = await getPatientMapAnalytics(session.tenantId, filters);
   const googleMapsKey = process.env.GOOGLE_MAPS_API_KEY ?? "";
+  const filteredStats = summarizeFilteredPoints(analytics.points);
+  const activeFilters = activeFilterSummary(filters);
   const exportHref = `/api/pms/patient-map/export?${new URLSearchParams({
     service: filters.service,
     insurance: filters.insurance,
@@ -70,14 +72,21 @@ export default async function PatientMapPage({ searchParams }: { searchParams: P
       <PmsSectionNav active="/app/pms/patient-map" roleKey={role.key} />
 
       <section className="grid gap-3 md:grid-cols-4 xl:grid-cols-7">
-        <Metric label="Mapped patients" value={analytics.stats.mappedPatients} detail={`${analytics.stats.mappedFamilies} households`} />
-        <Metric label="Unmapped" value={analytics.stats.unmappedFamilies} detail="missing or failed geocode" />
-        <Metric label="High value" value={analytics.stats.highValuePatients} detail="production/treatment threshold" />
-        <Metric label="Membership" value={analytics.stats.membershipSignals} detail="enrollment or note signal" />
-        <Metric label="Production" value={<Money cents={analytics.stats.productionCents} />} detail="mapped PMS value" />
-        <Metric label="Treatment" value={<Money cents={analytics.stats.treatmentCents} />} detail="presented/planned" />
+        <Metric label="Plotted patients" value={filteredStats.mappedPatients} detail={`${filteredStats.mappedFamilies} households matched`} />
+        <Metric label="Total mapped" value={analytics.stats.mappedPatients} detail={`${analytics.stats.mappedFamilies} source households`} />
+        <Metric label="High value" value={filteredStats.highValuePatients} detail="matched filter set" />
+        <Metric label="Membership" value={filteredStats.membershipSignals} detail="matched filter set" />
+        <Metric label="Production" value={<Money cents={filteredStats.productionCents} />} detail="plotted PMS value" />
+        <Metric label="Treatment" value={<Money cents={filteredStats.treatmentCents} />} detail="plotted planned value" />
         <Metric label="Geocoding" value={analytics.geocoding.updated} detail={`${analytics.geocoding.attempted} attempted`} />
       </section>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span className="rounded-full bg-neutral-200 px-3 py-1 font-semibold text-neutral-700">{activeFilters.length ? `${activeFilters.length} active filter${activeFilters.length === 1 ? "" : "s"}` : "All patients"}</span>
+        {activeFilters.map((filter) => (
+          <span key={filter} className="rounded-full bg-white px-3 py-1 font-semibold text-neutral-600 ring-1 ring-neutral-200">{filter}</span>
+        ))}
+        {activeFilters.length ? <a href={`/app/pms/patient-map?role=${role.key}`} className="rounded-full bg-neutral-950 px-3 py-1 font-semibold text-white">Clear filters</a> : null}
+      </div>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-[340px_1fr]">
         <PmsCard title="Map filters" eyebrow="Drill down">
@@ -172,6 +181,13 @@ export default async function PatientMapPage({ searchParams }: { searchParams: P
                     <td className="px-3 py-3 text-right font-semibold text-neutral-950"><Money cents={point.productionCents + point.treatmentCents} /><p className="text-xs text-neutral-500">score {point.opportunityScore}</p></td>
                   </tr>
                 ))}
+                {!analytics.points.length ? (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-8 text-center text-sm text-neutral-500">
+                      No plotted households match these filters. Clear filters or choose a broader service, payer, age, provider, or value band.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -190,7 +206,7 @@ export default async function PatientMapPage({ searchParams }: { searchParams: P
   );
 }
 
-function Metric({ label, value, detail }: { label: string; value: React.ReactNode; detail: string }) {
+function Metric({ label, value, detail }: { label: string; value: React.ReactNode; detail: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p>
@@ -198,6 +214,35 @@ function Metric({ label, value, detail }: { label: string; value: React.ReactNod
       <p className="mt-1 text-xs leading-5 text-neutral-600">{detail}</p>
     </div>
   );
+}
+
+function summarizeFilteredPoints(points: Awaited<ReturnType<typeof getPatientMapAnalytics>>["points"]) {
+  return points.reduce(
+    (stats, point) => ({
+      mappedFamilies: stats.mappedFamilies + 1,
+      mappedPatients: stats.mappedPatients + point.patientCount,
+      highValuePatients: stats.highValuePatients + point.highValuePatientCount,
+      membershipSignals: stats.membershipSignals + point.membershipSignalCount,
+      productionCents: stats.productionCents + point.productionCents,
+      treatmentCents: stats.treatmentCents + point.treatmentCents,
+    }),
+    { mappedFamilies: 0, mappedPatients: 0, highValuePatients: 0, membershipSignals: 0, productionCents: 0, treatmentCents: 0 },
+  );
+}
+
+function activeFilterSummary(filters: ReturnType<typeof parsePatientMapFilters>) {
+  const active: string[] = [];
+  if (filters.service !== "all") active.push(`Service: ${optionLabel(filters.service)}`);
+  if (filters.insurance !== "all") active.push(`Insurance: ${optionLabel(filters.insurance)}`);
+  if (filters.ageBand !== "all") active.push(`Age: ${optionLabel(filters.ageBand)}`);
+  if (filters.gender !== "all") active.push(`Gender: ${optionLabel(filters.gender)}`);
+  if (filters.provider !== "all") active.push(`Provider: ${optionLabel(filters.provider)}`);
+  if (filters.referralSource !== "all") active.push(`Referral: ${optionLabel(filters.referralSource)}`);
+  if (filters.valueBand !== "all") active.push(`Value: ${optionLabel(filters.valueBand)}`);
+  if (filters.mapMode !== "markers") active.push(`Mode: ${optionLabel(filters.mapMode)}`);
+  if (filters.highValueOnly) active.push("High-value only");
+  if (filters.membershipOnly) active.push("Membership only");
+  return active;
 }
 
 function Select({ label, name, value, options }: { label: string; name: string; value: string; options: string[] }) {
