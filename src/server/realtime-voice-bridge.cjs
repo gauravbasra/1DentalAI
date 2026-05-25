@@ -7,6 +7,10 @@ const TENANT_ID = "tenant_1dentalai_production";
 const REALTIME_PATH = "/api/twilio/voice/realtime";
 
 let pool;
+const truthy = (value) => {
+  const text = String(value || "").trim().toLowerCase();
+  return text === "true" || text === "1" || text === "yes" || text === "on";
+};
 
 function getPool() {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not configured");
@@ -55,6 +59,7 @@ async function runRealtimeCallBridge(twilioSocket, request) {
   let streamSid = null;
   let callSid = null;
   let callerPhone = null;
+  let realtimeModel = null;
   let lastCallerTranscript = "";
   let closed = false;
 
@@ -87,7 +92,7 @@ async function runRealtimeCallBridge(twilioSocket, request) {
     }
     if (agent?.id && !agentId) agentId = agent.id;
     const voiceSettings = mergeVoiceSettings(policy.voiceSettings || {}, agent?.voiceSettings || {});
-    const model = voiceSettings.realtimeModel || "gpt-realtime-mini";
+    const model = normalizeRealtimeModel(realtimeModel || voiceSettings.realtimeModel || voiceSettings.model || "gpt-4o-realtime-preview");
     openAiSocket = new WebSocket(`wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`, {
       headers: {
         Authorization: `Bearer ${openAiKey}`,
@@ -110,6 +115,7 @@ async function runRealtimeCallBridge(twilioSocket, request) {
       agentRunId = params.agentRunId || agentRunId;
       scenario = normalizeScenario(params.scenario || scenario);
       callerPhone = params.callerPhone || params.From || callerPhone;
+      realtimeModel = params.realtimeModel || realtimeModel;
       await markRealtimeStarted(tenantId, conversationId, { streamSid, callSid, callerPhone, scenario, agentId, agentRunId });
       await startOpenAi();
       return;
@@ -624,7 +630,9 @@ async function getVoicePmsContext(tenantId, conversationId, callerPhone) {
 }
 
 async function getOpenAiKey(tenantId) {
-  if (process.env.OPENAI_API_KEY && process.env.OPENAI_BAA_ENABLED === "true" && process.env.OPENAI_PHI_ALLOWED === "true") return process.env.OPENAI_API_KEY;
+  const openAiPhiAllowed = truthy(process.env.OPENAI_PHI_ALLOWED);
+  const openAiBaaEnabled = truthy(process.env.OPENAI_BAA_ENABLED);
+  if (process.env.OPENAI_API_KEY && openAiBaaEnabled && openAiPhiAllowed) return process.env.OPENAI_API_KEY;
   const result = await getPool().query(
     `select "encryptedValue", "encryptionIv", "encryptionTag"
      from "ConnectorCredentialVault"
@@ -777,7 +785,7 @@ function extractToolCall(event) {
 function sanitizeVoiceSettings(value) {
   const input = value && typeof value === "object" ? value : {};
   return {
-    realtimeModel: stringValue(input.realtimeModel, "gpt-realtime-mini"),
+    realtimeModel: stringValue(input.realtimeModel, "gpt-4o-realtime-preview"),
     transcriptionModel: stringValue(input.transcriptionModel, "gpt-4o-transcribe"),
     voice: stringValue(input.realtimeVoice || input.openAiVoice || input.voice, "alloy"),
     temperature: boundedNumber(input.temperature, 0.45, 0, 1.2),
@@ -797,6 +805,13 @@ function normalizeRealtimeVoice(value) {
   const allowed = new Set(["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]);
   const voice = String(value || "").trim().toLowerCase();
   return allowed.has(voice) ? voice : "alloy";
+}
+
+function normalizeRealtimeModel(value) {
+  const candidate = String(value || "").trim();
+  if (!candidate) return "gpt-4o-realtime-preview";
+  if (/realtime/.test(candidate)) return candidate;
+  return "gpt-4o-realtime-preview";
 }
 
 function normalizeScenario(value) {

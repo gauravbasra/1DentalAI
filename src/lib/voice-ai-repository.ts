@@ -723,6 +723,7 @@ async function buildGatherTwiML(input: { tenantId: string; conversationId: strin
 async function buildRealtimeStreamTwiML(input: { tenantId: string; conversationId: string; agentId?: string | null; agentRunId?: string | null; scenario: VoiceScenario; fallbackText: string; payload?: TwilioPayload }) {
   const openAi = await getOpenAiWebchatConfig(input.tenantId).catch(() => null);
   if (!openAi?.apiKey) return null;
+  const model = await resolveRealtimeModel(input.tenantId, openAi.apiKey, openAi.model).catch(() => "gpt-4o-realtime-preview");
   const origin = defaultOrigin();
   const websocketOrigin = origin.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
   const streamUrl = `${websocketOrigin}/api/twilio/voice/realtime`;
@@ -740,12 +741,39 @@ async function buildRealtimeStreamTwiML(input: { tenantId: string; conversationI
       <Parameter name="conversationId" value="${twilioXmlEscape(input.conversationId)}" />
       <Parameter name="agentId" value="${twilioXmlEscape(input.agentId || "")}" />
       <Parameter name="agentRunId" value="${twilioXmlEscape(input.agentRunId || "")}" />
+      <Parameter name="realtimeModel" value="${twilioXmlEscape(model)}" />
       <Parameter name="scenario" value="${twilioXmlEscape(input.scenario)}" />
       <Parameter name="callerPhone" value="${twilioXmlEscape(input.payload?.From || input.payload?.Caller || "")}" />
     </Stream>
   </Connect>
-  <Say voice="Polly.Joanna-Neural">The voice assistant is no longer connected. A team member will follow up if needed. Goodbye.</Say>
+  <Say voice="Polly.Joanna-Neural">I can’t stay connected on the live assistant path right now. I have routed this to the front desk queue and someone will follow up with you shortly.</Say>
 </Response>`;
+}
+
+async function resolveRealtimeModel(tenantId: string, apiKey: string, preferredModel: string) {
+  const fallbackModels = ["gpt-4o-realtime-preview", "gpt-4o-mini-realtime-preview", "gpt-realtime-mini", "gpt-realtime"];
+  const candidates = [] as string[];
+  if (typeof preferredModel === "string" && preferredModel.toLowerCase().includes("realtime")) {
+    candidates.push(preferredModel);
+  }
+  for (const candidate of fallbackModels) {
+    if (candidate && !candidates.includes(candidate)) candidates.push(candidate);
+  }
+  const response = await fetch("https://api.openai.com/v1/models", {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    cache: "no-store",
+  }).catch(() => null);
+  if (!response || !response.ok) return candidates[0] ?? "gpt-4o-realtime-preview";
+  const data = await response.json().catch(() => ({}));
+  const modelIds = Array.isArray(data?.data)
+    ? data.data.map((row: { id?: string }) => (typeof row?.id === "string" ? row.id : "")).filter(Boolean)
+    : [];
+  for (const candidate of candidates) {
+    if (modelIds.includes(candidate)) return candidate;
+  }
+  const model = modelIds.find((value) => String(value).includes("realtime"));
+  if (model && typeof model === "string") return model;
+  return candidates[0] ?? "gpt-4o-realtime-preview";
 }
 
 async function createVoicePromptEvent(input: { tenantId: string; conversationId: string; scenario: VoiceScenario; text: string }) {
@@ -1213,7 +1241,7 @@ async function getDentalKnowledgeContext(tenantId: string, speech: string) {
 function sanitizeVoiceSettings(value: Record<string, unknown>) {
   return {
     textModel: stringValue(value.textModel, "gpt-4.1-mini"),
-    realtimeModel: stringValue(value.realtimeModel, "gpt-realtime-mini"),
+    realtimeModel: stringValue(value.realtimeModel, "gpt-4o-realtime-preview"),
     transcriptionModel: stringValue(value.transcriptionModel, "gpt-4o-transcribe"),
     voice: stringValue(value.voice, "Polly.Joanna-Neural"),
     speed: boundedNumber(value.speed, 1, 0.6, 1.4),
@@ -1591,7 +1619,7 @@ function objectValue(value: unknown) {
 }
 
 function defaultVoiceAgents(tenantId: string) {
-  const commonSettings = { realtimeModel: "gpt-realtime-mini", transcriptionModel: "gpt-4o-transcribe", voice: "alloy", temperature: 0.35 };
+  const commonSettings = { realtimeModel: "gpt-4o-realtime-preview", transcriptionModel: "gpt-4o-transcribe", voice: "alloy", temperature: 0.35 };
   return [
     {
       id: "agent_inbound_receptionist",
