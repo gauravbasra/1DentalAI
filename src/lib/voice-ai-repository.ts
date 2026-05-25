@@ -812,9 +812,11 @@ async function generateVoiceReply(input: { tenantId: string; conversationId: str
   if (booking) return booking;
 
   const missing = missingVoiceBookingFields(input.memory);
-  if (input.memory.appointmentIntent && missing.length) {
-    const reply = nextBookingQuestion(input.memory, missing);
-    return { reply, memoryPatch: { missing, bookingStatus: "NEEDS_MORE_INFO" as const }, lastAssistantAsk: missing[0] };
+  // Prevent loops: once we have a caller name, do not keep re-asking for it.
+  const normalizedMissing = input.memory.callerName ? missing.filter((field) => field !== "caller_name") : missing;
+  if (input.memory.appointmentIntent && normalizedMissing.length) {
+    const reply = nextBookingQuestion(input.memory, normalizedMissing);
+    return { reply, memoryPatch: { missing: normalizedMissing, bookingStatus: "NEEDS_MORE_INFO" as const }, lastAssistantAsk: normalizedMissing[0] };
   }
   const openAi = await getOpenAiWebchatConfig(input.tenantId).catch(() => null);
   if (!openAi?.apiKey) return { reply: ruleBasedVoiceReply(input.scenario, speech, input.memory), lastAssistantAsk: "rules_fallback" };
