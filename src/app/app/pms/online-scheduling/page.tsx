@@ -71,7 +71,7 @@ export default async function OnlineSchedulingPage({ searchParams }: { searchPar
   const conversion = totalClicks ? Math.round((totalBookings / totalClicks) * 100) : 0;
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/online-scheduling" roleKey={role.key}>
       <PageHeader
         eyebrow="PMS online scheduling"
         title="Booking links, availability, and PMS writeback"

@@ -52,7 +52,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const noShowRate = ratio(reports.noShows.noShows, reports.noShows.scheduled);
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/reports" roleKey={role.key}>
       <PageHeader
         eyebrow="PMS performance intelligence"
         title="Practice performance dashboard"

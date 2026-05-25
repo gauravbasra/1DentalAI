@@ -126,7 +126,7 @@ export default async function FormsPage({ searchParams }: { searchParams: Promis
   const pendingChanges = changes.filter((change) => change.status === "PENDING");
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/forms" roleKey={role.key}>
       <PageHeader
         eyebrow="PMS forms foundation"
         title="Intake forms and profile review"

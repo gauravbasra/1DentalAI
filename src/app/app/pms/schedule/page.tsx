@@ -36,7 +36,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   const [board, patients] = await Promise.all([getScheduleBoard(session.tenantId, params.date), listPatients(session.tenantId)]);
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/schedule" roleKey={role.key}>
       <PageHeader
         eyebrow="PMS appointment book"
         title="Schedule, pinboard, and chair flow"

@@ -60,7 +60,7 @@ export default async function PatientMapPage({ searchParams }: { searchParams: P
   }).toString()}`;
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/patient-map" roleKey={role.key}>
       <PageHeader
         eyebrow="Patient geography"
         title="Patient origin, service demand, payer mix, and membership map"

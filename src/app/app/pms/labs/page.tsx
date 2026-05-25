@@ -54,7 +54,7 @@ export default async function LabsPage({ searchParams }: { searchParams: Promise
   const [labs, patients] = await Promise.all([listLabCases(session.tenantId), listPatients(session.tenantId)]);
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/labs" roleKey={role.key}>
       <PageHeader eyebrow="PMS labs" title="Lab case tracking" body="Order, track, receive, and reconcile crowns, aligners, appliances, surgical guides, and outside lab cases before the appointment day." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/labs" />
       <PmsSectionNav active="/app/pms/labs" roleKey={role.key} />

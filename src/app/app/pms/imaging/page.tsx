@@ -52,7 +52,7 @@ export default async function ImagingPage({ searchParams }: { searchParams: Prom
   const [studies, patients, providers] = await Promise.all([listImagingStudies(session.tenantId), listPatients(session.tenantId), listProviders(session.tenantId)]);
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/imaging" roleKey={role.key}>
       <PageHeader eyebrow="PMS imaging" title="Imaging orders and clinical image record" body="Track x-rays, CBCT, intraoral photos, DICOM study IDs, findings, and provider review status from the patient chart." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/imaging" />
       <PmsSectionNav active="/app/pms/imaging" roleKey={role.key} />

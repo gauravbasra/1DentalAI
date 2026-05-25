@@ -249,7 +249,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
   const hrefFor = (nextModal: string, id?: string) => `/app/pms/inventory?${roleParam}&period=${reportingWindow.period}&modal=${nextModal}${id ? `&id=${id}` : ""}`;
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/inventory" roleKey={role.key}>
       <PageHeader eyebrow="PMS inventory" title="Practice inventory and vendor marketplace" body="Track equipment, chairs, consumables, medicines, injections, lots, expiry, clinical usage, vendors, purchase orders, tenders, RFPs, bids, and peer benchmarks in the PMS operating graph." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/inventory" />
       <PmsSectionNav active="/app/pms/inventory" roleKey={role.key} />

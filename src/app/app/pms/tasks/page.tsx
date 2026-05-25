@@ -33,7 +33,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const role = getRole(params.role);
   const tasks = await listTasks(undefined, role.key);
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/tasks" roleKey={role.key}>
       <PageHeader eyebrow="PMS tasking" title="Role-owned work queue" body="Operational tasks belong to the role that can complete them: front desk, provider, hygiene, assistant, treatment coordinator, billing, manager, marketing, compliance, or support." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/tasks" />
       <PmsSectionNav active="/app/pms/tasks" roleKey={role.key} />

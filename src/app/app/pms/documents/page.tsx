@@ -124,7 +124,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
   ]);
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/documents" roleKey={role.key}>
       <PageHeader eyebrow="PMS documents" title="Documents, prescriptions, and referrals" body="Manage patient forms, consents, EOBs, statements, prescription records, referrals, and signed clinical documents attached to the patient chart." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/documents" />
       <PmsSectionNav active="/app/pms/documents" roleKey={role.key} />

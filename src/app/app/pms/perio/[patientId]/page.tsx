@@ -55,7 +55,7 @@ export default async function PerioPage({ params, searchParams }: { params: Prom
   const patient = perio.patient;
 
   if (!patient) {
-    return <FoundationShell active="/app/pms" roleKey={role.key}><PageHeader eyebrow="Perio" title="Patient not found" body="The requested perio chart is not available." /></FoundationShell>;
+    return <FoundationShell active="/app/pms/patients" roleKey={role.key}><PageHeader eyebrow="Perio" title="Patient not found" body="The requested perio chart is not available." /></FoundationShell>;
   }
 
   const measures = perio.measures as PerioMeasure[];
@@ -64,7 +64,7 @@ export default async function PerioPage({ params, searchParams }: { params: Prom
   const completed = String(perio.exam?.status ?? "") === "COMPLETED";
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/patients" roleKey={role.key}>
       <PageHeader eyebrow={patient.chartNumber} title={`${patient.firstName} ${patient.lastName} perio`} body="Hygiene and periodontal workspace for pocket depths, bleeding, recession, mobility, furcation, diagnosis, and recall planning." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath={`/app/pms/perio/${patient.id}`} />
       <PmsSectionNav active="/app/pms/patients" roleKey={role.key} />

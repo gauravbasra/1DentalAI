@@ -35,7 +35,7 @@ export default async function PatientsPage({ searchParams }: { searchParams: Pro
   const patients = await listPatients(undefined, params.q ?? "");
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/patients" roleKey={role.key}>
       <PageHeader eyebrow="PMS family module" title="Patients and family accounts" body="Create the patient and the guarantor/account record together, then work from the same family, chart, insurance, ledger, recall, treatment, and document context." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/patients" />
       <PmsSectionNav active="/app/pms/patients" roleKey={role.key} />

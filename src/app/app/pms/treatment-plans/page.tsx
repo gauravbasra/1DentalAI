@@ -165,7 +165,7 @@ export default async function TreatmentPlansPage({ searchParams }: { searchParam
   const benefitRules = benefitWorkup.rules as BenefitRuleRow[];
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/treatment-plans" roleKey={role.key}>
       <PageHeader eyebrow="PMS treatment planning" title="Treatment plan builder" body="Create phased treatment plans from real procedure codes, estimate insurance and patient portions, accept cases, and hand off accepted treatment to scheduling." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/treatment-plans" />
       <PmsSectionNav active="/app/pms/treatment-plans" roleKey={role.key} />

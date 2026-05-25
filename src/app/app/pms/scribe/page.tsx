@@ -14,7 +14,7 @@ export default async function PmsScribePage({ searchParams }: { searchParams: Pr
   const [patients, procedureCodes] = await Promise.all([listPatients(session.tenantId), listProcedureCodes(session.tenantId)]);
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/scribe" roleKey={role.key}>
       <PageHeader
         eyebrow="Clinical AI"
         title="Scribing and notes"

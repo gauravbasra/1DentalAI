@@ -138,7 +138,7 @@ export default async function AppointmentControlPage({
 
   if (!control) {
     return (
-      <FoundationShell active="/app/pms" roleKey={role.key}>
+      <FoundationShell active="/app/pms/schedule" roleKey={role.key}>
         <PageHeader eyebrow="PMS appointment" title="Appointment not found" body="The requested appointment is not available in this tenant." />
       </FoundationShell>
     );
@@ -154,7 +154,7 @@ export default async function AppointmentControlPage({
   const hardBlockers = control.readinessBlockers.filter((item) => item.severity === "HARD");
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/schedule" roleKey={role.key}>
       <PageHeader
         eyebrow="Appointment control"
         title={`${appointment.patientName ?? "Held appointment"} · ${appointment.appointmentType}`}

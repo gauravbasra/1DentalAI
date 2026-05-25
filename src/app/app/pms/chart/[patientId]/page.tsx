@@ -100,11 +100,11 @@ export default async function ChartPage({ params, searchParams }: { params: Prom
   const conditions = chart.conditions as ToothCondition[];
 
   if (!patient) {
-    return <FoundationShell active="/app/pms" roleKey={role.key}><PageHeader eyebrow="Chart" title="Patient not found" body="The requested chart is not available." /></FoundationShell>;
+    return <FoundationShell active="/app/pms/patients" roleKey={role.key}><PageHeader eyebrow="Chart" title="Patient not found" body="The requested chart is not available." /></FoundationShell>;
   }
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/patients" roleKey={role.key}>
       <PageHeader eyebrow={patient.chartNumber} title={`${patient.firstName} ${patient.lastName} clinical chart`} body="Dental charting workspace for odontogram findings, tooth/surface conditions, treatment-planned procedures, progress notes, medical alerts, and provider documentation." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath={`/app/pms/chart/${patient.id}`} />
       <PmsSectionNav active="/app/pms/patients" roleKey={role.key} />

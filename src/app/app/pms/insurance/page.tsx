@@ -167,7 +167,7 @@ export default async function InsurancePage({ searchParams }: { searchParams: Pr
   const coverageGaps = board.coverageGaps as CoverageGapRow[];
   const benefitUtilization = board.benefitUtilization as BenefitUtilizationRow[];
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/insurance" roleKey={role.key}>
       <PageHeader eyebrow="PMS insurance" title="Insurance and claim readiness" body="Maintain payer plans, attach patient coverage, track verified benefits, and build clean claims from posted clinical procedures." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/insurance" />
       <PmsSectionNav active="/app/pms/insurance" roleKey={role.key} />

@@ -179,7 +179,7 @@ export default async function PatientRecordPage({ params, searchParams }: { para
 
   if (!patient) {
     return (
-      <FoundationShell active="/app/pms" roleKey={role.key}>
+      <FoundationShell active="/app/pms/patients" roleKey={role.key}>
         <PageHeader eyebrow="PMS" title="Patient not found" body="The patient record does not exist in this tenant." />
       </FoundationShell>
     );
@@ -188,7 +188,7 @@ export default async function PatientRecordPage({ params, searchParams }: { para
   const name = `${patient.firstName} ${patient.lastName}`;
 
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/patients" roleKey={role.key}>
       <PageHeader eyebrow={patient.chartNumber} title={name} body="A PMS-grade patient workspace: family account, guarantor, demographics, chart, perio, treatment, insurance, ledger, recall, documents, and role-owned follow-up." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath={`/app/pms/patients/${patient.id}`} />
       <PmsSectionNav active="/app/pms/patients" roleKey={role.key} />

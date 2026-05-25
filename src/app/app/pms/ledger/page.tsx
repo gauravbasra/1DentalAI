@@ -91,7 +91,7 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
   const payments = board.payments as PaymentRow[];
   const claims = board.claims as ClaimRow[];
   return (
-    <FoundationShell active="/app/pms" roleKey={role.key}>
+    <FoundationShell active="/app/pms/ledger" roleKey={role.key}>
       <PageHeader eyebrow="PMS ledger" title="Patient ledger and payments" body="Post charges, accept patient payments, review balances, and keep claims tied to the account ledger." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath="/app/pms/ledger" />
       <PmsSectionNav active="/app/pms/ledger" roleKey={role.key} />
