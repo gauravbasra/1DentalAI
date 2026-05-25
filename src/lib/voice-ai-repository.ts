@@ -771,7 +771,7 @@ async function resolveRealtimeModel(tenantId: string, apiKey: string, preferredM
   for (const candidate of candidates) {
     if (modelIds.includes(candidate)) return candidate;
   }
-  const model = modelIds.find((value) => String(value).includes("realtime"));
+  const model = modelIds.find((value: string) => String(value).includes("realtime"));
   if (model && typeof model === "string") return model;
   return candidates[0] ?? "gpt-4o-realtime-preview";
 }
