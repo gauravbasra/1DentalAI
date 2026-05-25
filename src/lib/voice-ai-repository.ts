@@ -746,7 +746,7 @@ async function buildRealtimeStreamTwiML(input: { tenantId: string; conversationI
       <Parameter name="callerPhone" value="${twilioXmlEscape(input.payload?.From || input.payload?.Caller || "")}" />
     </Stream>
   </Connect>
-  <Say voice="Polly.Joanna-Neural">I can’t stay connected on the live assistant path right now. I have routed this to the front desk queue and someone will follow up with you shortly.</Say>
+  <Say voice="Polly.Joanna-Neural">The AI line is currently unavailable. I’m transferring you to the team queue now so this can continue in real time.</Say>
 </Response>`;
 }
 
