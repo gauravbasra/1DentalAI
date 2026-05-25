@@ -1,18 +1,22 @@
 import { newId, query } from "@/lib/db";
 import { getOpenAiWebchatConfig } from "@/lib/connector-control-repository";
-import { defaultTenantId } from "@/lib/pms-repository";
+import { createAppointmentHold, defaultTenantId, updateAppointmentStatus } from "@/lib/pms-repository";
 import { createTwilioCall, twilioRequest, updateTwilioCall, twilioXmlEscape } from "@/lib/twilio-provider";
 
 type VoiceScenario = "recall" | "reactivation" | "appointment_reminder" | "event_greeting" | "inbound_takeover";
 type TwilioPayload = Record<string, string>;
 type VoiceMemory = {
   callerName?: string;
+  callerFirstName?: string;
+  callerLastName?: string;
   callerPhone?: string;
   appointmentIntent?: boolean;
   requestedService?: string;
   requestedWindowRaw?: string;
   requestedDate?: string;
   requestedTime?: string;
+  offeredSlots?: VoiceSlot[];
+  selectedSlotStartsAt?: string;
   insuranceStatus?: "PROVIDED" | "NONE" | "UNKNOWN";
   insurancePlanName?: string;
   email?: string;
@@ -922,8 +926,14 @@ async function updateVoiceMemoryFromSpeech(input: {
   }
   const explicitName = speech.match(/\b(?:my name is|this is|i am|i'm)\s+([a-z][a-z'\-]+(?:\s+[a-z][a-z'\-]+){0,3})/i)?.[1];
   if (explicitName) memory.callerName = titleCaseName(explicitName);
-  if (!memory.callerName && input.existing.lastAssistantAsk === "callerName" && looksLikePersonName(speech)) {
-    memory.callerName = titleCaseName(speech);
+  if (!memory.callerName && input.existing.lastAssistantAsk === "callerName") {
+    const candidate = extractLikelyCallerName(speech);
+    if (candidate) memory.callerName = titleCaseName(candidate);
+  }
+  if (memory.callerName) {
+    const parts = splitName(memory.callerName);
+    memory.callerFirstName = parts.firstName || memory.callerFirstName;
+    memory.callerLastName = parts.lastName || memory.callerLastName;
   }
   const email = speech.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0];
   if (email) memory.email = email.toLowerCase();
@@ -943,6 +953,17 @@ async function updateVoiceMemoryFromSpeech(input: {
     memory.requestedDate = requested.date;
     memory.requestedTime = requested.time;
     memory.appointmentIntent = true;
+  }
+  if (input.existing.lastAssistantAsk === "slot_choice" && Array.isArray(input.existing.offeredSlots) && input.existing.offeredSlots.length) {
+    const picked = selectSlotFromSpeech(input.existing.offeredSlots, speech, memory.requestedDate);
+    if (picked) {
+      memory.selectedSlotStartsAt = picked.startsAt;
+      memory.requestedDate = picked.startsAt.slice(0, 10);
+      memory.requestedTime = picked.startsAt.slice(11, 16);
+      memory.requestedWindowRaw = `${memory.requestedDate} ${memory.requestedTime}`;
+      memory.offeredSlots = input.existing.offeredSlots;
+      memory.appointmentIntent = true;
+    }
   }
   if (!memory.patientId && memory.callerPhone) {
     const patient = await findPatientForVoice(input.tenantId, memory);
@@ -976,38 +997,40 @@ async function maybeHandleVoiceScheduling(tenantId: string, conversationId: stri
   if (!memory.appointmentIntent || memory.bookingStatus === "BOOKED" || memory.appointmentId) return null;
   const missing = missingVoiceBookingFields(memory);
   if (missing.length) return null;
-  const slot = await findVoiceSlot(tenantId, memory);
-  if (!slot) {
+  if (!memory.offeredSlots?.length) {
+    const offeredSlots = await findVoiceSlots(tenantId, memory);
+    if (!offeredSlots.length) {
     await createVoiceFollowUpTask(tenantId, conversationId, `Caller requested ${memory.requestedService} around ${memory.requestedWindowRaw}, but no available PMS slot was found. Review manually.`);
     return {
       reply: `I have your request for ${memory.requestedService} around ${memory.requestedWindowRaw}. I don’t see that exact time open, so I’m flagging the front desk to find the closest option and follow up.`,
-      memoryPatch: { bookingStatus: "NO_SLOT" as const },
+        memoryPatch: { bookingStatus: "NO_SLOT" as const, offeredSlots: [] },
       lastAssistantAsk: "staff_slot_review",
     };
   }
+    const choiceText = offeredSlots.slice(0, 3).map((slot) => formatVoiceSlot(slot)).join(", ");
+    return {
+      reply: `I can do ${choiceText}. Which one would you like?`,
+      memoryPatch: { offeredSlots: offeredSlots.slice(0, 3), bookingStatus: "NEEDS_MORE_INFO" as const },
+      lastAssistantAsk: "slot_choice",
+    };
+  }
+  const slot = memory.selectedSlotStartsAt
+    ? memory.offeredSlots.find((row) => row.startsAt === memory.selectedSlotStartsAt) ?? memory.offeredSlots[0]
+    : memory.offeredSlots[0];
+  if (!slot) return null;
   const patient = await ensureVoicePatient(tenantId, memory);
-  const appointmentId = newId("appt");
-  await query(
-    `insert into "PmsAppointment"
-       ("id", "tenantId", "patientId", "providerId", "operatoryId", "startsAt", "endsAt", "status", "appointmentType", "readinessStatus", "notes", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6::timestamp, $7::timestamp, 'CONFIRMED', $8, 'READY', $9, current_timestamp)`,
-    [
-      appointmentId,
-      tenantId,
-      patient.id,
-      slot.providerId,
-      slot.operatoryId,
-      slot.startsAt,
-      slot.endsAt,
-      memory.requestedService || "Dental visit",
-      `Booked by Voice AI from conversation ${conversationId}. Caller requested ${memory.requestedWindowRaw}.`,
-    ],
-  );
-  await query(
-    `insert into "PmsAppointmentStatusHistory" ("id", "appointmentId", "status", "actorRole", "note")
-     values ($1, $2, 'CONFIRMED', 'voice_ai', $3)`,
-    [newId("apst"), appointmentId, `Voice AI booked ${formatVoiceSlot(slot)}.`],
-  );
+  const hold = await createAppointmentHold({
+    tenantId,
+    patientId: patient.id,
+    providerId: slot.providerId ?? undefined,
+    operatoryId: slot.operatoryId ?? undefined,
+    startsAt: slot.startsAt,
+    endsAt: slot.endsAt,
+    appointmentType: memory.requestedService || "Dental visit",
+    notes: `Held by Voice AI from conversation ${conversationId}. Caller requested ${memory.requestedWindowRaw}.`,
+    actorRole: "voice_ai",
+  });
+  await updateAppointmentStatus(hold.id, "CONFIRMED", tenantId, "voice_ai");
   await query(
     `update "PhoneConversation"
      set "patientId" = $3,
@@ -1017,9 +1040,9 @@ async function maybeHandleVoiceScheduling(tenantId: string, conversationId: stri
        "outcome" = 'PMS_APPOINTMENT_BOOKED',
        "updatedAt" = current_timestamp
      where "tenantId" = $1 and "id" = $2`,
-    [tenantId, conversationId, patient.id, appointmentId, `${patient.firstName} ${patient.lastName}`.trim()],
+    [tenantId, conversationId, patient.id, hold.id, `${patient.firstName} ${patient.lastName}`.trim()],
   );
-  await audit(tenantId, "voice_ai", "APPOINTMENT_BOOKED_FROM_VOICE_AI", "PmsAppointment", appointmentId, "ALLOWED", {
+  await audit(tenantId, "voice_ai", "APPOINTMENT_BOOKED_FROM_VOICE_AI", "PmsAppointment", hold.id, "ALLOWED", {
     conversationId,
     slot,
     patientId: patient.id,
@@ -1027,7 +1050,7 @@ async function maybeHandleVoiceScheduling(tenantId: string, conversationId: stri
   const confirmation = await sendVoiceAppointmentSmsConfirmation({
     tenantId,
     conversationId,
-    appointmentId,
+    appointmentId: hold.id,
     patientId: patient.id,
     phone: memory.callerPhone || patient.phone || "",
     service: memory.requestedService || "Dental visit",
@@ -1035,7 +1058,7 @@ async function maybeHandleVoiceScheduling(tenantId: string, conversationId: stri
   });
   return {
     reply: `You’re booked for ${memory.requestedService} on ${formatVoiceSlot(slot)}. ${confirmation} Is there anything else I can help with?`,
-    memoryPatch: { bookingStatus: "BOOKED" as const, patientId: patient.id, appointmentId },
+    memoryPatch: { bookingStatus: "BOOKED" as const, patientId: patient.id, appointmentId: hold.id, offeredSlots: [], selectedSlotStartsAt: undefined },
     lastAssistantAsk: "booking_complete",
   };
 }
@@ -1046,6 +1069,7 @@ function missingVoiceBookingFields(memory: VoiceMemory) {
     !memory.callerName ? "callerName" : null,
     !memory.requestedService ? "requestedService" : null,
     !memory.requestedDate || !memory.requestedTime ? "requestedWindow" : null,
+    !memory.insuranceStatus ? "insurance" : null,
   ].filter(Boolean) as string[];
 }
 
@@ -1060,41 +1084,83 @@ function nextBookingQuestion(memory: VoiceMemory, missing: string[]) {
     const details = memory.requestedWindowRaw ? `I still have ${memory.requestedWindowRaw} noted. ` : "";
     return `${prefix}${details}What type of visit should I book, like a cleaning, new patient exam, consult, or urgent problem visit?`;
   }
+  if (missing[0] === "insurance") {
+    return `${prefix}Do you have dental insurance you’d like us to use, or should I note this as self-pay?`;
+  }
   return `${prefix}What day and time works best for you?`;
 }
 
-async function findVoiceSlot(tenantId: string, memory: VoiceMemory): Promise<VoiceSlot | null> {
-  if (!memory.requestedDate || !memory.requestedTime) return null;
-  const startsAt = `${memory.requestedDate} ${memory.requestedTime}:00`;
-  const endsAt = addMinutesIsoish(startsAt, defaultDurationForService(memory.requestedService));
-  const candidates = await query<VoiceSlot>(
-    `select p."id" as "providerId",
-            p."displayName" as "providerName",
-            o."id" as "operatoryId",
-            o."name" as "operatoryName",
-            $2::timestamp::text as "startsAt",
-            $3::timestamp::text as "endsAt"
-     from "PmsProvider" p
-     cross join "PmsOperatory" o
-     where p."tenantId" = $1
-       and o."tenantId" = $1
-       and p."status" = 'ACTIVE'
-       and o."status" in ('READY', 'ACTIVE')
-       and not exists (
-         select 1 from "PmsAppointment" a
-         where a."tenantId" = $1
-           and a."status" not in ('CANCELED', 'NO_SHOW', 'BROKEN')
-           and a."startsAt" < $3::timestamp
-           and a."endsAt" > $2::timestamp
-           and (a."providerId" = p."id" or a."operatoryId" = o."id")
-       )
-     order by case when lower(p."providerType") like '%hyg%' and lower($4) like '%hygiene%' then 0 else 1 end,
-              p."displayName",
-              o."code"
-     limit 1`,
-    [tenantId, startsAt, endsAt, memory.requestedService || ""],
-  );
-  return candidates.rows[0] ?? null;
+function extractLikelyCallerName(speech: string) {
+  const cleaned = speech
+    .replace(/[0-9]/g, "")
+    .replace(/\b(yes|yeah|yep|no|nope|uh|um|okay|ok|sure)\b/gi, "")
+    .trim();
+  if (!cleaned) return null;
+  if (cleaned.length > 80) return null;
+  // Avoid treating schedule/service phrases as names.
+  if (/(monday|tuesday|wednesday|thursday|friday|saturday|sunday|\b(am|pm)\b|appointment|cleaning|exam|consult|insurance|billing)/i.test(cleaned)) return null;
+  if (looksLikePersonName(cleaned)) return cleaned;
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2 && parts.length <= 4) return parts.join(" ");
+  // Accept a single first name as a last resort so we can move forward and confirm later.
+  if (parts.length === 1 && parts[0].length >= 2) return parts[0];
+  return null;
+}
+
+function selectSlotFromSpeech(offered: VoiceSlot[], speech: string, preferredDate?: string) {
+  if (!offered.length) return null;
+  const normalized = speech.toLowerCase();
+  if (/\b(first|1|one)\b/.test(normalized)) return offered[0] ?? null;
+  if (/\b(second|2|two)\b/.test(normalized)) return offered[1] ?? null;
+  if (/\b(third|3|three)\b/.test(normalized)) return offered[2] ?? null;
+  const requested = parseRequestedDateTime(speech);
+  if (!requested) return null;
+  const date = requested.date || preferredDate || "";
+  const time = requested.time || "";
+  if (!date || !time) return null;
+  const startsAtPrefix = `${date} ${time}`;
+  return offered.find((slot) => slot.startsAt.startsWith(startsAtPrefix)) ?? null;
+}
+
+async function findVoiceSlots(tenantId: string, memory: VoiceMemory): Promise<VoiceSlot[]> {
+  if (!memory.requestedDate || !memory.requestedTime) return [];
+  const baseStartsAt = `${memory.requestedDate} ${memory.requestedTime}:00`;
+  const duration = defaultDurationForService(memory.requestedService);
+  const candidates = [baseStartsAt, addMinutesIsoish(baseStartsAt, 30), addMinutesIsoish(baseStartsAt, 60), addMinutesIsoish(baseStartsAt, 90), addMinutesIsoish(baseStartsAt, 120), addMinutesIsoish(baseStartsAt, -30), addMinutesIsoish(baseStartsAt, -60)];
+  const slots: VoiceSlot[] = [];
+  for (const startsAt of candidates) {
+    const endsAt = addMinutesIsoish(startsAt, duration);
+    const result = await query<VoiceSlot>(
+      `select p."id" as "providerId",
+              p."displayName" as "providerName",
+              o."id" as "operatoryId",
+              o."name" as "operatoryName",
+              $2::timestamp::text as "startsAt",
+              $3::timestamp::text as "endsAt"
+       from "PmsProvider" p
+       cross join "PmsOperatory" o
+       where p."tenantId" = $1
+         and o."tenantId" = $1
+         and p."status" = 'ACTIVE'
+         and o."status" in ('READY', 'ACTIVE')
+         and not exists (
+           select 1 from "PmsAppointment" a
+           where a."tenantId" = $1
+             and a."status" not in ('CANCELED', 'NO_SHOW', 'BROKEN')
+             and a."startsAt" < $3::timestamp
+             and a."endsAt" > $2::timestamp
+             and (a."providerId" = p."id" or a."operatoryId" = o."id")
+         )
+       order by case when lower(p."providerType") like '%hyg%' and lower($4) like '%hygiene%' then 0 else 1 end,
+                p."displayName",
+                o."code"
+       limit 1`,
+      [tenantId, startsAt, endsAt, memory.requestedService || ""],
+    );
+    if (result.rows[0]) slots.push(result.rows[0]);
+    if (slots.length >= 3) break;
+  }
+  return slots;
 }
 
 async function ensureVoicePatient(tenantId: string, memory: VoiceMemory) {
