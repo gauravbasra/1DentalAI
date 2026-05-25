@@ -134,9 +134,10 @@ export function PatientMapClient({ apiKey, points, mode }: { apiKey: string; poi
 
   return (
     <div className="min-w-0">
-      <div className="relative h-[620px] min-h-[420px] overflow-hidden rounded-lg border border-neutral-200 bg-neutral-100" ref={mapRef}>
+      <div className="relative h-[620px] min-h-[420px] overflow-hidden rounded-lg border border-neutral-200 bg-neutral-100">
+        <div className="h-full" ref={mapRef} />
         {!apiKey ? (
-          <div className="grid h-full place-items-center px-6 text-center">
+          <div className="absolute inset-0 grid h-full place-items-center px-6 text-center">
             <div>
               <p className="text-lg font-semibold text-neutral-950">Google Maps is not configured</p>
               <p className="mt-2 max-w-xl text-sm leading-6 text-neutral-600">Add the Maps JavaScript and Geocoding-enabled API key to production as <code className="rounded bg-white px-1 py-0.5">GOOGLE_MAPS_API_KEY</code>.</p>
