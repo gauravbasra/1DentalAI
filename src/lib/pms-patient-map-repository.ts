@@ -791,12 +791,12 @@ const CITY_CENTROIDS: Record<string, { lat: number; lng: number }> = {
   "wheat ridge,co": { lat: 39.7661, lng: -105.0772 },
 };
 
-function fallbackGeocodeAddress(row: Pick<FamilyAddressRow, "city" | "state" | "postalCode">, address: string, failureReason?: string): GeocodeResult {
+function fallbackGeocodeAddress(row: Pick<FamilyAddressRow, "id" | "city" | "state" | "postalCode">, address: string, failureReason?: string): GeocodeResult {
   const zip = row.postalCode?.match(/\d{5}/)?.[0];
   const cityKey = `${row.city ?? ""},${row.state ?? ""}`.toLowerCase().replace(/\s+/g, " ").trim();
   const base = (zip ? ZIP_CENTROIDS[zip] : null) ?? CITY_CENTROIDS[cityKey] ?? CITY_CENTROIDS["denver,co"];
   const precision = zip ? "ZIP_CENTROID_FALLBACK" : CITY_CENTROIDS[cityKey] ? "CITY_CENTROID_FALLBACK" : "PRACTICE_AREA_FALLBACK";
-  const offset = deterministicOffset(address, zip ? 0.012 : precision === "CITY_CENTROID_FALLBACK" ? 0.03 : 0.055);
+  const offset = deterministicOffset(`${row.id}:${address}`, zip ? 0.012 : precision === "CITY_CENTROID_FALLBACK" ? 0.03 : 0.075);
   return {
     ok: true,
     formattedAddress: [row.city, row.state, zip].filter(Boolean).join(", ") || "Denver, CO practice-area fallback",
