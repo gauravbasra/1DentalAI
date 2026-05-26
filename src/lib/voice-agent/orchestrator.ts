@@ -1,7 +1,7 @@
 import { getOpenAiWebchatConfig } from "@/lib/connector-control-repository";
 import { defaultTenantId } from "@/lib/pms-repository";
 import { appendCallTranscript, createAppointmentRequest, createVoiceAgentCall, loadVoiceAgentSession, upsertVoiceAgentSession } from "./repository";
-import { computeMissingFields, mergeEntities, newConversationState, nextQuestion, normalizeIntent, normalizePatientType } from "./state-manager";
+import { computeMissingFields, mergeEntities, newConversationState, nextQuestion, normalizeIntent } from "./state-manager";
 import type { ConversationState, ExtractedEntities, Slot, VoiceAgentIntent } from "./types";
 import type { SchedulingAdapter } from "./scheduling/adapters";
 

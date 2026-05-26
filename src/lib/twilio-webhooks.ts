@@ -103,6 +103,8 @@ async function markInboundCallForAiTakeover(conversationId: string) {
   );
 }
 
+// Reserved for voicemail fallback when AI is unavailable.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function voicemailTwiML(recordingUrl: string, transcriptionUrl: string, transcription: string, greeting: string) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>

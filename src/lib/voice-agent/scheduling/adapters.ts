@@ -58,9 +58,12 @@ export class MockSchedulingAdapter implements SchedulingAdapter {
     };
   }
 
-  async confirmAppointment(_practiceId: string | null, heldSlotId: string, _payload: Record<string, unknown>) {
+  async confirmAppointment(_practiceId: string | null, heldSlotId: string, payload: Record<string, unknown>) {
+    void payload;
     return { externalAppointmentId: `mock_appt_${heldSlotId}` };
   }
 
-  async releaseHold(_practiceId: string | null, _heldSlotId: string) {}
+  async releaseHold(_practiceId: string | null, heldSlotId: string) {
+    void heldSlotId;
+  }
 }

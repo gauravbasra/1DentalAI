@@ -36,6 +36,7 @@ function slotMatchesCriteria(slot: Slot, criteria: SlotCriteria) {
 
 async function pickActiveSlug(tenantId: string, practiceId: string | null): Promise<string | null> {
   // practiceId mapping is optional for now; prefer any ACTIVE scheduling link.
+  void practiceId;
   const result = await query<{ slug: string }>(
     `select "slug"
      from "PmsOnlineSchedulingLink"
@@ -70,7 +71,10 @@ export class OnlineSchedulingAdapter implements SchedulingAdapter {
   }
 
   async holdSlot(practiceId: string | null, slotId: string, _patient: Record<string, unknown>): Promise<HeldSlot> {
+    void practiceId;
+    void _patient;
     const [startsAt, providerId, operatoryId] = slotId.split("|");
+    void operatoryId;
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
     return {
       heldSlotId: slotId,
@@ -111,5 +115,8 @@ export class OnlineSchedulingAdapter implements SchedulingAdapter {
     return { externalAppointmentId: booking.appointmentId };
   }
 
-  async releaseHold(_practiceId: string | null, _heldSlotId: string) {}
+  async releaseHold(practiceId: string | null, heldSlotId: string) {
+    void practiceId;
+    void heldSlotId;
+  }
 }
