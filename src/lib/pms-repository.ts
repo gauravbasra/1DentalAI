@@ -3061,6 +3061,40 @@ export async function addPerioMeasure(patientId: string, input: { tooth: string;
   return result.rows[0];
 }
 
+export async function undoLastPerioMeasure(
+  patientId: string,
+  input: { actorRole?: string },
+  tenantId = defaultTenantId,
+) {
+  const exam = (await query<{ id: string }>(
+    `select pe."id" from "PmsPerioExam" pe
+     join "PmsPatient" p on p."id" = pe."patientId"
+     where pe."patientId" = $1 and p."tenantId" = $2 and pe."status" = 'IN_PROGRESS'
+     order by pe."examDate" desc limit 1`,
+    [patientId, tenantId],
+  )).rows[0];
+  if (!exam) return null;
+
+  const result = await query(
+    `delete from "PmsPerioMeasure"
+      where "id" = (
+        select pm."id" from "PmsPerioMeasure" pm
+        where pm."perioExamId" = $1
+        order by pm."createdAt" desc
+        limit 1
+      )
+      returning *`,
+    [exam.id],
+  );
+  if (!result.rows[0]) return null;
+
+  await addAudit(tenantId, input.actorRole ?? "rdh", "PERIO_MEASURE_UNDONE", "PmsPerioMeasure", result.rows[0].id, "ALLOWED", {
+    patientId,
+    examId: exam.id,
+  });
+  return result.rows[0];
+}
+
 export async function completePerioExam(patientId: string, input: { diagnosis: string; providerId?: string; actorRole?: string }, tenantId = defaultTenantId) {
   const patient = await getPatient(patientId, tenantId);
   if (!patient) return null;
@@ -5563,7 +5597,15 @@ export async function createReputationRecoveryCase(input: {
   return result.rows[0];
 }
 
-async function addAudit(tenantId: string, actorRole: string, eventType: string, targetType: string, targetId: string, outcome: string, metadata?: unknown) {
+export async function addAudit(
+  tenantId: string,
+  actorRole: string,
+  eventType: string,
+  targetType: string,
+  targetId: string,
+  outcome: string,
+  metadata?: unknown,
+) {
   await query(
     `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
      values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,

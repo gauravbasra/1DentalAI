@@ -2174,6 +2174,7 @@ export async function createSoftphoneOutboundDial(input: {
   const voiceAgentId = input.voiceAgentId || null;
   const id = newId("pctrl");
   const conversationId = newId("phone");
+  const providerConferenceName = mode === "OPERATOR_BRIDGE" ? conferenceNameForConversation(conversationId) : null;
   const activeCallId = newId("pcall");
   const voiceAgentRunId = mode === "VOICE_AI" ? newId("vairun") : null;
   const patientMatch = await findPatientByPhone(tenantId, targetNumber);
@@ -2204,15 +2205,27 @@ export async function createSoftphoneOutboundDial(input: {
       mode === "VOICE_AI" ? "VOICE_AI_OUTBOUND" : "SOFTPHONE_OUTBOUND",
       mode === "VOICE_AI"
         ? `Voice AI outbound call requested to ${targetNumber}.`
-        : `Softphone bridge requested. Twilio calls the operator first, then bridges to ${targetNumber} with recording, status callbacks, and transcript hooks.`,
+        : `Softphone bridge requested. Twilio creates an operator leg and patient leg into a conference with recording, status callbacks, and transcript hooks.`,
     ],
   );
 
   await query(
     `insert into "PhoneActiveCall"
-       ("id", "tenantId", "conversationId", "voiceAgentId", "voiceAgentRunId", "phoneNumberId", "fromNumber", "toNumber", "direction", "callState", "callControlMode", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, $8, 'OUTBOUND', $9, $10, current_timestamp)`,
-    [activeCallId, tenantId, conversationId, voiceAgentId, voiceAgentRunId, input.fromNumberId || null, fromNumber || "unknown", targetNumber || "unknown", missing.length ? "BLOCKED" : "QUEUED", mode === "VOICE_AI" ? "TWILIO_VOICE_AI" : "TWILIO_OPERATOR_BRIDGE"],
+       ("id", "tenantId", "conversationId", "voiceAgentId", "voiceAgentRunId", "phoneNumberId", "fromNumber", "toNumber", "direction", "callState", "providerConferenceName", "callControlMode", "updatedAt")
+     values ($1, $2, $3, $4, $5, $6, $7, $8, 'OUTBOUND', $9, $10, $11, current_timestamp)`,
+    [
+      activeCallId,
+      tenantId,
+      conversationId,
+      voiceAgentId,
+      voiceAgentRunId,
+      input.fromNumberId || null,
+      fromNumber || "unknown",
+      targetNumber || "unknown",
+      missing.length ? "BLOCKED" : "QUEUED",
+      providerConferenceName,
+      mode === "VOICE_AI" ? "TWILIO_VOICE_AI" : "TWILIO_OPERATOR_BRIDGE",
+    ],
   );
   if (mode === "VOICE_AI" && voiceAgentRunId) {
     await query(
@@ -2238,6 +2251,7 @@ export async function createSoftphoneOutboundDial(input: {
   let providerRequest: Record<string, unknown> | null = null;
   let providerResponse: Record<string, unknown> | null = null;
   let providerCallId: string | null = null;
+  let bridgeCallSid: string | null = null;
   let executedAt: Date | null = null;
 
   if (!missing.length && fromNumber) {
@@ -2248,7 +2262,7 @@ export async function createSoftphoneOutboundDial(input: {
     const aiUrl = `${origin}/api/twilio/voice/ai/start?conversationId=${encodeURIComponent(conversationId)}&scenario=event_greeting&reason=softphone_voice_ai${voiceAgentId ? `&agentId=${encodeURIComponent(voiceAgentId)}` : ""}${voiceAgentRunId ? `&agentRunId=${encodeURIComponent(voiceAgentRunId)}` : ""}`;
     const twiml = mode === "VOICE_AI"
       ? `<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${twilioXmlEscape(aiUrl)}</Redirect></Response>`
-      : `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">1DentalAI is connecting your outbound call now.</Say><Dial callerId="${twilioXmlEscape(fromNumber)}" record="record-from-answer-dual" recordingStatusCallback="${twilioXmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST"><Number statusCallback="${twilioXmlEscape(statusCallback)}" statusCallbackMethod="POST">${twilioXmlEscape(targetNumber)}</Number></Dial><Say voice="alice">The call has ended.</Say><Record maxLength="120" playBeep="false" transcribe="true" transcribeCallback="${twilioXmlEscape(transcriptionUrl)}" /></Response>`;
+      : `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">1DentalAI is connecting your outbound call now.</Say><Dial><Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="false">${twilioXmlEscape(providerConferenceName || conferenceNameForConversation(conversationId))}</Conference></Dial></Response>`;
     providerRequest = {
       provider: "TWILIO",
       mode,
@@ -2256,29 +2270,54 @@ export async function createSoftphoneOutboundDial(input: {
       from: fromNumber,
       to: mode === "VOICE_AI" ? targetNumber : operatorNumber,
       finalTarget: targetNumber,
+      conferenceName: providerConferenceName,
     };
-    const result = await createTwilioCall({
+    const operatorOrAiResult = await createTwilioCall({
       tenantId,
       from: fromNumber,
       to: mode === "VOICE_AI" ? targetNumber : operatorNumber!,
       statusCallback,
       twiml,
     });
-    providerStatus = result.providerStatus;
-    blockedReason = result.ok ? null : result.error ?? "Twilio provider execution failed.";
-    resultSummary = result.ok
-      ? `Twilio accepted ${mode === "VOICE_AI" ? "Voice AI outbound call" : "operator bridge softphone call"} with status ${result.status}.`
-      : `Twilio rejected softphone dial: ${result.error}`;
-    providerResponse = result.data ?? { sid: result.sid, status: result.status, error: result.error };
-    providerCallId = result.sid ?? null;
-    executedAt = result.ok ? new Date() : null;
+    providerStatus = operatorOrAiResult.providerStatus;
+    blockedReason = operatorOrAiResult.ok ? null : operatorOrAiResult.error ?? "Twilio provider execution failed.";
+    providerCallId = operatorOrAiResult.sid ?? null;
+    executedAt = operatorOrAiResult.ok ? new Date() : null;
+    providerResponse = operatorOrAiResult.data ?? { sid: operatorOrAiResult.sid, status: operatorOrAiResult.status, error: operatorOrAiResult.error };
+
+    if (mode === "OPERATOR_BRIDGE" && operatorOrAiResult.ok) {
+      const targetLegTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial callerId="${twilioXmlEscape(fromNumber)}" record="record-from-answer-dual" recordingStatusCallback="${twilioXmlEscape(recordingUrl)}" recordingStatusCallbackMethod="POST"><Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="true">${twilioXmlEscape(providerConferenceName || conferenceNameForConversation(conversationId))}</Conference></Dial><Record maxLength="120" playBeep="false" transcribe="true" transcribeCallback="${twilioXmlEscape(transcriptionUrl)}" /></Response>`;
+      const targetLegResult = await createTwilioCall({
+        tenantId,
+        from: fromNumber,
+        to: targetNumber,
+        statusCallback,
+        twiml: targetLegTwiml,
+      });
+      providerStatus = targetLegResult.ok ? operatorOrAiResult.providerStatus : targetLegResult.providerStatus;
+      blockedReason = targetLegResult.ok ? null : targetLegResult.error ?? "Twilio target-leg bridge call failed.";
+      bridgeCallSid = targetLegResult.sid ?? null;
+      resultSummary = targetLegResult.ok
+        ? `Twilio accepted operator and patient conference legs for outbound softphone bridge.`
+        : `Twilio operator leg connected but patient leg failed: ${targetLegResult.error}`;
+      providerResponse = {
+        operatorLeg: operatorOrAiResult.data ?? { sid: operatorOrAiResult.sid, status: operatorOrAiResult.status, error: operatorOrAiResult.error },
+        patientLeg: targetLegResult.data ?? { sid: targetLegResult.sid, status: targetLegResult.status, error: targetLegResult.error },
+      };
+    } else {
+      resultSummary = operatorOrAiResult.ok
+        ? `Twilio accepted ${mode === "VOICE_AI" ? "Voice AI outbound call" : "operator bridge softphone call"} with status ${operatorOrAiResult.status}.`
+        : `Twilio rejected softphone dial: ${operatorOrAiResult.error}`;
+    }
+
     await query(
       `update "PhoneActiveCall"
        set "providerCallId" = $3,
-         "callState" = $4,
+         "bridgeCallSid" = $4,
+         "callState" = $5,
          "updatedAt" = current_timestamp
        where "tenantId" = $1 and "id" = $2`,
-      [tenantId, activeCallId, providerCallId, result.ok ? "QUEUED" : "PROVIDER_ERROR"],
+      [tenantId, activeCallId, providerCallId, bridgeCallSid, operatorOrAiResult.ok ? "QUEUED" : "PROVIDER_ERROR"],
     );
     if (voiceAgentRunId) {
       await query(
@@ -2289,7 +2328,7 @@ export async function createSoftphoneOutboundDial(input: {
            "blockedReason" = $6,
            "updatedAt" = current_timestamp
          where "tenantId" = $1 and "id" = $2`,
-        [tenantId, voiceAgentRunId, providerCallId, providerStatus, Boolean(result.ok), blockedReason],
+        [tenantId, voiceAgentRunId, providerCallId, providerStatus, Boolean(operatorOrAiResult.ok), blockedReason],
       );
     }
   }
@@ -2314,6 +2353,10 @@ export async function createSoftphoneOutboundDial(input: {
     providerResponse,
   });
   return { conversationId, activeCallId, providerStatus, blockedReason, resultSummary, providerCallId };
+}
+
+function conferenceNameForConversation(conversationId: string) {
+  return `onedentalai-${conversationId}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
 }
 
 export async function refreshPhoneCarrierStatus(input: {

@@ -7,31 +7,55 @@ import { scribeTemplates, type ScribeDraft, type ScribeProcedureCode, type Scrib
 type Props = {
   patients: PmsPatientSummary[];
   procedureCodes: ScribeProcedureCode[];
+  roleKey: string;
 };
 
 const controlClass = "min-w-0 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100";
 const buttonClass = "inline-flex min-h-10 items-center justify-center rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:bg-neutral-300";
 const secondaryButtonClass = "inline-flex min-h-10 items-center justify-center rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-semibold text-neutral-800 transition hover:bg-neutral-50 disabled:text-neutral-400";
+const approvalRoles = [
+  "owner_dentist",
+  "owner_doctor",
+  "associate_provider",
+  "rdh",
+  "clinical_assistant",
+  "super_admin",
+  "dso_admin",
+] as const;
 
 const defaultTranscript = "Patient reports sensitivity on tooth #19. Bitewing reviewed. Discussed MOD composite and possible crown if symptoms persist. Medical history reviewed with no changes.";
+type SavedScribeRecord = { noteId: string; treatmentPlanId: string | null };
+type WritebackOutput = {
+  externalPatientId: string;
+  createdCount: number;
+  blockedCount: number;
+  jobs: Array<{ localType: string; localId: string; jobId: string; status: string; blockedReason?: string }>;
+};
 
-export function PmsScribeWorkspace({ patients, procedureCodes }: Props) {
+export function PmsScribeWorkspace({ patients, procedureCodes, roleKey }: Props) {
   const [patientId, setPatientId] = useState(patients[0]?.id ?? "");
   const [templateKey, setTemplateKey] = useState("specific_exam");
   const [transcript, setTranscript] = useState(defaultTranscript);
   const [signedByName, setSignedByName] = useState("");
   const [patientAcknowledged, setPatientAcknowledged] = useState(false);
   const [providerAttestation, setProviderAttestation] = useState(false);
+  const [providerApprovalId, setProviderApprovalId] = useState("");
+  const initialApprovalRole = (approvalRoles as readonly string[]).includes(roleKey) ? roleKey : "associate_provider";
+  const [providerApprovalRole, setProviderApprovalRole] = useState(initialApprovalRole);
+  const [providerApprovalNote, setProviderApprovalNote] = useState("");
   const [recordingMode, setRecordingMode] = useState("manual_dictation");
   const [draft, setDraft] = useState<ScribeDraft | null>(null);
   const [noteBody, setNoteBody] = useState("");
   const [suggestions, setSuggestions] = useState<ScribeSuggestion[]>([]);
   const [tasks, setTasks] = useState<ScribeTaskDraft[]>([]);
   const [saving, setSaving] = useState(false);
+  const [writebackRunning, setWritebackRunning] = useState(false);
   const [recording, setRecording] = useState(false);
   const [message, setMessage] = useState("Ready to capture or paste the appointment conversation.");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const [lastSavedRecord, setLastSavedRecord] = useState<SavedScribeRecord | null>(null);
+  const [lastWriteback, setLastWriteback] = useState<WritebackOutput | null>(null);
 
   const selectedPatient = patients.find((patient) => patient.id === patientId);
   const consent = {
@@ -68,6 +92,109 @@ export function PmsScribeWorkspace({ patients, procedureCodes }: Props) {
     setSuggestions(payload.data.treatmentSuggestions);
     setTasks(payload.data.taskDrafts);
     setMessage("Draft generated. Review and edit before saving to the PMS chart.");
+  }
+
+  async function saveDraft() {
+    if (!draft || !patientId) return;
+    if (!consentReady) {
+      setMessage("Patient acknowledgement, signer name, and provider attestation are required before PMS save.");
+      return null;
+    }
+    setSaving(true);
+    setMessage("Saving approved draft package...");
+    const response = await fetch("/api/pms/scribe/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        patientId,
+        noteType: draft.noteType,
+        noteBody,
+        treatmentPlanName: draft.treatmentPlanName,
+        treatmentPlanNote: draft.treatmentPlanNote,
+        treatmentSuggestions: suggestions,
+        taskDrafts: tasks,
+        consent,
+        generation: draft.generation,
+      }),
+    });
+    const payload = await response.json();
+    setSaving(false);
+    if (!response.ok) {
+      setMessage(payload.error ?? "Unable to save scribe package.");
+      return null;
+    }
+    const record: SavedScribeRecord = {
+      noteId: String(payload.data?.noteId ?? ""),
+      treatmentPlanId: payload.data?.treatmentPlanId ?? null,
+    };
+    if (!record.noteId) {
+      setMessage("Saved package response was missing noteId.");
+      return null;
+    }
+    setLastSavedRecord(record);
+    setMessage(`Saved draft note, ${payload.data.treatmentItemIds?.length ?? 0} CDT rows, and ${payload.data.taskIds?.length ?? 0} tasks for provider review.`);
+    return record;
+  }
+
+  async function submitWriteback() {
+    if (!lastSavedRecord?.noteId && !draft) {
+      setMessage("Save draft first to generate chart artifact IDs for writeback.");
+      return;
+    }
+    if (!providerApprovalId.trim()) {
+      setMessage("Provider approval ID is required before writeback.");
+      return;
+    }
+    const clinicalNoteId = lastSavedRecord?.noteId || "";
+    const treatmentPlanId = lastSavedRecord?.treatmentPlanId || "";
+    await executeWriteback({ patientId, clinicalNoteId, treatmentPlanId });
+  }
+
+  async function saveAndWriteback() {
+    const record = await saveDraft();
+    if (!record?.noteId) return;
+    if (!providerApprovalId.trim()) {
+      setMessage("Add provider approval before writeback request.");
+      return;
+    }
+    await executeWriteback({ patientId, clinicalNoteId: record.noteId, treatmentPlanId: record.treatmentPlanId });
+  }
+
+  async function executeWriteback(input: { patientId: string; clinicalNoteId: string; treatmentPlanId: string | null }) {
+    setWritebackRunning(true);
+    setMessage("Submitting writeback request for clinical note and treatment plan...");
+    try {
+      const response = await fetch("/api/pms/scribe/writeback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: input.patientId,
+          clinicalNoteId: input.clinicalNoteId,
+          treatmentPlanId: input.treatmentPlanId,
+          providerApprovalId: providerApprovalId.trim(),
+          providerApprovalRole: providerApprovalRole.trim() || roleKey,
+          providerApprovalNote: providerApprovalNote.trim(),
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setMessage(payload.error ?? "Unable to create scribe writeback jobs.");
+        return;
+      }
+      const output = payload.data as WritebackOutput;
+      setLastWriteback(output);
+      if (input.treatmentPlanId || input.clinicalNoteId) {
+        setMessage(
+          `Writeback queued: ${output.createdCount} created, ${output.blockedCount} blocked. External patient: ${output.externalPatientId}`,
+        );
+      } else {
+        setMessage("No local artifacts were provided for writeback.");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to submit writeback request.");
+    } finally {
+      setWritebackRunning(false);
+    }
   }
 
   async function startRecording() {
@@ -119,38 +246,6 @@ export function PmsScribeWorkspace({ patients, procedureCodes }: Props) {
     setMessage(`Audio transcribed with ${payload.data.model}. Review transcript before draft generation.`);
   }
 
-  async function saveDraft() {
-    if (!draft || !patientId) return;
-    if (!consentReady) {
-      setMessage("Patient acknowledgement, signer name, and provider attestation are required before PMS save.");
-      return;
-    }
-    setSaving(true);
-    setMessage("Saving approved draft package...");
-    const response = await fetch("/api/pms/scribe/save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        patientId,
-        noteType: draft.noteType,
-        noteBody,
-        treatmentPlanName: draft.treatmentPlanName,
-        treatmentPlanNote: draft.treatmentPlanNote,
-        treatmentSuggestions: suggestions,
-        taskDrafts: tasks,
-        consent,
-        generation: draft.generation,
-      }),
-    });
-    const payload = await response.json();
-    setSaving(false);
-    if (!response.ok) {
-      setMessage(payload.error ?? "Unable to save scribe package.");
-      return;
-    }
-    setMessage(`Saved draft note, ${payload.data.treatmentItemIds?.length ?? 0} CDT rows, and ${payload.data.taskIds?.length ?? 0} tasks for provider review.`);
-  }
-
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
       <div className="grid gap-4">
@@ -171,6 +266,20 @@ export function PmsScribeWorkspace({ patients, procedureCodes }: Props) {
         <label className="grid gap-1 text-xs font-semibold text-neutral-700">
           Patient or guardian signer
           <input value={signedByName} onChange={(event) => setSignedByName(event.target.value)} className={controlClass} placeholder="Name on acknowledgement" />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-neutral-700">
+          Provider approval ID (required for writeback)
+          <input value={providerApprovalId} onChange={(event) => setProviderApprovalId(event.target.value)} className={controlClass} placeholder="e.g. APPROVE-2026-05-24-01" />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-neutral-700">
+          Provider approval role
+          <select value={providerApprovalRole} onChange={(event) => setProviderApprovalRole(event.target.value)} className={controlClass}>
+            {approvalRoles.map((role) => <option key={role} value={role}>{role}</option>)}
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-neutral-700">
+          Approval note (optional)
+          <textarea value={providerApprovalNote} onChange={(event) => setProviderApprovalNote(event.target.value)} rows={3} className={controlClass} placeholder="Clinical approval context and scope." />
         </label>
         <label className="grid gap-1 text-xs font-semibold text-neutral-700">
           Capture mode
@@ -202,6 +311,26 @@ export function PmsScribeWorkspace({ patients, procedureCodes }: Props) {
           <button type="button" onClick={() => setTranscript(defaultTranscript)} className={secondaryButtonClass}>Load sample</button>
         </div>
         <p className="rounded-md bg-neutral-50 p-3 text-sm text-neutral-700">{message}</p>
+        {lastSavedRecord ? (
+          <div className="rounded-md border border-neutral-200 bg-white p-3 text-xs text-neutral-700">
+            <p className="font-semibold text-neutral-900">Latest draft IDs</p>
+            <p>Clinical note: {lastSavedRecord.noteId}</p>
+            <p>Treatment plan: {lastSavedRecord.treatmentPlanId || "none"}</p>
+          </div>
+        ) : null}
+        {lastWriteback ? (
+          <div className="rounded-md border border-green-200 bg-green-50 p-3 text-xs text-green-900">
+            <p className="font-semibold">Last writeback attempt</p>
+            <p>External patient: {lastWriteback.externalPatientId}</p>
+            <p>Created: {lastWriteback.createdCount}</p>
+            <p>Blocked: {lastWriteback.blockedCount}</p>
+            <ul className="mt-2 list-disc space-y-1 pl-4">
+              {lastWriteback.jobs.map((job) => (
+                <li key={job.jobId}>{job.localType}:{job.localId} → {job.status}{job.blockedReason ? ` (${job.blockedReason})` : ""}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-4">
@@ -211,7 +340,11 @@ export function PmsScribeWorkspace({ patients, procedureCodes }: Props) {
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-700">Provider review draft</p>
               <h3 className="mt-1 text-lg font-semibold text-neutral-950">{draft?.treatmentPlanName || "No draft generated"}</h3>
             </div>
-            <button type="button" disabled={!draft || saving} onClick={saveDraft} className={buttonClass}>{saving ? "Saving..." : "Save approved output"}</button>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={!draft || saving} onClick={saveDraft} className={buttonClass}>{saving ? "Saving..." : "Save approved output"}</button>
+              <button type="button" disabled={!draft || saving || writebackRunning || !providerApprovalId.trim()} onClick={saveAndWriteback} className={buttonClass}>{saving || writebackRunning ? "Saving..." : "Save and request writeback"}</button>
+              <button type="button" disabled={!lastSavedRecord?.noteId || writebackRunning || !providerApprovalId.trim()} onClick={submitWriteback} className={secondaryButtonClass}>{writebackRunning ? "Submitting..." : "Submit writeback"}</button>
+            </div>
           </div>
           <textarea value={noteBody} onChange={(event) => setNoteBody(event.target.value)} rows={14} className={`${controlClass} mt-4 font-mono`} placeholder="Generated note appears here." />
         </div>

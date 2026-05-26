@@ -573,7 +573,9 @@ export async function getOpenAiWebchatConfig(tenantId = defaultTenantId) {
     }
   }
   const envKey = process.env.OPENAI_API_KEY || "";
-  const envAllowed = envKey && process.env.OPENAI_BAA_ENABLED === "true" && process.env.OPENAI_PHI_ALLOWED === "true";
+  const openAiPhiAllowed = String(process.env.OPENAI_PHI_ALLOWED || "").toLowerCase() === "true" || String(process.env.OPENAI_PHI_ALLOWED || "").toLowerCase() === "1" || String(process.env.OPENAI_PHI_ALLOWED || "").toLowerCase() === "yes";
+  const openAiBaaEnabled = String(process.env.OPENAI_BAA_ENABLED || "").toLowerCase() === "true" || String(process.env.OPENAI_BAA_ENABLED || "").toLowerCase() === "1" || String(process.env.OPENAI_BAA_ENABLED || "").toLowerCase() === "yes";
+  const envAllowed = envKey && openAiPhiAllowed && openAiBaaEnabled;
   const vaultApproved = Boolean(
     install?.credentialStatus === "VALIDATED" &&
     install.approvalStatus === "APPROVED" &&

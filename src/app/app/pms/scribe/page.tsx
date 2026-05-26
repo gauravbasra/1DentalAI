@@ -39,7 +39,7 @@ export default async function PmsScribePage({ searchParams }: { searchParams: Pr
         </PmsCard>
       </section>
 
-      <PmsScribeWorkspace patients={patients} procedureCodes={procedureCodes} />
+      <PmsScribeWorkspace patients={patients} procedureCodes={procedureCodes} roleKey={role.key} />
     </FoundationShell>
   );
 }

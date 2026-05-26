@@ -1,6 +1,9 @@
 import { revalidatePath } from "next/cache";
 import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
 import { EmptyPmsState, PmsCard, PmsSectionNav } from "@/components/pms-ui";
+import { PerioChartGrid } from "@/components/perio/perio-chart-grid";
+import { PerioSignoffPanel } from "@/components/perio/perio-signoff-panel";
+import { PerioVoiceCapture } from "@/components/perio/perio-voice-capture";
 import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
 import { addPerioMeasure, completePerioExam, getPerio } from "@/lib/pms-repository";
@@ -69,7 +72,7 @@ export default async function PerioPage({ params, searchParams }: { params: Prom
       <RoleSwitcher activeRole={role.key as RoleKey} basePath={`/app/pms/perio/${patient.id}`} />
       <PmsSectionNav active="/app/pms/patients" roleKey={role.key} />
 
-      <section className="grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
+        <section className="grid gap-6 xl:grid-cols-[0.7fr_1.3fr]">
         <PmsCard title="Record measurement" eyebrow="Six-point charting">
           <form action={addMeasureAction} className="grid gap-3">
             <input type="hidden" name="patientId" value={patient.id} />
@@ -105,22 +108,7 @@ export default async function PerioPage({ params, searchParams }: { params: Prom
             <Metric label="5mm+" value={deepSites} detail="deep pockets" />
             <Metric label="Status" value={String(perio.exam?.status ?? "not started").replaceAll("_", " ").toLowerCase()} detail={perio.exam?.diagnosis ?? "diagnosis pending"} />
           </div>
-          {measures.length ? (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {measures.map((m) => (
-                <div key={m.id} className="rounded-2xl bg-neutral-50 p-4">
-                  <div className="flex items-center justify-between">
-                    <p className="font-semibold text-neutral-950">Tooth {m.tooth} · {m.site}</p>
-                    <StatusPill tone={m.probingDepth >= 5 ? "red" : m.probingDepth >= 4 ? "amber" : "green"}>{m.probingDepth} mm</StatusPill>
-                  </div>
-                  <p className="mt-2 text-sm text-neutral-600">{m.bleeding ? "Bleeding" : "No bleeding"} · recession {m.recession ?? 0} mm</p>
-                  <p className="mt-1 text-xs text-neutral-500">Mobility {m.mobility ?? "0"} · furcation {m.furcation ?? "none"}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyPmsState title="No perio measurements yet" body="Start the exam by entering the first tooth and site. Measurements are stored per active perio exam and can be updated site by site." />
-          )}
+          {measures.length ? <PerioChartGrid measures={measures} /> : <EmptyPmsState title="No perio measurements yet" body="Start the exam by entering the first tooth and site. Measurements are stored per active perio exam and can be updated site by site." />}
           <form action={completeExamAction} className="mt-4 grid gap-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
             <input type="hidden" name="patientId" value={patient.id} />
             <label className="grid gap-1 text-sm font-semibold text-neutral-700">
@@ -132,6 +120,17 @@ export default async function PerioPage({ params, searchParams }: { params: Prom
             </button>
           </form>
         </PmsCard>
+
+        <PmsCard title="Voice perio capture" eyebrow="Hands-free workflow">
+          <PerioVoiceCapture patientId={patient.id} />
+        </PmsCard>
+
+        <PerioSignoffPanel
+          patientId={patient.id}
+          roleKey={role.key}
+          defaultApprovalRole={role.key}
+          signoffId={`PERIO-${patient.chartNumber || patient.id.slice(0, 8)}`}
+        />
       </section>
     </FoundationShell>
   );
