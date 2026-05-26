@@ -872,7 +872,7 @@ async function generateVoiceReply(input: { tenantId: string; conversationId: str
     "Use only the approved local knowledge context when answering dental process questions. If it is not enough, say you can have the team follow up.",
   ].join(" ");
   const payload = {
-    model: voiceSettings.textModel || openAi.model || "gpt-4.1-mini",
+    model: voiceSettings.textModel || openAi.model || "gpt-4o-mini",
     temperature: voiceSettings.temperature,
     max_output_tokens: voiceSettings.maxOutputTokens,
     instructions,
@@ -1380,7 +1380,7 @@ async function getDentalKnowledgeContext(tenantId: string, speech: string) {
 
 function sanitizeVoiceSettings(value: Record<string, unknown>) {
   return {
-    textModel: stringValue(value.textModel, "gpt-4.1-mini"),
+    textModel: stringValue(value.textModel, "gpt-4o-mini"),
     realtimeModel: stringValue(value.realtimeModel, "gpt-4o-realtime-preview"),
     transcriptionModel: stringValue(value.transcriptionModel, "gpt-4o-transcribe"),
     voice: stringValue(value.voice, "Polly.Joanna-Neural"),

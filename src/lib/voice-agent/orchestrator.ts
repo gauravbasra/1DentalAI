@@ -199,7 +199,7 @@ async function extractEntities(tenantId: string, text: string, state: Conversati
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { Authorization: `Bearer ${openAi.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: openAi.model || "gpt-4.1-mini", input: prompt, temperature: 0.1, max_output_tokens: 200 }),
+    body: JSON.stringify({ model: openAi.model || "gpt-4o-mini", input: prompt, temperature: 0.1, max_output_tokens: 200 }),
   }).catch(() => null);
   if (!response?.ok) return entities;
   const data = await response.json().catch(() => ({}));

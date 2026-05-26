@@ -7,14 +7,26 @@ function normalizeDay(value: string) {
   return value.trim().toLowerCase();
 }
 
+const PRACTICE_TZ = process.env.ONE_DENTAL_PRACTICE_TIMEZONE || process.env.TZ || "America/Denver";
+
+function weekdayLong(iso: string) {
+  return new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: PRACTICE_TZ }).format(new Date(iso));
+}
+
+function hourInTz(iso: string) {
+  const parts = new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: PRACTICE_TZ }).formatToParts(new Date(iso));
+  const hour = parts.find((p) => p.type === "hour")?.value;
+  return Number(hour || 0);
+}
+
 function slotMatchesCriteria(slot: Slot, criteria: SlotCriteria) {
   if (criteria.preferredDays?.length) {
-    const slotDay = normalizeDay(new Date(slot.slotStart).toLocaleDateString("en-US", { weekday: "long" }));
+    const slotDay = normalizeDay(weekdayLong(slot.slotStart));
     const wanted = new Set(criteria.preferredDays.map((d) => normalizeDay(d)));
     if (!wanted.has(slotDay)) return false;
   }
   if (criteria.preferredTimeWindows?.length) {
-    const hour = new Date(slot.slotStart).getHours();
+    const hour = hourInTz(slot.slotStart);
     const window = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
     const wanted = new Set(criteria.preferredTimeWindows.map((w) => normalizeDay(w)));
     if (!wanted.has(window)) return false;
@@ -101,4 +113,3 @@ export class OnlineSchedulingAdapter implements SchedulingAdapter {
 
   async releaseHold(_practiceId: string | null, _heldSlotId: string) {}
 }
-
