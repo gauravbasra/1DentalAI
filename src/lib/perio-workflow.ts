@@ -60,6 +60,9 @@ export async function applyPerioVoiceCommand(input: VoiceInput): Promise<VoiceRe
       furcation: parsed.furcation,
       actorRole: input.actorRole,
     }, input.tenantId);
+    if (!measure) {
+      throw Object.assign(new Error("Unable to record perio measurement."), { status: 500 });
+    }
 
     await addAudit(
       input.tenantId,
@@ -96,6 +99,9 @@ export async function applyPerioVoiceCommand(input: VoiceInput): Promise<VoiceRe
       furcation: parsed.furcation,
       actorRole: input.actorRole,
     }, input.tenantId);
+    if (!measure) {
+      throw Object.assign(new Error("Unable to record corrected perio measurement."), { status: 500 });
+    }
 
     await addAudit(
       input.tenantId,

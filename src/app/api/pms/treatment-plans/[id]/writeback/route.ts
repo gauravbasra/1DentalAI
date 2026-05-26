@@ -1,13 +1,13 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { requirePmsApiSession } from "@/lib/pms-api-auth";
 import { createTreatmentPlanWriteback } from "@/lib/clinical-scribe-workflow";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const auth = await requirePmsApiSession();
   if (auth.response) return auth.response;
-  const { id } = params;
+  const { id } = await context.params;
   try {
     const body = (await request.json().catch(() => ({}))) as {
       patientId?: string;

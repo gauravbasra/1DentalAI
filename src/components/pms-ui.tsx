@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { StatusPill } from "@/components/foundation-shell";
+import { StatusPill } from "@/components/status-pill";
 
 export const pmsNav = [
   { href: "/app/pms", label: "Command" },

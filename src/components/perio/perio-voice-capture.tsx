@@ -224,7 +224,14 @@ export function PerioVoiceCapture({ patientId }: Props) {
           >
             {running ? "Listening" : "Start voice"}
           </button>
-          <button type="button" onClick={() => setRunning(false) || stopAll()} className="rounded-full border border-neutral-300 px-4 py-2 text-sm font-semibold">
+          <button
+            type="button"
+            onClick={() => {
+              setRunning(false);
+              stopAll();
+            }}
+            className="rounded-full border border-neutral-300 px-4 py-2 text-sm font-semibold"
+          >
             Stop
           </button>
           <button type="button" onClick={async () => {
