@@ -1,250 +1,300 @@
-# 1DentalAI Phase 0 Handoff Plan (For Next Model)
+# Next Model Handoff Plan (1DentalAI PMS/RCM/Phone)
 
-Last updated: 2026-05-25 (Denver time)
+Date: 2026-05-26  
+Repo: `/Users/gauravbasra/Developer/1DentalAI`  
+Branch: `main`  
 
-This document is the authoritative handoff for the next model (Cursor/DeepSeek/Ollama) to continue Phase 0 production work without re-tracing decisions.
+This document is the operational handoff for the next model (Cursor/Deepseek/Ollama). It captures what is verifiably working in code and production, what is only scaffolded, and the next phases required to close the competitive gap (OpenDental/Dentrix/Eaglesoft/Curve/Archy, etc.) and meet the QA rubric in `docs/PMS_QA_RUBRIC_AND_BACKEND_SLICE_PLAN.md`.
 
-It focuses on the active slice: **Patient Engagement Voice (inbound phone) + Vapi transport path + scheduling brain**, while also recording the state of recent Phase 0 work that was committed and deployed.
+## Current Production State (Verified)
 
-## 0) Current Production State (What Is Actually Live)
+Deployment target:
 
-Repository: `gauravbasra/1DentalAI` (branch `main`)
+- Public marketing + product entry: `https://1dentalai.com`
+- Product host used by login redirect / app runtime: `https://app.1dentalai.com`
+- PMS patient map (fresh UI route): `https://app.1dentalai.com/app/pms/patient-map`
 
-Latest deploy status:
-- A successful deploy to DigitalOcean completed after the last push (verify in GitHub Actions: “Deploy 1DentalAI to DigitalOcean”).
-- Public health check should be green at `GET https://app.1dentalai.com/api/health`.
+Health checks (post-deploy verification):
 
-Important behavior changes already shipped:
-- Twilio inbound AI receptionist: **Realtime streaming is now opt-in** (prevents broken websocket stream usage unless explicitly enabled).
-- Twilio inbound AI fallback (Gather-based turn-taking) now routes **inbound scheduling turns** through the **stateful scheduling brain** (voice-agent module) so it stops repeating first/last name loops and can do slot selection.
-- Vapi webhook endpoint exists and supports tool-calls (scheduling tools) with a shared-token authentication model.
+- `GET https://1dentalai.com/api/health` returns `{ ok: true, ... }`
+- `GET https://1dentalai.com/api/database/health` returns `{ ok: true, database: "ready", presentTables: [...] }`
 
-## 1) What Was Built (High-Signal Inventory)
+Latest “build is green” commit and deploy:
 
-### 1.1 Provider-Agnostic “Scheduling Brain” (Voice Agent Core)
+- Commit: `8fc4e22` (“Fix build: isolate StatusPill + route typings”)
+- GitHub Actions workflow: `.github/workflows/deploy-digitalocean.yml`
+- Recent deploy run succeeded and includes health + DB health verification.
 
-Purpose: stateful scheduling logic that does NOT depend on Twilio/Vapi/Retell specifics.
+## What Is Working End-to-End (Not Just UI)
 
-Files:
-- `src/lib/voice-agent/types.ts`
-- `src/lib/voice-agent/state-manager.ts`
-- `src/lib/voice-agent/prompt-builder.ts`
-- `src/lib/voice-agent/orchestrator.ts`
-- `src/lib/voice-agent/repository.ts`
-- `src/lib/voice-agent/scheduling/adapters.ts`
-- `src/lib/voice-agent/scheduling/online-scheduling-adapter.ts`
+### PMS: Scribe + Perio E2E (Production)
 
-Database + migrations:
-- Prisma models added: `VoiceAgentCall`, `VoiceAgentSession`, `AppointmentRequest`, `PracticeSchedulingRule`, `AppointmentSlotCache`
-- Migration: `prisma/migrations/202605251430_voice_agent_scheduling_brain/migration.sql`
+Validated via the existing script:
+
+- `scripts/validate-pms-scribe-perio-e2e.mjs`
+
+What it proves:
+
+- Authenticated API access
+- Patient lookup/create
+- Scribe draft generation
+- Scribe save into chart notes
+- Perio exam creation/measurement persistence
 
 Notes:
-- This brain stores structured conversation state to prevent repeated questions.
-- Slot selection: supports “first/second/third” and time matching (basic).
-- Scheduling adapter pattern exists (Mock + OnlineSchedulingAdapter).
-- OnlineSchedulingAdapter currently books via the canonical internal PMS “online scheduling” engine (not NexHealth/OpenDental API direct yet).
-- Slot filtering is timezone-safe using `ONE_DENTAL_PRACTICE_TIMEZONE` (defaults to `America/Denver`).
 
-### 1.2 Twilio Inbound Voice: Ring-Then-AI Takeover
+- The script expects a clinical role. Use an `owner_doctor` test account for QA automation.
+- The host to test against is `https://app.1dentalai.com` (not `https://1dentalai.com`) due to login redirect behavior in `src/app/login/route.ts`.
 
-Inbound TwiML builder:
-- `src/lib/twilio-webhooks.ts` has `buildInboundVoiceTwiML(...)`:
-  - starts transcription
-  - dials the practice bridge number for `ringThreshold * 5` seconds
-  - if no answer, redirects to `/api/twilio/voice/ai/start`
+### PMS: Patient Map (Production)
 
-Twilio routes:
-- `src/app/api/twilio/voice/incoming/route.ts`
-- `src/app/api/twilio/voice/ai/start/route.ts`
-- `src/app/api/twilio/voice/ai/turn/route.ts`
-- `src/app/api/twilio/voice/transcription/route.ts`
-- `src/app/api/twilio/voice/status/route.ts`
+Validated with:
 
-Key change already shipped:
-- In `src/lib/voice-ai-repository.ts`, realtime streaming is only used if `ONE_DENTAL_ENABLE_TWILIO_REALTIME=1`.
-- In `handleVoiceAiTurn(...)`, for `scenario === "inbound_takeover"` it routes the caller’s speech into the voice-agent scheduling brain via `handleSchedulingBrainTurn(...)`.
+- `scripts/validate-pms-patient-map-e2e.mjs` (added in this repo)
 
-Scheduling source used for now:
-- `OnlineSchedulingAdapter` (calls `getOnlineSchedulingAvailability(...)` + `submitOnlineBooking(...)`).
+What it proves:
 
-### 1.3 Vapi Transport Path (Webhook + Tool Calls)
+- `GET /api/pms/patient-map/export` returns a CSV with real household rows (not empty).
+- `GET /app/pms/patient-map` renders the expected server-side content under an authenticated session.
 
-Goal: Use Vapi for audio pipeline + barge-in + turn-taking, while keeping all business logic and scheduling actions on our servers.
+Manual verification (in browser):
 
-Files:
-- `src/app/api/webhooks/vapi/route.ts`
-- `src/lib/vapi-webhooks.ts`
+- The map loads and plotted household circles are visible on `https://app.1dentalai.com/app/pms/patient-map`.
 
-Supported tools (names must match Vapi assistant config):
-- `get_available_slots`
-- `hold_appointment_slot`
-- `confirm_appointment`
-- `escalate_to_human`
+### RCM: API Route Coverage (Structural + Some Functional)
 
-Authentication:
-- Shared token via `Authorization: Bearer <token>` (also checks `x-vapi-token` variants).
-- Token read from env `VAPI_WEBHOOK_TOKEN` OR vault credential providerKey `VAPI`, label `webhook_token`.
+RCM route surfaces now exist for:
 
-## 2) Known Gaps (Why Users Still Experience “Dumb AI”)
+- Prior auth packet endpoints
+- Denial appeal packet endpoints
+- ERA post-to-PMS endpoints
 
-This is the main gap analysis driving next work. Do not do UI-first work until these are closed.
+Important: “exists” is not “integrated”. See “Pending / Gap Analysis” below for the missing lifecycle depth.
 
-### 2.1 Voice Quality + Turn Logic
+## Architecture Constraints / Known Operational Reality
 
-Symptoms reported:
-- Caller asks for Wednesday slots but hears Tuesday.
-- Name is misheard (“Gust”) and the agent repeats name requests or loses it.
-- Flow can still feel rigid or repetitive.
+### Local Docker Is Unreliable On This Mac
 
-Root causes:
-- STT errors must be handled with confirmation/correction (“Did I get that right?”).
-- The new scheduling brain is only used for `inbound_takeover` in the Twilio Gather fallback path.
-- Calendar/time parsing is currently basic; preferences like “Wednesday morning” must be enforced at the slot-offer layer, not only prompt text.
+Local Docker Desktop was hanging at the time of development. Do not assume local `docker compose` is a stable path for DB-backed testing.
 
-### 2.2 Provider Readiness (NexHealth + Open Dental)
+Practical workaround used:
 
-What exists:
-- PMS has a connector readiness surface (`getPmsDataSourceStatus`).
-- Internal online scheduling engine can book appointments (canonical tables + locking).
+- Operate directly against the production droplet and DB via SSH, and validate via live URLs + scripts.
 
-What is missing:
-- A real external adapter:
-  - `NexHealthSchedulingAdapter` (fetch availability + create appointment)
-  - `OpenDentalSchedulingAdapter` (direct DB or API, depending on chosen integration approach)
-- A routing policy that chooses adapter per practice/location.
+### Production Runs On A Droplet (Not DO Apps / Managed DB)
 
-### 2.3 Call Controls (Weave-like)
+DigitalOcean context:
 
-Twilio call-control exists elsewhere in codebase (conference participant hold/mute).
-Missing for production:
-- Real inbound call console reliability
-- Park/hold/warm transfer flows tied to operatories/departments/extensions
-- Screen pop integration for matched patients (partially present in phone ingestion; needs UX + correctness work)
+- Deployment runs on a DO droplet (example name previously used: `dentalrcm-demo-20260507`).
+- App is running in Docker Compose on the droplet at `/var/www/1DentalAI`.
+- Nginx proxies public domains to the app container (typically port 3001).
 
-### 2.4 Security / Compliance Gaps
+### Security Note (Immediate Action For Humans)
 
-Vapi webhook auth currently uses shared token but does NOT implement signature-based verification.
+Multiple secrets were pasted into chat historically (Twilio/OpenAI/ElevenLabs/Google Maps). Assume they are compromised and rotate them. Do not commit secrets into git. Prefer DO env / vault.
 
-Missing:
-- Dedicated per-tenant webhook secrets + rotation
-- Hard PHI boundary enforcement for which fields are ever sent to Vapi
-- Centralized integration settings UX (single place for keys) and enforcement that modules do not duplicate secrets.
+## QA Contract (Non-Negotiable)
 
-## 3) Required Environment / Config (Production)
+The required QA standard is documented here:
 
-These must be set for correct behavior. If missing, features will appear broken.
+- `docs/PMS_QA_RUBRIC_AND_BACKEND_SLICE_PLAN.md`
 
-Twilio:
-- Ensure Twilio inbound voice webhook points to:
-  - `POST https://app.1dentalai.com/api/twilio/voice/incoming`
+The product is considered “done” only when:
 
-Practice bridge number (human front desk line):
-- In DB routing tables OR env fallback:
-  - `TWILIO_OPERATOR_BRIDGE_NUMBER` or `PRACTICE_BRIDGE_NUMBER`
+1. Each workflow is end-to-end functional, with DB records + audits + idempotency and no placeholder buttons.
+2. QA can click through each screen and verify real writes (not optimistic UI).
+3. External mutations go through `PmsWritebackJob` and store evidence, external response, and audit trail.
 
-Time zone:
-- Set `ONE_DENTAL_PRACTICE_TIMEZONE` per tenant/practice if not Denver.
+## How To Validate Quickly (Next Model Checklist)
 
-Vapi:
-- `VAPI_WEBHOOK_TOKEN` (env) OR vault credential `VAPI:webhook_token`
-- Vapi server URL should be:
-  - `https://app.1dentalai.com/api/webhooks/vapi`
+1. Lint and schema checks:
+   - `npm run lint` (warnings are allowed today; errors are not)
+   - `npm run test:pms`
+   - `npm run build`
 
-Realtime streaming:
-- Do NOT enable `ONE_DENTAL_ENABLE_TWILIO_REALTIME=1` unless the websocket sidecar is truly deployed and reachable at `/api/twilio/voice/realtime`.
+2. Production smoke:
+   - `curl -fsS https://1dentalai.com/api/health`
+   - `curl -fsS https://1dentalai.com/api/database/health`
 
-## 4) Next Build Order (Do This In This Exact Sequence)
+3. E2E (requires an authenticated clinical account):
+   - `PMS_E2E_BASE_URL=https://app.1dentalai.com node scripts/validate-pms-scribe-perio-e2e.mjs`
+   - `PMS_E2E_BASE_URL=https://app.1dentalai.com node scripts/validate-pms-patient-map-e2e.mjs`
 
-This sequence is designed to produce a working “better-than-Weave” inbound scheduling experience quickly, while keeping the architecture provider-agnostic.
+Important: the repository currently has no safe committed mechanism to mint test users/cookies. Previous runs created QA accounts directly in production DB. Replace that with a first-class admin/test harness (see Phase 9 / Pending).
 
-### Step 1: Make Scheduling Brain the Single Source of Truth for Inbound Scheduling
+## Completed vs Pending (Gap Analysis)
 
-Goal: Remove the split-brain behavior where some turns use old memory logic and some use the new brain.
+This is organized to match the phased plan (`docs/PHASED_PRODUCT_IMPROVEMENT_CODE_PLAN.md`) and the competitive gap matrix/rubric.
 
-Tasks:
-1. Ensure Twilio inbound AI (Gather) ALWAYS routes scheduling turns into voice-agent brain.
-2. Persist offered slots and selected slot robustly (don’t lose state between turns).
-3. Add “confirm spelling” micro-flow when STT gives an unlikely name or caller corrects it.
-4. Add a deterministic preference guard:
-   - If caller says “Wednesday morning”, do not offer slots outside that preference unless you explicitly say “I don’t see Wednesday morning; closest is Tuesday morning, would that work?”
+### Completed (Working or Substantively Implemented)
 
-Acceptance:
-- No repeated first/last name asks after captured.
-- Day preference is respected.
-- Caller corrections update state.
+Phase 1–5 are partially to substantially implemented in codebase (see implementation reports in `docs/PHASE_*_IMPLEMENTATION_REPORT.md`).
 
-### Step 2: Add NexHealthSchedulingAdapter (Read + Write)
+1. PMS Connector foundation (partial):
+   - Capability tables and writeback job pattern exist in schema and codebase.
+   - Connector pages exist under `/app/connectors/pms`.
+   - OpenDental/NexHealth stubs exist; smoke test endpoints exist.
 
-Goal: Use real NexHealth availability and appointment creation if credentials are configured.
+2. PMS core objects (substantial):
+   - Patients, appointments, schedule, chart page surfaces, documents/imaging placeholders, ledger/insurance/inventory surfaces exist.
+   - Auth + session + role scoping exists (with known host-canonicalization patterns).
 
-Tasks:
-1. Create `src/lib/voice-agent/scheduling/nexhealth-adapter.ts` implementing `SchedulingAdapter`.
-2. Add connector config:
-   - read NexHealth credentials from vault (`providerKey=NEXHEALTH` or `PMS_NEXHEALTH`)
-3. Add adapter selection:
-   - If NexHealth credential present and practice is configured for NexHealth, use it; else fall back to OnlineSchedulingAdapter.
+3. Clinical scribe workflow (substantial + validated):
+   - Scribe generate/save APIs exist and are validated E2E against production.
+   - Writeback endpoints exist (PMS connector mutation gating still needs deeper evidence enforcement).
 
-Acceptance:
-- Tool `get_available_slots` returns slots from NexHealth (with connector status shown if blocked).
-- Booking creates a real NexHealth appointment when enabled.
+4. Perio workflow (substantial + validated):
+   - Perio APIs exist (exam/measurements/complete).
+   - Voice command endpoint exists and basic writeback workflow exists.
 
-### Step 3: Add OpenDentalSchedulingAdapter (Read + Write)
+5. Patient Map analytics (validated):
+   - DB has geo rows and the map renders plotted clusters.
+   - Export endpoint works and returns non-empty CSV.
 
-Goal: For practices on Open Dental, availability + booking should be real.
+6. RCM core route coverage (structural):
+   - Prior auth packet endpoints, denial appeal packet endpoints, ERA post-to-PMS endpoints exist.
 
-Tasks:
-1. Implement adapter with connector readiness gating.
-2. Decide integration approach:
-   - direct Open Dental DB connection (preferred for internal deployments) OR Open Dental API if available in this environment.
+### Pending (Must Be Built To Match Competition + QA Rubric)
 
-Acceptance:
-- Same as NexHealth.
+This is the real backlog. Treat it as the “no-excuses” list.
 
-### Step 4: Switch Voice Transport to Vapi (Primary) While Keeping Twilio Fallback
+#### A) Insurance Eligibility + Benefits (Deep, Evidence-Driven)
 
-Goal: Vapi handles audio quality now; Twilio Gather remains as backup and for later full-stack work.
+Needed to match real-world payer portal workflows:
 
-Tasks:
-1. Configure Vapi assistant to call our tools.
-2. Implement minimal “assistant-request” flow to return an assistantId (optional).
-3. Add PHI boundary in `vapi-webhooks.ts`:
-   - redact anything not required
-4. Add audit events for every tool call with outcome and blocked reasons.
+- Eligibility run orchestration:
+  - Store payer portal login URL (per payer registry).
+  - Run RPA/bot runner to login, navigate benefits screens, capture screenshots/PDFs, and extract facts.
+  - Persist raw evidence + extracted facts + normalization confidence.
 
-Acceptance:
-- Live inbound call via Vapi can:
-  - capture name + reason + preference
-  - fetch slots
-  - book
-  - confirm
+- Benefits mapping depth:
+  - Deductibles (individual/family, in-network/out-of-network, used/remaining, year basis).
+  - Maximums (annual, lifetime where applicable, used/remaining).
+  - Frequencies and limitations (exam, prophy, BW, perio maintenance, SRP, crowns, implants).
+  - Waiting periods, missing tooth clauses, downgrades, alternative benefits.
+  - Past claims / remaining balance (eligibility “active” is not sufficient).
 
-### Step 5: Own Full Stack (Later)
+- Output artifacts:
+  - A human-readable, payer-safe benefits PDF summary.
+  - Attachments stored in `PmsDocument` and linked to patient/appointment/insurance.
 
-Goal: Replace Vapi transport progressively.
+References:
 
-Tasks:
-1. Deploy the websocket realtime bridge for Twilio Media Streams in production.
-2. Replace shared-token auth with signed webhooks (Twilio signature already exists; do Vapi/Retell signatures too).
-3. Build a proper call state machine for barge-in, interruptions, and latency handling.
+- `docs/PAYER_MATRIX_SCHEMA_SERVICE_SLICE.md`
+- `docs/PMS_QA_RUBRIC_AND_BACKEND_SLICE_PLAN.md` sections 1–2
 
-## 5) Testing / Verification Checklist (Must Be Run Before “Done”)
+#### B) Claims / EOB / ERA / Ledger Posting (Real Finance)
 
-1. `npm run lint`
-2. Confirm API behavior:
-   - `GET https://app.1dentalai.com/api/health` returns ok.
-3. Twilio:
-   - Place inbound call to practice number.
-   - Let it ring out to AI takeover.
-   - Ask: “My name is Gaurav. I want Wednesday morning for a cleaning.”
-   - Verify it does not offer Tuesday unless explicitly stated as fallback.
-4. Vapi webhook:
-   - Send a signed/authenticated test request to `/api/webhooks/vapi` to ensure tool-calls return `results[]`.
+Needed to match OpenDental/Dentrix:
 
-## 6) Notes About Cursor/DeepSeek/Ollama Local Build
+- Claim creation from completed procedures with CDT/tooth/surface/provider/diagnosis/narrative.
+- Attachments enforcement (images, perio charts, narratives).
+- Submission gates based on payer matrix route readiness + required evidence.
+- ERA ingestion (835) + mapping to ledger adjustments:
+  - Allowed/paid/deductible/coinsurance/writeoff/denial codes/PR amounts.
+  - Idempotent posting (no double post on retries).
+- EOB PDF generation and attachment storage.
 
-The repo currently includes a Next.js app with a PostgreSQL-backed DB layer (via `pg` and raw SQL), plus Prisma schema/migrations.
+References:
 
-If you run a local stack:
-- Ensure `DATABASE_URL` is set and migrations applied.
-- Confirm “online scheduling” has at least one ACTIVE link in `PmsOnlineSchedulingLink` or the scheduling adapter will return no slots.
+- QA rubric section 3.
+
+#### C) Treatment Plans + Prior Auth Case Lifecycle (Operational Depth)
+
+Needed:
+
+- Treatment plan case building with CDT mapping + alternatives + staging.
+- Estimates computed from benefit facts and fee schedules.
+- Prior auth packet builder:
+  - Structured narrative by CDT category (endo/prosth/implant/ortho/perio).
+  - Evidence checklist + attachments.
+  - Review/approval gate before submission.
+- Conversion of accepted plans into scheduled appointments and procedure logs.
+
+References:
+
+- QA rubric section 4.
+
+#### D) Clinical EHR “Whole Process” Completion
+
+Needed:
+
+- Staff vs RDH vs doctor note separation with signatures.
+- Process templates + CDT-procedure templates:
+  - Intake, exams, hygiene/perio flows, restorative, endo, oral surgery, pediatric, ortho.
+- Imaging workflows:
+  - X-rays capture/import linkage, annotations, “used as evidence” tags for claims/prior auth/referrals.
+- Referrals workflows:
+  - Referral letters/emails + attachments auto-generated from CDT and treatment plan context.
+- Follow-ups and scribing integration with tasks.
+
+References:
+
+- `docs/CANONICAL_DENTAL_MODEL_WORKFLOW_CATALOG.md`
+- QA rubric section 5.
+
+#### E) Inventory: Make It A Real System (Not Pages)
+
+Needed to meet earlier stated product requirements:
+
+- Barcode scanning + label printing (lots/expiry).
+- Cycle counts and reconciliation.
+- Purchase order workflow:
+  - approvals, receiving, variances.
+- Vendor portal:
+  - self-service login, bid submission, marketplace gating, subscription/payment.
+- Usage analytics:
+  - daily/weekly/monthly consumption, per-chair/per-provider/per-CDT usage.
+  - ROI: purchase cost vs usage patterns, expiration waste, vendor price variance.
+- Cross-practice benchmarks:
+  - requires anonymization and aggregation (not just seeded baselines).
+
+#### F) Phone / AI Voice Live Readiness (Phase 6)
+
+Needed (explicitly called out by phase plan):
+
+- Implement `/api/phone/live/*` routes and the live-call provider gate model.
+- Provider readiness gating: webhook configured, number provisioned, E911, Twilio credentials, etc.
+- Screen pop, transcript, summary, disposition, and PMS communication-note writeback job.
+
+Current state:
+
+- Non-live routes exist (e.g., `/api/phone/softphone/dial`, `/api/phone/call-control`, `/api/phone/screen-pop`).
+- Phase 6 “live” contract and UI panels are not yet complete.
+
+#### G) Readiness Dashboard (Phase 7) + Role-Based Daily Workflows (Phase 8)
+
+Needed:
+
+- A single place to see which modules are truly live (by smoke test evidence).
+- Role-based daily queues (front desk vs rdh vs billing/rcm vs doctor).
+
+#### H) Demo + Go-Live Pack (Phase 9)
+
+Needed:
+
+- Demo seed fixture and deterministic E2E pack:
+  - `appointment -> scribe -> treatment plan -> perio -> benefits -> prior auth -> claim -> ERA -> ledger -> phone follow-up`
+- Product smoke test runner and Playwright E2E specs.
+- Remove any reliance on manual production DB edits for test accounts.
+
+## Immediate Next Sprint Recommendation (Concrete)
+
+Priority order for the next model:
+
+1. Phase 6 (Phone live readiness): complete `/api/phone/live/*` + UI panels + readiness gates + writeback.
+2. Phase 2/3 of QA rubric for RCM: eligibility benefit extraction + PDF + evidence storage, then claim/ERA idempotent ledger posting.
+3. Inventory operationalization: barcode/labels/cycle counts + vendor portal skeleton with real auth and bid submission.
+4. Phase 7/8 dashboards: readiness cards + daily role queues to stop the “giant UI page” regressions.
+5. Phase 9 go-live pack: deterministic demo seed + e2e suite.
+
+## Pointers: Where Things Live In Code
+
+- Auth/session: `src/lib/auth.ts`, `src/app/login/route.ts`, `src/app/logout/route.ts`
+- PMS core: `src/lib/pms-repository.ts`, `src/app/app/pms/**`, `src/app/api/pms/**`
+- Scribe: `src/app/api/pms/scribe/*`, `src/components/pms-scribe-workspace.tsx`, `src/lib/clinical-scribe-workflow.ts`
+- Perio: `src/app/api/pms/perio/*`, `src/components/perio/*`, `src/lib/perio-workflow.ts`, `src/lib/perio-command-parser.ts`
+- Patient map: `src/lib/pms-patient-map-repository.ts`, `src/app/app/pms/patient-map/*`
+- RCM: `src/app/api/rcm/*`, `src/lib/rcm-*`
+- Deploy: `.github/workflows/deploy-digitalocean.yml`, `docs/DEPLOYMENT.md`, `docs/DEPLOYMENT_AND_ENVIRONMENT_STRATEGY.md`
 
