@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requirePmsApiSession } from "@/lib/pms-api-auth";
-import { createPatient, listPatients } from "@/lib/pms-repository";
+import { createPatient, listPatients, PatientDuplicateError } from "@/lib/pms-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +19,20 @@ export async function POST(request: Request) {
   if (!body.firstName || !body.lastName) {
     return NextResponse.json({ error: "firstName and lastName are required" }, { status: 400 });
   }
-  const patient = await createPatient({ ...body, tenantId: auth.session.tenantId });
-  return NextResponse.json({ data: patient }, { status: 201 });
+  try {
+    const patient = await createPatient({ ...body, tenantId: auth.session.tenantId });
+    return NextResponse.json({ data: patient }, { status: 201 });
+  } catch (error) {
+    if (error instanceof PatientDuplicateError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Duplicate patient blocked.",
+          duplicate: error.existingPatient,
+        },
+        { status: 409 },
+      );
+    }
+    throw error;
+  }
 }

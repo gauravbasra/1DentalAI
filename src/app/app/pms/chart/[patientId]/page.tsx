@@ -11,6 +11,8 @@ type ChartAlert = { id: string; title: string; details: string | null };
 type ChartAllergy = { id: string; allergen: string; reaction: string | null };
 type ChartMedication = { id: string; name: string; dosage: string | null };
 type ChartProcedure = { id: string; code: string; description: string; tooth: string | null; status: string };
+type ChartTreatmentPlan = { id: string; name: string; status: string; totalFeeCents: number; insuranceEstimateCents: number; patientEstimateCents: number; providerName: string | null; itemCount: number };
+type ChartImagingStudy = { id: string; studyType: string; acquisitionStatus: string; tooth: string | null; region: string | null; findings: string | null; aiReviewStatus: string; providerName: string | null };
 type ChartNote = {
   id: string;
   noteType: string;
@@ -86,7 +88,8 @@ async function addProcedureAction(formData: FormData) {
     procedureCodeId: String(formData.get("procedureCodeId") ?? ""),
     tooth: String(formData.get("tooth") ?? ""),
     surface: String(formData.get("surface") ?? ""),
-    status: String(formData.get("status") ?? "TREATMENT_PLANNED"),
+    feeCents: formData.get("fee") ? Math.round(Number(String(formData.get("fee")).replace(/[^0-9.-]/g, "") || "0") * 100) : undefined,
+    status: String(formData.get("status") ?? "PLANNED"),
   });
   revalidatePath(`/app/pms/chart/${patientId}`);
 }
@@ -98,6 +101,9 @@ export default async function ChartPage({ params, searchParams }: { params: Prom
   const [chart, procedureCodes] = await Promise.all([getChart(patientId, session.tenantId), listProcedureCodes(session.tenantId)]);
   const patient = chart.patient;
   const conditions = chart.conditions as ToothCondition[];
+  const treatmentPlans = chart.treatmentPlans as ChartTreatmentPlan[];
+  const imaging = chart.imaging as ChartImagingStudy[];
+  const profile = chart.profile as { alerts: ChartAlert[]; allergies: ChartAllergy[]; medications: ChartMedication[]; medicalHistory: Array<{ category: string; condition: string; note: string | null }> } | null;
 
   if (!patient) {
     return <FoundationShell active="/app/pms/patients" roleKey={role.key}><PageHeader eyebrow="Chart" title="Patient not found" body="The requested chart is not available." /></FoundationShell>;
@@ -108,6 +114,30 @@ export default async function ChartPage({ params, searchParams }: { params: Prom
       <PageHeader eyebrow={patient.chartNumber} title={`${patient.firstName} ${patient.lastName} clinical chart`} body="Dental charting workspace for odontogram findings, tooth/surface conditions, treatment-planned procedures, progress notes, medical alerts, and provider documentation." />
       <RoleSwitcher activeRole={role.key as RoleKey} basePath={`/app/pms/chart/${patient.id}`} />
       <PmsSectionNav active="/app/pms/patients" roleKey={role.key} />
+
+      <section className="grid min-w-0 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <PmsCard title="Patient demographics" eyebrow="Chart identity">
+          <div className="grid min-w-0 gap-3 md:grid-cols-2">
+            <Detail label="Name" value={`${patient.lastName}, ${patient.firstName}${patient.preferredName ? ` (${patient.preferredName})` : ""}`} />
+            <Detail label="Chart number" value={patient.chartNumber} />
+            <Detail label="Date of birth" value={patient.dateOfBirth ? new Date(patient.dateOfBirth).toLocaleDateString() : "Not recorded"} />
+            <Detail label="Contact" value={[patient.phone ?? "No phone", patient.email ?? "No email"].join(" · ")} />
+            <Detail label="Family account" value={patient.familyAccountId ?? "None"} />
+            <Detail label="Responsible party" value={patient.responsibleParty ?? "Not recorded"} />
+            <Detail label="Emergency contact" value={[patient.emergencyContactName, patient.emergencyContactPhone].filter(Boolean).join(" · ") || "Not recorded"} />
+            <Detail label="Referral source" value={patient.referralSource ?? "Not recorded"} />
+          </div>
+        </PmsCard>
+
+        <PmsCard title="Clinical spine" eyebrow="Treatment and imaging">
+          <div className="grid gap-3 md:grid-cols-2">
+            <MiniMetric label="Treatment plans" value={treatmentPlans.length} detail={`${treatmentPlans.filter((plan) => ["DRAFT", "PRESENTED", "ACCEPTED"].includes(plan.status)).length} active/presented`} />
+            <MiniMetric label="Imaging studies" value={imaging.length} detail="Patient-linked studies" />
+            <MiniMetric label="Family members" value={((chart.familyMembers as Array<unknown>) || []).length} detail="Same family account" />
+            <MiniMetric label="Medical history" value={profile?.medicalHistory.length ?? 0} detail="System medical history entries" />
+          </div>
+        </PmsCard>
+      </section>
 
       <section className="grid min-w-0 gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <PmsCard title="Odontogram" eyebrow="Tooth and surface charting">
@@ -129,9 +159,10 @@ export default async function ChartPage({ params, searchParams }: { params: Prom
         </PmsCard>
 
         <PmsCard title="Clinical alerts and history" eyebrow="Chairside readiness">
-          <ClinicalList title="Alerts" items={(chart.alerts as ChartAlert[]).map((item) => `${item.title}${item.details ? `: ${item.details}` : ""}`)} />
-          <ClinicalList title="Allergies" items={(chart.allergies as ChartAllergy[]).map((item) => `${item.allergen}${item.reaction ? `: ${item.reaction}` : ""}`)} />
-          <ClinicalList title="Medications" items={(chart.medications as ChartMedication[]).map((item) => `${item.name}${item.dosage ? ` ${item.dosage}` : ""}`)} />
+          <ClinicalList title="Alerts" items={(profile?.alerts ?? chart.alerts as ChartAlert[]).map((item) => `${item.title}${item.details ? `: ${item.details}` : ""}`)} />
+          <ClinicalList title="Allergies" items={(profile?.allergies ?? chart.allergies as ChartAllergy[]).map((item) => `${item.allergen}${item.reaction ? `: ${item.reaction}` : ""}`)} />
+          <ClinicalList title="Medications" items={(profile?.medications ?? chart.medications as ChartMedication[]).map((item) => `${item.name}${item.dosage ? ` ${item.dosage}` : ""}`)} />
+          <ClinicalList title="Medical history" items={(profile?.medicalHistory ?? []).map((item) => `${item.category} · ${item.condition}${item.note ? `: ${item.note}` : ""}`)} />
         </PmsCard>
       </section>
 
@@ -156,8 +187,9 @@ export default async function ChartPage({ params, searchParams }: { params: Prom
             <div className="grid min-w-0 gap-3 sm:grid-cols-2">
               <Input name="tooth" label="Tooth" />
               <Input name="surface" label="Surface" />
+              <Input name="fee" label="Fee override" placeholder="0.00" />
+              <label className="grid min-w-0 gap-1 text-sm font-semibold text-neutral-700">Status<select name="status" className={controlClass}><option>PROPOSED</option><option>ACCEPTED</option><option>PLANNED</option><option>IN_PROGRESS</option><option>COMPLETED</option><option>BILLED</option></select></label>
             </div>
-            <label className="grid min-w-0 gap-1 text-sm font-semibold text-neutral-700">Status<select name="status" className={controlClass}><option>TREATMENT_PLANNED</option><option>REFERRED</option><option>COMPLETED</option><option>EXISTING_OTHER</option></select></label>
             <button className={buttonClass}>Save procedure</button>
           </form>
         </PmsCard>
@@ -235,6 +267,39 @@ export default async function ChartPage({ params, searchParams }: { params: Prom
           )) : <EmptyPmsState title="No clinical notes yet" body="Use the note panel to record chairside documentation. Notes persist to the chart immediately." />}
         </PmsCard>
       </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-2">
+        <PmsCard title="Treatment plans" eyebrow="Active cases">
+          {treatmentPlans.length ? treatmentPlans.map((plan) => (
+            <div key={plan.id} className="mb-3 rounded-2xl bg-neutral-50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-neutral-950">{plan.name}</p>
+                  <p className="mt-1 text-xs text-neutral-500">{plan.providerName ?? "Provider unassigned"} · {plan.itemCount} item{plan.itemCount === 1 ? "" : "s"}</p>
+                </div>
+                <StatusFor value={plan.status} />
+              </div>
+              <p className="mt-2 text-sm text-neutral-700">{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(plan.totalFeeCents / 100)} total · {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(plan.insuranceEstimateCents / 100)} insurance est. · {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(plan.patientEstimateCents / 100)} patient est.</p>
+            </div>
+          )) : <EmptyPmsState title="No treatment plans" body="Accepted or draft plans for this patient will appear here." />}
+        </PmsCard>
+
+        <PmsCard title="Imaging studies" eyebrow="Clinical images">
+          {imaging.length ? imaging.map((study) => (
+            <div key={study.id} className="mb-3 rounded-2xl bg-neutral-50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-neutral-950">{study.studyType.replaceAll("_", " ")}</p>
+                  <p className="mt-1 text-xs text-neutral-500">{study.tooth ? `Tooth ${study.tooth}` : study.region ?? "Region not recorded"} · {study.providerName ?? "Provider unassigned"}</p>
+                </div>
+                <StatusFor value={study.acquisitionStatus} />
+              </div>
+              <p className="mt-2 text-sm text-neutral-700">AI review: {study.aiReviewStatus.replaceAll("_", " ").toLowerCase()}</p>
+              {study.findings ? <p className="mt-1 text-sm text-neutral-600">{study.findings}</p> : null}
+            </div>
+          )) : <EmptyPmsState title="No imaging studies" body="Ordered, acquired, and reviewed imaging records will appear here." />}
+        </PmsCard>
+      </section>
     </FoundationShell>
   );
 }
@@ -250,11 +315,30 @@ function ClinicalList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function Input({ label, name, required = false }: { label: string; name: string; required?: boolean }) {
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-neutral-950">{value}</p>
+    </div>
+  );
+}
+
+function MiniMetric({ label, value, detail }: { label: string; value: number; detail: string }) {
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p>
+      <p className="mt-1 text-2xl font-semibold text-neutral-950">{value}</p>
+      <p className="mt-1 text-xs text-neutral-600">{detail}</p>
+    </div>
+  );
+}
+
+function Input({ label, name, required = false, placeholder = "", type = "text" }: { label: string; name: string; required?: boolean; placeholder?: string; type?: string }) {
   return (
     <label className="grid min-w-0 gap-1 text-sm font-semibold text-neutral-700">
       {label}
-      <input name={name} required={required} className={controlClass} />
+      <input name={name} required={required} placeholder={placeholder} type={type} className={controlClass} />
     </label>
   );
 }

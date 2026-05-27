@@ -27,6 +27,9 @@
     "test:payer-matrix": "node scripts/validate-payer-matrix-slice.mjs && node scripts/validate-payer-route-readiness-behavior.mjs",
     "test:pms-scribe-perio-e2e": "node scripts/validate-pms-scribe-perio-e2e.mjs",
     "test:scribe": "node scripts/validate-pms-scribe-go-live.mjs",
+    "test:pms-patient-directory": "node scripts/validate-pms-patient-directory.mjs",
+    "test:pms-schedule-state-flow": "node scripts/validate-pms-schedule-state-flow.mjs",
+    "test:pms-checkout-flow": "node scripts/validate-pms-checkout-flow.mjs",
     "pms:sync-live": "node scripts/sync-live-pms-data.mjs",
     "test:voice-agent": "node --test tests/voice-agent.test.mjs"
   },

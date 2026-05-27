@@ -9,9 +9,13 @@ import {
   addClinicalNote,
   addClinicalNoteAddendum,
   completeAppointmentCheckout,
+  formatAppointmentStatusLabel,
   getAppointmentControl,
+  getPatientAccount,
+  getAllowedAppointmentStatusTransitions,
   listProcedureCodes,
   signClinicalNote,
+  transitionAppointmentStatus,
 } from "@/lib/pms-repository";
 import { createZoomMeetingForAppointment, listVirtualVisitsForAppointment } from "@/lib/zoom-repository";
 
@@ -32,6 +36,7 @@ async function addProcedureAction(appointmentId: string, formData: FormData) {
     tooth: String(formData.get("tooth") ?? ""),
     surface: String(formData.get("surface") ?? ""),
     feeCents: feeValue ? moneyToCents(feeValue) : undefined,
+    status: String(formData.get("status") ?? "PLANNED"),
     actorRole: session.roleKey,
     tenantId: session.tenantId,
   });
@@ -120,6 +125,21 @@ async function addAppointmentNoteAddendumAction(appointmentId: string, patientId
   revalidatePath(`/app/pms/chart/${patientId}`);
 }
 
+async function transitionAppointmentAction(appointmentId: string, formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await transitionAppointmentStatus({
+    appointmentId,
+    status: String(formData.get("status") ?? ""),
+    reason: String(formData.get("reason") ?? "").trim() || null,
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+  });
+  revalidatePath(`/app/pms/appointments/${appointmentId}`);
+  revalidatePath("/app/pms");
+  revalidatePath("/app/pms/schedule");
+}
+
 export default async function AppointmentControlPage({
   params,
   searchParams,
@@ -145,6 +165,8 @@ export default async function AppointmentControlPage({
   }
 
   const appointment = control.appointment;
+  const patientAccount = appointment.patientId ? await getPatientAccount(appointment.patientId, session.tenantId) : null;
+  const treatmentPlans = (patientAccount?.treatmentPlans ?? []) as Array<{ id: string; name: string; status: string }>;
   const addProcedure = addProcedureAction.bind(null, appointment.id);
   const checkout = checkoutAction.bind(null, appointment.id);
   const createZoom = createZoomMeetingAction.bind(null, appointment.id);
@@ -152,6 +174,7 @@ export default async function AppointmentControlPage({
   const signAppointmentNote = appointment.patientId ? signAppointmentNoteAction.bind(null, appointment.id, appointment.patientId) : null;
   const addAppointmentNoteAddendum = appointment.patientId ? addAppointmentNoteAddendumAction.bind(null, appointment.id, appointment.patientId) : null;
   const hardBlockers = control.readinessBlockers.filter((item) => item.severity === "HARD");
+  const transitions = getAllowedAppointmentStatusTransitions(appointment.status);
 
   return (
     <FoundationShell active="/app/pms/schedule" roleKey={role.key}>
@@ -170,6 +193,26 @@ export default async function AppointmentControlPage({
         <Metric label="Open balance" value={<Money cents={control.totals.openBalanceCents} />} />
       </section>
 
+      <section className="mt-4">
+        <PmsCard title="Status actions" eyebrow="Chair flow">
+          {transitions.length ? (
+            <div className="flex flex-wrap gap-2">
+              {transitions.map((transition) => (
+                <form key={transition.status} action={transitionAppointmentAction.bind(null, appointment.id)} className="flex items-center gap-2">
+                  <input type="hidden" name="status" value={transition.status} />
+                  {transition.requiresReason ? <input name="reason" required placeholder="Reason" className="w-44 rounded-md border border-neutral-300 px-3 py-2 text-sm" /> : null}
+                  <button className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 hover:bg-neutral-50">
+                    {formatAppointmentStatusLabel(transition.status)}
+                  </button>
+                </form>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-neutral-500">No further chair-flow actions are available for this visit.</p>
+          )}
+        </PmsCard>
+      </section>
+
       <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.35fr_0.85fr]">
         <div className="grid gap-4">
           <PmsCard title="Patient and benefits" eyebrow={appointment.chartNumber ?? "No chart"}>
@@ -180,6 +223,27 @@ export default async function AppointmentControlPage({
               <p>{appointment.payerName ? `${appointment.payerName} · ${appointment.planName}` : "No primary insurance"}</p>
               {appointment.eligibilityStatus ? <StatusFor value={appointment.eligibilityStatus} /> : null}
             </div>
+          </PmsCard>
+
+          <PmsCard title="Status history" eyebrow="Operational trail">
+            {control.statusHistory.length ? (
+              <div className="grid gap-2">
+                {control.statusHistory.map((entry) => (
+                  <div key={entry.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-neutral-950">{formatAppointmentStatusLabel(entry.status)}</p>
+                        <p className="mt-1 text-xs text-neutral-500">{new Date(entry.createdAt).toLocaleString()} · {entry.actorRole}</p>
+                      </div>
+                      <StatusFor value={entry.status} />
+                    </div>
+                    {entry.note ? <p className="mt-2 text-sm leading-6 text-neutral-700">{entry.note}</p> : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-neutral-500">No status changes have been recorded yet.</p>
+            )}
           </PmsCard>
 
           <PmsCard title="Readiness blockers" eyebrow={hardBlockers.length ? "Checkout gated" : "Review"}>
@@ -237,6 +301,7 @@ export default async function AppointmentControlPage({
                 ...control.forms.map((row) => ({ id: row.id, title: row.templateName, detail: "Form packet", status: row.status })),
                 ...control.labCases.map((row) => ({ id: row.id, title: `${row.caseType} · ${row.labName}`, detail: row.dueDate ? `Due ${new Date(row.dueDate).toLocaleDateString()}` : "Lab case", status: row.status })),
                 ...control.imaging.map((row) => ({ id: row.id, title: `${row.studyType}${row.tooth ? ` · tooth ${row.tooth}` : ""}`, detail: row.region ?? "Imaging study", status: row.acquisitionStatus })),
+                ...treatmentPlans.map((plan) => ({ id: plan.id, title: plan.name, detail: plan.status, status: plan.status })),
               ]}
             />
           </PmsCard>
@@ -347,7 +412,10 @@ export default async function AppointmentControlPage({
                   <textarea name="checkoutNote" rows={3} placeholder="Checkout note, blocker override reason, next visit instruction" className="rounded-md border border-neutral-300 px-3 py-2 text-sm md:col-span-2" />
                 </div>
 
-                <button disabled={appointment.status === "COMPLETED"} className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white disabled:bg-neutral-300">
+                <button
+                  disabled={appointment.status !== "READY_FOR_CHECKOUT"}
+                  className="rounded-md bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white disabled:bg-neutral-300"
+                >
                   Complete checkout
                 </button>
               </form>
@@ -369,6 +437,7 @@ export default async function AppointmentControlPage({
               <Input name="tooth" label="Tooth" />
               <Input name="surface" label="Surface" />
               <Input name="fee" label="Fee override" placeholder="Use default" />
+              <Select name="status" label="Status" options={["PROPOSED", "ACCEPTED", "PLANNED", "IN_PROGRESS", "COMPLETED", "BILLED"]} />
               <button className="rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white md:col-span-3">Add to visit</button>
             </form>
           </PmsCard>

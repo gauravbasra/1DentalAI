@@ -1,10 +1,19 @@
 import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import { FoundationShell, PageHeader, RoleSwitcher, StatusPill } from "@/components/foundation-shell";
-import { Money, PmsCard, PmsSectionNav } from "@/components/pms-ui";
+import { Money, PmsCard, PmsSectionNav, StatusFor } from "@/components/pms-ui";
 import { requireAuth } from "@/lib/auth";
 import { getRole, type RoleKey } from "@/lib/foundation-data";
-import { createAppointmentHold, getScheduleBoard, listPatients, type PmsAppointmentRow, type PmsScheduleBoard } from "@/lib/pms-repository";
+import {
+  createAppointmentHold,
+  formatAppointmentStatusLabel,
+  getAllowedAppointmentStatusTransitions,
+  getScheduleBoard,
+  listPatients,
+  transitionAppointmentStatus,
+  type PmsAppointmentRow,
+  type PmsScheduleBoard,
+} from "@/lib/pms-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +34,21 @@ async function holdAction(formData: FormData) {
   });
   revalidatePath("/app/pms");
   revalidatePath("/app/pms/schedule");
+}
+
+async function transitionAppointmentAction(appointmentId: string, formData: FormData) {
+  "use server";
+  const session = await requireAuth();
+  await transitionAppointmentStatus({
+    appointmentId,
+    status: String(formData.get("status") ?? ""),
+    reason: String(formData.get("reason") ?? "").trim() || null,
+    tenantId: session.tenantId,
+    actorRole: session.roleKey,
+  });
+  revalidatePath("/app/pms");
+  revalidatePath("/app/pms/schedule");
+  revalidatePath(`/app/pms/appointments/${appointmentId}`);
 }
 
 const timeSlots = Array.from({ length: 21 }, (_, index) => 7 * 60 + index * 30);
@@ -149,15 +173,31 @@ function ScheduleGrid({ board, roleKey }: { board: PmsScheduleBoard; roleKey: st
 }
 
 function AppointmentTile({ appt, roleKey }: { appt: PmsAppointmentRow; roleKey: string }) {
+  const transitions = getAllowedAppointmentStatusTransitions(appt.status);
   return (
-    <Link href={`/app/pms/appointments/${appt.id}?role=${roleKey}`} className="mb-2 block rounded-md border-l-4 border-cyan-500 bg-cyan-50 p-2 text-sm shadow-sm">
+    <div className="mb-2 rounded-md border-l-4 border-cyan-500 bg-cyan-50 p-2 text-sm shadow-sm">
       <div className="flex items-start justify-between gap-2">
-        <p className="font-semibold text-neutral-950">{appt.patientName ?? "Held appointment"}</p>
-        <StatusPill tone={appt.status === "COMPLETED" ? "green" : appt.status === "BROKEN" ? "red" : "amber"}>{appt.status.toLowerCase()}</StatusPill>
+        <Link href={`/app/pms/appointments/${appt.id}?role=${roleKey}`} className="min-w-0 flex-1 font-semibold text-neutral-950 hover:underline">
+          {appt.patientName ?? "Held appointment"}
+        </Link>
+        <StatusFor value={appt.status} />
       </div>
       <p className="mt-1 text-xs text-neutral-600">{time(appt.startsAt)}-{time(appt.endsAt)} · {appt.appointmentType}</p>
       <p className="mt-1 text-xs text-neutral-600">{appt.providerName ?? "provider unassigned"} · <Money cents={appt.productionCents} /></p>
-    </Link>
+      {transitions.length ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {transitions.map((transition) => (
+            <form key={transition.status} action={transitionAppointmentAction.bind(null, appt.id)} className="flex items-center gap-1">
+              <input type="hidden" name="status" value={transition.status} />
+              {transition.requiresReason ? <input name="reason" required placeholder="Reason" className="w-28 rounded-md border border-neutral-300 bg-white px-2 py-1 text-[11px] text-neutral-700" /> : null}
+              <button className="rounded-md border border-cyan-200 bg-white px-2 py-1 text-[11px] font-semibold text-cyan-900 hover:bg-cyan-50">
+                {formatAppointmentStatusLabel(transition.status)}
+              </button>
+            </form>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

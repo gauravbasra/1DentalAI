@@ -315,7 +315,7 @@ function PmsSourceBanner({
             {live
               ? `${dataSource.lastSync?.source ?? "Live PMS"} sync active`
               : dataSource.samplePatientCount > 0
-                ? "Seeded PMS data is still visible"
+                ? "Imported PMS records are visible but not yet live"
                 : "No live PMS records imported yet"}
           </h2>
           <p className={`mt-1 max-w-5xl text-sm leading-6 ${live ? "text-emerald-900" : "text-amber-950"}`}>{dataSource.nextAction}</p>
@@ -323,7 +323,7 @@ function PmsSourceBanner({
         <div className="grid gap-2 text-right text-xs font-semibold sm:grid-cols-3">
           <span className="rounded-md bg-white/70 px-3 py-2">NexHealth {dataSource.hasNexHealthCredential ? "vaulted" : "missing"}</span>
           <span className="rounded-md bg-white/70 px-3 py-2">Open Dental {dataSource.hasOpenDentalCredential ? "vaulted" : "missing"}</span>
-          <span className="rounded-md bg-white/70 px-3 py-2">{live ? `${dataSource.lastSync?.importedPatients ?? 0} patients` : `${dataSource.samplePatientCount} seeded patients`}</span>
+          <span className="rounded-md bg-white/70 px-3 py-2">{live ? `${dataSource.lastSync?.importedPatients ?? 0} patients` : `${dataSource.samplePatientCount} loaded patients`}</span>
         </div>
       </div>
     </section>

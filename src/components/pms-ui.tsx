@@ -71,11 +71,11 @@ export function Money({ cents }: { cents: number }) {
 
 export function StatusFor({ value }: { value: string }) {
   const tone =
-    value.includes("READY") || value.includes("ACTIVE") || value.includes("COMPLETED") || value.includes("CURRENT")
+    value.includes("READY") || value.includes("ACTIVE") || value.includes("COMPLETED") || value.includes("CHECKED_OUT") || value.includes("CURRENT")
       ? "green"
-      : value.includes("DENIED") || value.includes("BROKEN") || value.includes("REJECTED")
+      : value.includes("DENIED") || value.includes("BROKEN") || value.includes("REJECTED") || value.includes("CANCELLED") || value.includes("CANCELED") || value.includes("NO_SHOW")
         ? "red"
-        : value.includes("HELD") || value.includes("OPEN") || value.includes("DRAFT") || value.includes("NEEDS")
+        : value.includes("HELD") || value.includes("OPEN") || value.includes("DRAFT") || value.includes("NEEDS") || value.includes("ARRIVED") || value.includes("CONFIRMED") || value.includes("SEATED") || value.includes("IN_PROGRESS")
           ? "amber"
           : "neutral";
   return <StatusPill tone={tone}>{value.replaceAll("_", " ").toLowerCase()}</StatusPill>;

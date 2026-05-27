@@ -8,6 +8,29 @@ export const defaultTenantId = "tenant_1dentalai_production";
 const clinicalSignRoles = new Set(["owner_doctor", "associate_provider", "rdh", "clinical_assistant"]);
 const checkoutOverrideRoles = new Set(["owner_doctor", "associate_provider", "rdh", "practice_manager"]);
 
+export type PatientDuplicateMatch = {
+  id: string;
+  chartNumber: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
+  matchType: "PHONE" | "EMAIL" | "NAME_DOB";
+};
+
+export class PatientDuplicateError extends Error {
+  code = "PMS_PATIENT_DUPLICATE";
+  statusCode = 409;
+  existingPatient: PatientDuplicateMatch;
+
+  constructor(existingPatient: PatientDuplicateMatch) {
+    super("A matching active patient already exists.");
+    this.name = "PatientDuplicateError";
+    Object.setPrototypeOf(this, new.target.prototype);
+    this.existingPatient = existingPatient;
+  }
+}
+
 export type PmsPatientSummary = {
   id: string;
   chartNumber: string;
@@ -89,6 +112,14 @@ export type PmsAppointmentProcedureRow = {
   status: string;
 };
 
+export type PmsAppointmentStatusHistoryRow = {
+  id: string;
+  status: string;
+  actorRole: string;
+  note: string | null;
+  createdAt: string;
+};
+
 export type PmsAppointmentReadinessBlocker = {
   area: string;
   severity: "HARD" | "SOFT";
@@ -118,6 +149,7 @@ export type PmsAppointmentControl = {
   clinicalNotes: Array<{ id: string; noteType: string; status: string; body: string; signedAt: string | null; signedByRole: string | null; addendumOfNoteId: string | null; addendumReason: string | null; createdAt: string }>;
   claims: Array<{ id: string; claimNumber: string | null; status: string; billedCents: number; patientDueCents: number; attachmentStatus: string }>;
   checkoutSessions: Array<{ id: string; status: string; chargeCents: number; patientPaymentCents: number; claimId: string | null; createdAt: string; checkoutNote: string | null }>;
+  statusHistory: PmsAppointmentStatusHistoryRow[];
   readinessBlockers: PmsAppointmentReadinessBlocker[];
   totals: { procedureFeeCents: number; estimatedPatientDueCents: number; openBalanceCents: number };
 };
@@ -144,6 +176,104 @@ export type PmsScheduleBoard = {
   labCases: Array<{ id: string; labName: string; caseType: string; status: string; dueDate: string | null; patientName: string | null }>;
   production: { scheduledCents: number; completedCents: number; unscheduledRequests: number; dueRecalls: number; labCaseRisks: number };
 };
+
+export type PmsAppointmentStatus =
+  | "HELD"
+  | "SCHEDULED"
+  | "CONFIRMED"
+  | "ARRIVED"
+  | "SEATED"
+  | "IN_PROGRESS"
+  | "READY_FOR_CHECKOUT"
+  | "CHECKED_OUT"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "NO_SHOW";
+
+type AppointmentStatusTransitionRule = {
+  status: PmsAppointmentStatus;
+  requiresReason?: boolean;
+};
+
+const appointmentStatusTransitions: Record<PmsAppointmentStatus, AppointmentStatusTransitionRule[]> = {
+  HELD: [{ status: "SCHEDULED" }, { status: "CONFIRMED" }],
+  SCHEDULED: [{ status: "CONFIRMED" }, { status: "ARRIVED" }, { status: "CANCELLED" }, { status: "NO_SHOW" }],
+  CONFIRMED: [{ status: "ARRIVED" }, { status: "CANCELLED" }, { status: "NO_SHOW" }],
+  ARRIVED: [{ status: "SEATED" }, { status: "CANCELLED", requiresReason: true }],
+  SEATED: [{ status: "IN_PROGRESS" }],
+  IN_PROGRESS: [{ status: "READY_FOR_CHECKOUT" }],
+  READY_FOR_CHECKOUT: [{ status: "CHECKED_OUT" }],
+  CHECKED_OUT: [{ status: "COMPLETED" }],
+  COMPLETED: [],
+  CANCELLED: [],
+  NO_SHOW: [],
+};
+
+const procedureStatuses = new Set(["PROPOSED", "ACCEPTED", "PLANNED", "IN_PROGRESS", "COMPLETED", "BILLED"]);
+
+const appointmentStatusLabels: Record<PmsAppointmentStatus, string> = {
+  HELD: "Held",
+  SCHEDULED: "Scheduled",
+  CONFIRMED: "Confirmed",
+  ARRIVED: "Arrived",
+  SEATED: "Seated",
+  IN_PROGRESS: "In progress",
+  READY_FOR_CHECKOUT: "Ready for checkout",
+  CHECKED_OUT: "Checked out",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
+  NO_SHOW: "No show",
+};
+
+export function getAllowedAppointmentStatusTransitions(status: string): AppointmentStatusTransitionRule[] {
+  return appointmentStatusTransitions[status as PmsAppointmentStatus] ?? [];
+}
+
+export function formatAppointmentStatusLabel(status: string) {
+  return appointmentStatusLabels[status as PmsAppointmentStatus] ?? status.replaceAll("_", " ").toLowerCase();
+}
+
+export class AppointmentStatusTransitionError extends Error {
+  code = "PMS_APPOINTMENT_STATUS_TRANSITION_BLOCKED";
+  statusCode = 409;
+  appointmentId: string;
+  currentStatus: string;
+  targetStatus: string;
+  allowedStatuses: string[];
+  requiresReason: boolean;
+
+  constructor(input: {
+    appointmentId: string;
+    currentStatus: string;
+    targetStatus: string;
+    allowedStatuses: string[];
+    requiresReason?: boolean;
+    reason?: string | null;
+  }) {
+    super(input.requiresReason ? "A reason is required for this appointment status transition." : "This appointment status transition is not allowed.");
+    this.name = "AppointmentStatusTransitionError";
+    Object.setPrototypeOf(this, new.target.prototype);
+    this.appointmentId = input.appointmentId;
+    this.currentStatus = input.currentStatus;
+    this.targetStatus = input.targetStatus;
+    this.allowedStatuses = input.allowedStatuses;
+    this.requiresReason = Boolean(input.requiresReason);
+    void input.reason;
+  }
+}
+
+export class CheckoutBlockedError extends Error {
+  code = "PMS_APPOINTMENT_CHECKOUT_BLOCKED";
+  statusCode = 409;
+  details: { currentStatus?: string; requiredStatus?: string; blockers?: string[]; reason?: string };
+
+  constructor(message: string, details: { currentStatus?: string; requiredStatus?: string; blockers?: string[]; reason?: string } = {}) {
+    super(message);
+    this.name = "CheckoutBlockedError";
+    Object.setPrototypeOf(this, new.target.prototype);
+    this.details = details;
+  }
+}
 
 export type PmsPracticeIntelligence = {
   productionTrend: Array<{ day: string; scheduledCents: number; completedCents: number; appointmentCount: number }>;
@@ -860,64 +990,191 @@ export async function createPatient(input: {
   referralSource?: string;
 }) {
   const tenantId = input.tenantId ?? defaultTenantId;
-  const chart = await query<{ next: string }>(
-    `select ('P' || lpad((coalesce(max(substring("chartNumber" from 2)::int), 0) + 1)::text, 6, '0')) as next
-     from "PmsPatient"
-     where "tenantId" = $1 and "chartNumber" ~ '^P[0-9]+$'`,
-    [tenantId],
-  );
-  const id = newId("pat");
-  const familyId = newId("fam");
-  const chartNumber = chart.rows[0]?.next ?? "P000001";
-  const accountNumber = `F${chartNumber.slice(1)}`;
+  const firstName = input.firstName.trim();
+  const lastName = input.lastName.trim();
+  const preferredName = input.preferredName?.trim() || null;
+  const phone = normalizePhoneForDuplicate(input.phone);
+  const email = normalizeEmailForDuplicate(input.email);
+  const dateOfBirth = input.dateOfBirth?.trim() || null;
+  const firstNameNorm = normalizeNameForDuplicate(firstName);
+  const lastNameNorm = normalizeNameForDuplicate(lastName);
 
-  await query(
-    `insert into "PmsFamilyAccount"
-       ("id", "tenantId", "accountNumber", "displayName", "guarantorPatientId", "billingType", "billingStatus",
-        "addressLine1", "addressLine2", "city", "state", "postalCode", "phone", "email", "updatedAt")
-     values ($1, $2, $3, $4, $5, 'STANDARD', 'CURRENT', $6, $7, $8, $9, $10, $11, $12, current_timestamp)`,
-    [
-      familyId,
+  return withTransaction(async (client) => {
+    await acquirePatientDuplicateLocks(client, tenantId, phone, email, dateOfBirth ? `${firstNameNorm}|${lastNameNorm}|${dateOfBirth}` : null);
+
+    const duplicate = await findDuplicatePatient(client, {
       tenantId,
-      accountNumber,
-      `${input.lastName.trim()} family`,
-      id,
-      input.addressLine1?.trim() || null,
-      input.addressLine2?.trim() || null,
-      input.city?.trim() || null,
-      input.state?.trim() || null,
-      input.postalCode?.trim() || null,
-      input.phone?.trim() || null,
-      input.email?.trim() || null,
+      phone,
+      email,
+      firstNameNorm,
+      lastNameNorm,
+      dateOfBirth,
+    });
+    if (duplicate) {
+      throw new PatientDuplicateError(duplicate);
+    }
+
+    const chart = await client.query<{ next: string }>(
+      `select ('P' || lpad((coalesce(max(substring("chartNumber" from 2)::int), 0) + 1)::text, 6, '0')) as next
+       from "PmsPatient"
+       where "tenantId" = $1 and "chartNumber" ~ '^P[0-9]+$'`,
+      [tenantId],
+    );
+    const id = newId("pat");
+    const familyId = newId("fam");
+    const chartNumber = chart.rows[0]?.next ?? "P000001";
+    const accountNumber = `F${chartNumber.slice(1)}`;
+
+    await client.query(
+      `insert into "PmsFamilyAccount"
+         ("id", "tenantId", "accountNumber", "displayName", "guarantorPatientId", "billingType", "billingStatus",
+          "addressLine1", "addressLine2", "city", "state", "postalCode", "phone", "email", "updatedAt")
+       values ($1, $2, $3, $4, $5, 'STANDARD', 'CURRENT', $6, $7, $8, $9, $10, $11, $12, current_timestamp)`,
+      [
+        familyId,
+        tenantId,
+        accountNumber,
+        `${lastName} family`,
+        id,
+        input.addressLine1?.trim() || null,
+        input.addressLine2?.trim() || null,
+        input.city?.trim() || null,
+        input.state?.trim() || null,
+        input.postalCode?.trim() || null,
+        input.phone?.trim() || null,
+        input.email?.trim() || null,
+      ],
+    );
+
+    const result = await client.query<PmsPatientSummary>(
+      `insert into "PmsPatient"
+         ("id", "tenantId", "familyAccountId", "chartNumber", "firstName", "lastName", "preferredName", "dateOfBirth", "phone", "email",
+          "sex", "responsibleParty", "referralSource", "updatedAt")
+       values ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, $9, $10, $11, $12, $13, current_timestamp)
+       returning "id", "chartNumber", "firstName", "lastName", "preferredName", "dateOfBirth"::text as "dateOfBirth",
+         "phone", "email", "status", "privacyLevel", "familyAccountId", "responsibleParty", "patientNote", 0::int as "openTasks", 0::int as "balanceCents"`,
+      [
+        id,
+        tenantId,
+        familyId,
+        chartNumber,
+        firstName,
+        lastName,
+        preferredName,
+        dateOfBirth,
+        input.phone?.trim() || null,
+        input.email?.trim() || null,
+        input.sex?.trim() || null,
+        input.responsibleParty?.trim() || "SELF",
+        input.referralSource?.trim() || null,
+      ],
+    );
+
+    await client.query(
+      `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+      [newId("audit"), tenantId, "front_desk", "PATIENT_CREATED", "PmsPatient", id, "ALLOWED", null],
+    );
+    return result.rows[0];
+  });
+}
+
+function normalizeNameForDuplicate(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function normalizeEmailForDuplicate(value?: string) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized || null;
+}
+
+function normalizePhoneForDuplicate(value?: string) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+  return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+}
+
+async function acquirePatientDuplicateLocks(client: { query: <T extends QueryResultRow>(sql: string, values?: unknown[]) => Promise<QueryResult<T>> }, tenantId: string, phone: string | null, email: string | null, nameDobKey: string | null) {
+  const lockKeys = [
+    phone ? `${tenantId}:patient-duplicate:phone:${phone}` : null,
+    email ? `${tenantId}:patient-duplicate:email:${email}` : null,
+    nameDobKey ? `${tenantId}:patient-duplicate:name-dob:${nameDobKey}` : null,
+  ].filter((key): key is string => Boolean(key));
+
+  for (const key of lockKeys) {
+    await client.query(`select pg_advisory_xact_lock(hashtext($1)::bigint)`, [key]);
+  }
+}
+
+async function findDuplicatePatient(
+  client: { query: <T extends QueryResultRow>(sql: string, values?: unknown[]) => Promise<QueryResult<T>> },
+  input: {
+    tenantId: string;
+    phone: string | null;
+    email: string | null;
+    firstNameNorm: string;
+    lastNameNorm: string;
+    dateOfBirth: string | null;
+  },
+) {
+  const result = await client.query<PatientDuplicateMatch & { dateOfBirth: string | null }>(
+    `with active_patients as (
+       select
+         p."id",
+         p."chartNumber",
+         p."firstName",
+         p."lastName",
+         p."phone",
+         p."email",
+         p."dateOfBirth",
+         lower(btrim(p."firstName")) as first_name_norm,
+         lower(btrim(p."lastName")) as last_name_norm,
+         lower(btrim(coalesce(p."email", ''))) as email_norm,
+         case
+           when length(regexp_replace(coalesce(p."phone", ''), '\\D', '', 'g')) = 11 and left(regexp_replace(coalesce(p."phone", ''), '\\D', '', 'g'), 1) = '1'
+             then substring(regexp_replace(coalesce(p."phone", ''), '\\D', '', 'g') from 2)
+           else regexp_replace(coalesce(p."phone", ''), '\\D', '', 'g')
+         end as phone_norm,
+         lower(btrim(p."firstName")) || '|' || lower(btrim(p."lastName")) || '|' || coalesce(p."dateOfBirth"::date::text, '') as name_dob_norm
+       from "PmsPatient" p
+       where p."tenantId" = $1 and p."status" = 'ACTIVE'
+     )
+     select
+       id,
+       "chartNumber",
+       "firstName",
+       "lastName",
+       "phone",
+       "email",
+       case
+         when $2::text is not null and phone_norm = $2 then 'PHONE'
+         when $3::text is not null and email_norm = $3 then 'EMAIL'
+         when $4::text is not null and name_dob_norm = $4 then 'NAME_DOB'
+       end as "matchType"
+     from active_patients
+     where
+       ($2::text is not null and phone_norm = $2)
+       or ($3::text is not null and email_norm = $3)
+       or ($4::text is not null and name_dob_norm = $4)
+     order by
+       case
+         when $2::text is not null and phone_norm = $2 then 0
+         when $3::text is not null and email_norm = $3 then 1
+         else 2
+       end,
+       "lastName",
+       "firstName"
+     limit 1`,
+    [
+      input.tenantId,
+      input.phone,
+      input.email,
+      input.dateOfBirth ? `${input.firstNameNorm}|${input.lastNameNorm}|${input.dateOfBirth}` : null,
     ],
   );
 
-  const result = await query<PmsPatientSummary>(
-    `insert into "PmsPatient"
-       ("id", "tenantId", "familyAccountId", "chartNumber", "firstName", "lastName", "preferredName", "dateOfBirth", "phone", "email",
-        "sex", "responsibleParty", "referralSource", "updatedAt")
-     values ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, $9, $10, $11, $12, $13, current_timestamp)
-     returning "id", "chartNumber", "firstName", "lastName", "preferredName", "dateOfBirth"::text as "dateOfBirth",
-       "phone", "email", "status", "privacyLevel", "familyAccountId", "responsibleParty", "patientNote", 0::int as "openTasks", 0::int as "balanceCents"`,
-    [
-      id,
-      tenantId,
-      familyId,
-      chartNumber,
-      input.firstName.trim(),
-      input.lastName.trim(),
-      input.preferredName?.trim() || null,
-      input.dateOfBirth || null,
-      input.phone?.trim() || null,
-      input.email?.trim() || null,
-      input.sex?.trim() || null,
-      input.responsibleParty?.trim() || "SELF",
-      input.referralSource?.trim() || null,
-    ],
-  );
-
-  await addAudit(tenantId, "front_desk", "PATIENT_CREATED", "PmsPatient", id, "ALLOWED");
-  return result.rows[0];
+  const duplicate = result.rows[0];
+  return duplicate ? (duplicate as PatientDuplicateMatch) : null;
 }
 
 export async function getPatient(patientId: string, tenantId = defaultTenantId) {
@@ -1693,9 +1950,9 @@ export async function getScheduleBoard(tenantId = defaultTenantId, date?: string
     query<{ scheduled: string; completed: string }>(
       `select
         coalesce(sum("productionCents"), 0)::text as scheduled,
-        coalesce(sum(case when "status" = 'COMPLETED' then "productionCents" else 0 end), 0)::text as completed
+        coalesce(sum(case when "status" in ('CHECKED_OUT', 'COMPLETED') then "productionCents" else 0 end), 0)::text as completed
        from "PmsAppointment"
-       where "tenantId" = $1 and "startsAt"::date = $2::date`,
+       where "tenantId" = $1 and "startsAt"::date = $2::date and "status" not in ('CANCELED', 'CANCELLED', 'BROKEN', 'NO_SHOW')`,
       [tenantId, boardDate],
     ),
   ]);
@@ -1807,21 +2064,111 @@ async function addAppointmentProceduresFromCodes(appointmentId: string, tenantId
   }
 }
 
-export async function updateAppointmentStatus(appointmentId: string, status: string, tenantId = defaultTenantId, actorRole = "front_desk") {
-  const result = await query<{ id: string; tenantId: string; status: string }>(
-    `update "PmsAppointment" set "status" = $2, "updatedAt" = current_timestamp where "id" = $1 and "tenantId" = $3 returning "id", "tenantId", "status"`,
-    [appointmentId, status, tenantId],
-  );
-  const row = result.rows[0] ?? null;
-  if (row) {
-    await query(
-      `insert into "PmsAppointmentStatusHistory" ("id", "appointmentId", "status", "actorRole")
-       values ($1, $2, $3, $4)`,
-      [newId("apst"), appointmentId, status, actorRole],
+export async function transitionAppointmentStatus(input: {
+  appointmentId: string;
+  status: string;
+  tenantId?: string;
+  actorRole?: string;
+  reason?: string | null;
+}) {
+  const tenantId = input.tenantId ?? defaultTenantId;
+  const actorRole = input.actorRole ?? "front_desk";
+  const targetStatus = input.status;
+  const logBlockedTransition = async (metadata: unknown) => {
+    await addAudit(tenantId, actorRole, "APPOINTMENT_STATUS_UPDATED", "PmsAppointment", input.appointmentId, "BLOCKED", metadata);
+  };
+  return withTransaction(async (client) => {
+    await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [`appointment-status:${tenantId}:${input.appointmentId}`]);
+
+    const appointment = (
+      await client.query<{ id: string; tenantId: string; status: string }>(
+        `select "id", "tenantId", "status"
+         from "PmsAppointment"
+         where "id" = $1 and "tenantId" = $2
+         for update`,
+        [input.appointmentId, tenantId],
+      )
+    ).rows[0];
+    if (!appointment) return null;
+
+    const allowedTransitions = getAllowedAppointmentStatusTransitions(appointment.status);
+    const transition = allowedTransitions.find((item) => item.status === targetStatus);
+    if (!transition) {
+      await logBlockedTransition({
+        fromStatus: appointment.status,
+        targetStatus,
+        allowedStatuses: allowedTransitions.map((item) => item.status),
+        reasonProvided: Boolean(input.reason?.trim()),
+        blockedReason: "transition_not_allowed",
+      });
+      throw new AppointmentStatusTransitionError({
+        appointmentId: input.appointmentId,
+        currentStatus: appointment.status,
+        targetStatus,
+        allowedStatuses: allowedTransitions.map((item) => item.status),
+        reason: input.reason ?? null,
+      });
+    }
+
+    const reason = input.reason?.trim() || null;
+    if (transition.requiresReason && !reason) {
+      await logBlockedTransition({
+        fromStatus: appointment.status,
+        targetStatus,
+        allowedStatuses: allowedTransitions.map((item) => item.status),
+        reasonProvided: false,
+        blockedReason: "reason_required",
+      });
+      throw new AppointmentStatusTransitionError({
+        appointmentId: input.appointmentId,
+        currentStatus: appointment.status,
+        targetStatus,
+        allowedStatuses: allowedTransitions.map((item) => item.status),
+        requiresReason: true,
+        reason: null,
+      });
+    }
+
+    const result = await client.query<{ id: string; tenantId: string; status: string }>(
+      `update "PmsAppointment"
+       set "status" = $2, "updatedAt" = current_timestamp
+       where "id" = $1 and "tenantId" = $3
+       returning "id", "tenantId", "status"`,
+      [input.appointmentId, targetStatus, tenantId],
     );
-    await addAudit(row.tenantId, actorRole, "APPOINTMENT_STATUS_UPDATED", "PmsAppointment", appointmentId, "ALLOWED");
-  }
-  return row;
+    const row = result.rows[0] ?? null;
+    if (!row) return null;
+
+    await client.query(
+      `insert into "PmsAppointmentStatusHistory" ("id", "appointmentId", "status", "actorRole", "note")
+       values ($1, $2, $3, $4, $5)`,
+      [newId("apst"), input.appointmentId, targetStatus, actorRole, reason],
+    );
+    await client.query(
+      `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+      [
+        newId("audit"),
+        row.tenantId,
+        actorRole,
+        "APPOINTMENT_STATUS_UPDATED",
+        "PmsAppointment",
+        input.appointmentId,
+        "ALLOWED",
+        JSON.stringify({
+          fromStatus: appointment.status,
+          toStatus: targetStatus,
+          reasonProvided: Boolean(reason),
+          requiresReason: Boolean(transition.requiresReason),
+        }),
+      ],
+    );
+    return row;
+  });
+}
+
+export async function updateAppointmentStatus(appointmentId: string, status: string, tenantId = defaultTenantId, actorRole = "front_desk") {
+  return transitionAppointmentStatus({ appointmentId, status, tenantId, actorRole });
 }
 
 export async function addAppointmentProcedure(input: {
@@ -1830,6 +2177,7 @@ export async function addAppointmentProcedure(input: {
   tooth?: string;
   surface?: string;
   feeCents?: number;
+  status?: string;
   actorRole?: string;
   tenantId?: string;
 }) {
@@ -1843,12 +2191,14 @@ export async function addAppointmentProcedure(input: {
     [input.procedureCodeId, appointment.tenantId],
   )).rows[0];
   if (!code) throw new Error("Procedure code not found for this tenant.");
+  const status = (input.status ?? "PLANNED").trim().toUpperCase();
+  if (!procedureStatuses.has(status)) throw new Error("Invalid procedure status.");
 
   const id = newId("aproc");
   const result = await query(
     `insert into "PmsAppointmentProcedure"
        ("id", "appointmentId", "procedureCodeId", "tooth", "surface", "feeCents", "status", "updatedAt")
-     values ($1, $2, $3, $4, $5, coalesce($6::int, $7::int), 'PLANNED', current_timestamp)
+     values ($1, $2, $3, $4, $5, coalesce($6::int, $7::int), $8, current_timestamp)
      returning *`,
     [
       id,
@@ -1858,6 +2208,7 @@ export async function addAppointmentProcedure(input: {
       input.surface?.trim() || null,
       input.feeCents ?? null,
       code.defaultFeeCents,
+      status,
     ],
   );
   await addAudit(appointment.tenantId, input.actorRole ?? "associate_provider", "APPOINTMENT_PROCEDURE_ADDED", "PmsAppointmentProcedure", id, "ALLOWED");
@@ -1894,7 +2245,7 @@ async function getAppointmentControlWithExecutor(executor: PmsQueryExecutor, app
   )).rows[0];
   if (!appointment) return null;
 
-  const [procedures, forms, labCases, imaging, clinicalNotes, claims, checkoutSessions, balance] = await Promise.all([
+  const [procedures, forms, labCases, imaging, clinicalNotes, claims, checkoutSessions, statusHistory, balance] = await Promise.all([
     executor.query<PmsAppointmentProcedureRow>(
       `select ap."id", ap."procedureCodeId", pc."code", pc."description", pc."category",
         ap."tooth", ap."surface", ap."feeCents", ap."status"
@@ -1949,6 +2300,13 @@ async function getAppointmentControlWithExecutor(executor: PmsQueryExecutor, app
        order by "createdAt" desc`,
       [appointmentId, tenantId],
     ),
+    executor.query<PmsAppointmentControl["statusHistory"][number]>(
+      `select "id", "status", "actorRole", "note", "createdAt"::text as "createdAt"
+       from "PmsAppointmentStatusHistory"
+       where "appointmentId" = $1
+       order by "createdAt" desc`,
+      [appointmentId],
+    ),
     executor.query<{ openBalanceCents: string }>(
       `select coalesce(sum("balanceCents"), 0)::text as "openBalanceCents"
        from "PmsLedgerEntry"
@@ -1977,6 +2335,7 @@ async function getAppointmentControlWithExecutor(executor: PmsQueryExecutor, app
     clinicalNotes: clinicalNotes.rows,
     claims: claims.rows,
     checkoutSessions: checkoutSessions.rows,
+    statusHistory: statusHistory.rows,
     readinessBlockers,
     totals: {
       procedureFeeCents,
@@ -2074,29 +2433,72 @@ export async function completeAppointmentCheckout(input: {
 
     const control = await getAppointmentControlWithExecutor(client, input.appointmentId, tenantId);
     if (!control) throw new Error("Appointment not found.");
-    if (!control.appointment.patientId) throw new Error("A patient is required before checkout.");
-    if (control.appointment.status === "COMPLETED") throw new Error("This appointment has already been completed without a checkout session.");
+    if (!control.appointment.patientId) {
+      await addAudit(tenantId, actorRole, "APPOINTMENT_CHECKOUT_BLOCKED_NO_PATIENT", "PmsAppointment", input.appointmentId, "BLOCKED");
+      throw new CheckoutBlockedError("A patient is required before checkout.", {
+        currentStatus: control.appointment.status,
+        requiredStatus: "READY_FOR_CHECKOUT",
+      });
+    }
+    if (control.appointment.status !== "READY_FOR_CHECKOUT") {
+      await addAudit(tenantId, actorRole, "APPOINTMENT_CHECKOUT_BLOCKED_STATUS", "PmsAppointment", input.appointmentId, "BLOCKED", {
+        currentStatus: control.appointment.status,
+        requiredStatus: "READY_FOR_CHECKOUT",
+      });
+      throw new CheckoutBlockedError("Checkout can only be completed when the appointment is ready for checkout.", {
+        currentStatus: control.appointment.status,
+        requiredStatus: "READY_FOR_CHECKOUT",
+      });
+    }
 
     const hardBlockers = control.readinessBlockers.filter((blocker) => blocker.severity === "HARD");
     if (hardBlockers.length && input.overrideBlockers) {
       if (!checkoutOverrideRoles.has(actorRole)) {
-        await txAudit("APPOINTMENT_CHECKOUT_OVERRIDE_BLOCKED_ROLE", "PmsAppointment", input.appointmentId, "BLOCKED", { actorRole, hardBlockerCount: hardBlockers.length });
-        throw new Error("Only a provider, RDH, or practice manager can override hard checkout blockers.");
+        await addAudit(tenantId, actorRole, "APPOINTMENT_CHECKOUT_OVERRIDE_BLOCKED_ROLE", "PmsAppointment", input.appointmentId, "BLOCKED", { actorRole, hardBlockerCount: hardBlockers.length });
+        throw new CheckoutBlockedError("Only a provider, RDH, or practice manager can override hard checkout blockers.", {
+          currentStatus: control.appointment.status,
+          requiredStatus: "READY_FOR_CHECKOUT",
+          blockers: hardBlockers.map((blocker) => blocker.message),
+        });
       }
       if (!input.checkoutNote || input.checkoutNote.trim().length < 12) {
-        await txAudit("APPOINTMENT_CHECKOUT_OVERRIDE_BLOCKED_REASON", "PmsAppointment", input.appointmentId, "BLOCKED", { actorRole, hardBlockerCount: hardBlockers.length });
-        throw new Error("A checkout override reason is required when hard blockers are overridden.");
+        await addAudit(tenantId, actorRole, "APPOINTMENT_CHECKOUT_OVERRIDE_BLOCKED_REASON", "PmsAppointment", input.appointmentId, "BLOCKED", { actorRole, hardBlockerCount: hardBlockers.length });
+        throw new CheckoutBlockedError("A checkout override reason is required when hard blockers are overridden.", {
+          currentStatus: control.appointment.status,
+          requiredStatus: "READY_FOR_CHECKOUT",
+          blockers: hardBlockers.map((blocker) => blocker.message),
+          reason: "override reason missing",
+        });
       }
     }
     if (hardBlockers.length && !input.overrideBlockers) {
       await addAudit(tenantId, actorRole, "APPOINTMENT_CHECKOUT_BLOCKED", "PmsAppointment", input.appointmentId, "BLOCKED");
-      throw new Error(`Checkout blocked: ${hardBlockers.map((blocker) => blocker.message).join(" ")}`);
+      throw new CheckoutBlockedError(`Checkout blocked: ${hardBlockers.map((blocker) => blocker.message).join(" ")}`, {
+        currentStatus: control.appointment.status,
+        requiredStatus: "READY_FOR_CHECKOUT",
+        blockers: hardBlockers.map((blocker) => blocker.message),
+      });
     }
 
     const selectedIds = input.procedureIds?.filter(Boolean) ?? control.procedures.map((procedure) => procedure.id);
     const selectedProcedures = control.procedures.filter((procedure) => selectedIds.includes(procedure.id));
-    if (!selectedProcedures.length) throw new Error("Select at least one appointment procedure to complete.");
-    if (selectedProcedures.length !== selectedIds.length) throw new Error("Selected procedures must all belong to this appointment.");
+    if (!selectedProcedures.length) {
+      await addAudit(tenantId, actorRole, "APPOINTMENT_CHECKOUT_BLOCKED_NO_PROCEDURES", "PmsAppointment", input.appointmentId, "BLOCKED", { selectedIds });
+      throw new CheckoutBlockedError("Select at least one appointment procedure to complete.", {
+        currentStatus: control.appointment.status,
+        requiredStatus: "READY_FOR_CHECKOUT",
+      });
+    }
+    if (selectedProcedures.length !== selectedIds.length) {
+      await addAudit(tenantId, actorRole, "APPOINTMENT_CHECKOUT_BLOCKED_PROCEDURE_MISMATCH", "PmsAppointment", input.appointmentId, "BLOCKED", {
+        selectedIds,
+        selectedCount: selectedProcedures.length,
+      });
+      throw new CheckoutBlockedError("Selected procedures must all belong to this appointment.", {
+        currentStatus: control.appointment.status,
+        requiredStatus: "READY_FOR_CHECKOUT",
+      });
+    }
     const completedProcedureIds = selectedProcedures.map((procedure) => procedure.id);
     const checkoutId = newId("checkout");
 
@@ -2104,11 +2506,11 @@ export async function completeAppointmentCheckout(input: {
     for (const procedure of selectedProcedures) {
       await client.query(`update "PmsAppointmentProcedure" set "status" = 'COMPLETED', "updatedAt" = current_timestamp where "id" = $1 and "appointmentId" = $2`, [procedure.id, input.appointmentId]);
       const logId = newId("plog");
+      procedureLogIds.push(logId);
       await client.query(
         `insert into "PmsProcedureLog"
-           ("id", "tenantId", "patientId", "providerId", "appointmentId", "appointmentProcedureId", "checkoutSessionId",
-            "procedureCodeId", "tooth", "surface", "status", "feeCents", "serviceDate", "updatedAt")
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'COMPLETED', $11, $12::timestamp, current_timestamp)`,
+           ("id", "tenantId", "patientId", "providerId", "appointmentId", "appointmentProcedureId", "checkoutSessionId", "procedureCodeId", "tooth", "surface", "status", "feeCents", "serviceDate", "updatedAt")
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'COMPLETED', $11, coalesce($12::timestamp, current_timestamp), current_timestamp)`,
         [
           logId,
           tenantId,
@@ -2124,53 +2526,38 @@ export async function completeAppointmentCheckout(input: {
           control.appointment.startsAt,
         ],
       );
-      procedureLogIds.push(logId);
     }
 
     const chargeCents = selectedProcedures.reduce((sum, procedure) => sum + Number(procedure.feeCents ?? 0), 0);
     let claimId: string | null = null;
-    if (input.createClaimDraft && control.appointment.primaryInsuranceId) {
-      const coverage = (await client.query<{ payerName: string }>(
-        `select ip."payerName"
-         from "PmsPatientInsurance" pi
-         join "PmsInsurancePlan" ip on ip."id" = pi."planId"
-         where pi."id" = $1 and pi."patientId" = $2 and ip."tenantId" = $3`,
-        [control.appointment.primaryInsuranceId, control.appointment.patientId, tenantId],
-      )).rows[0];
-      if (!coverage) throw new Error("Selected coverage does not belong to the selected patient.");
-
-      const claimProcedures = (await client.query<{
-        id: string;
-        procedureCodeId: string;
-        tooth: string | null;
-        surface: string | null;
-        feeCents: number;
-        serviceDate: string | null;
-      }>(
-        `select pl."id", pl."procedureCodeId", pl."tooth", pl."surface", pl."feeCents", pl."serviceDate"::text as "serviceDate"
-         from "PmsProcedureLog" pl
-         left join "PmsClaimLine" cl on cl."procedureLogId" = pl."id"
-         join "PmsPatient" p on p."id" = pl."patientId"
-         where pl."patientId" = $1 and p."tenantId" = $2 and pl."id" = any($3::text[]) and cl."id" is null`,
-        [control.appointment.patientId, tenantId, procedureLogIds],
-      )).rows;
-      if (!claimProcedures.length) throw new Error("No unclaimed procedures were available for the selected patient.");
-
-      const billedCents = claimProcedures.reduce((sum, procedure) => sum + Number(procedure.feeCents ?? 0), 0);
+    if (input.createClaimDraft || control.appointment.primaryInsuranceId || control.appointment.payerName) {
       claimId = newId("claim");
-      const claimNumber = `CLM-${new Date().getFullYear()}-${claimId.slice(-6).toUpperCase()}`;
+      const payerName = control.appointment.payerName ?? "Unknown payer";
       await client.query(
         `insert into "PmsClaim"
-           ("id", "tenantId", "patientId", "appointmentId", "patientInsuranceId", "payerName", "claimNumber", "status", "billedCents", "lastStatusAt", "updatedAt")
-         values ($1, $2, $3, $4, $5, $6, $7, 'READY', $8, current_timestamp, current_timestamp)`,
-        [claimId, tenantId, control.appointment.patientId, input.appointmentId, control.appointment.primaryInsuranceId, coverage.payerName, claimNumber, billedCents],
+           ("id", "tenantId", "patientId", "patientInsuranceId", "appointmentId", "payerName", "claimNumber", "attachmentStatus", "status",
+            "billedCents", "allowedCents", "paidCents", "patientDueCents", "submittedAt", "lastStatusAt", "updatedAt")
+         values ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'DRAFT', $8, $9, $10, $11, null, current_timestamp, current_timestamp)`,
+        [
+          claimId,
+          tenantId,
+          control.appointment.patientId,
+          control.appointment.primaryInsuranceId,
+          input.appointmentId,
+          payerName,
+          `CLM-${Date.now()}`,
+          chargeCents,
+          chargeCents,
+          Math.max(0, input.paymentCents ?? 0),
+          Math.max(0, chargeCents - (input.paymentCents ?? 0)),
+        ],
       );
-      for (const procedure of claimProcedures) {
+      for (const [index, procedure] of selectedProcedures.entries()) {
         await client.query(
           `insert into "PmsClaimLine"
              ("id", "claimId", "procedureLogId", "procedureCodeId", "tooth", "surface", "serviceDate", "feeCents", "patientDueCents", "updatedAt")
            values ($1, $2, $3, $4, $5, $6, $7::timestamp, $8, 0, current_timestamp)`,
-          [newId("cline"), claimId, procedure.id, procedure.procedureCodeId, procedure.tooth, procedure.surface, procedure.serviceDate, procedure.feeCents],
+          [newId("cline"), claimId, procedureLogIds[index], procedure.procedureCodeId, procedure.tooth, procedure.surface, control.appointment.startsAt, procedure.feeCents],
         );
       }
       await txAudit("CLAIM_CREATED_FROM_PROCEDURES", "PmsClaim", claimId, "ALLOWED");
@@ -2217,16 +2604,52 @@ export async function completeAppointmentCheckout(input: {
       await txAudit("PATIENT_PAYMENT_POSTED", "PmsPayment", paymentId, "ALLOWED");
     }
 
+    const recallEligible = selectedProcedures.some((procedure) => ["HYGIENE", "PERIODONTAL", "PREVENTIVE"].includes(procedure.category));
+    const examEligible = !recallEligible && selectedProcedures.some((procedure) => procedure.category === "DIAGNOSTIC");
+    if (recallEligible || examEligible) {
+      const recallId = newId("recall");
+      const recallType = recallEligible ? "HYGIENE_RECALL" : "EXAM_RECALL";
+      const dueDate = new Date(control.appointment.startsAt);
+      dueDate.setMonth(dueDate.getMonth() + (recallEligible ? 6 : 12));
+      await client.query(
+        `insert into "PmsRecall" ("id", "tenantId", "patientId", "recallType", "dueDate", "status", "procedureCodes", "updatedAt")
+         values ($1, $2, $3, $4, $5::timestamp, 'DUE', $6::text[], current_timestamp)`,
+        [recallId, tenantId, control.appointment.patientId, recallType, dueDate.toISOString(), selectedProcedures.map((procedure) => procedure.code)],
+      );
+      await txAudit("RECALL_CREATED_FROM_CHECKOUT", "PmsRecall", recallId, "ALLOWED", { recallType, dueDate: dueDate.toISOString() });
+
+      const recallTaskId = newId("task");
+      await client.query(
+        `insert into "PmsTask" ("id", "tenantId", "patientId", "appointmentId", "ownerRoleKey", "title", "taskType", "priority", "dueAt", "updatedAt")
+         values ($1, $2, $3, $4, $5, $6, $7, 'NORMAL', $8::timestamp, current_timestamp)`,
+        [
+          recallTaskId,
+          tenantId,
+          control.appointment.patientId,
+          input.appointmentId,
+          "front_desk",
+          recallEligible ? "Schedule hygiene recall" : "Schedule exam recall",
+          recallEligible ? "HYGIENE_RECALL" : "EXAM_RECALL",
+          dueDate.toISOString(),
+        ],
+      );
+      await txAudit("TASK_CREATED", "PmsTask", recallTaskId, "ALLOWED", { recallType });
+    }
+
+    await txAudit("APPOINTMENT_STATUS_UPDATED", "PmsAppointment", input.appointmentId, "ALLOWED", {
+      fromStatus: control.appointment.status,
+      toStatus: "CHECKED_OUT",
+    });
     await client.query(
       `update "PmsAppointment"
-       set "status" = 'COMPLETED', "readinessStatus" = case when $2::boolean then 'OVERRIDDEN' else 'READY' end,
+       set "status" = 'CHECKED_OUT', "readinessStatus" = case when $2::boolean then 'OVERRIDDEN' else 'READY' end,
          "productionCents" = greatest("productionCents", $3), "updatedAt" = current_timestamp
        where "id" = $1 and "tenantId" = $4`,
       [input.appointmentId, Boolean(input.overrideBlockers && control.readinessBlockers.length), chargeCents, tenantId],
     );
     await client.query(
       `insert into "PmsAppointmentStatusHistory" ("id", "appointmentId", "status", "actorRole", "note")
-       values ($1, $2, 'COMPLETED', $3, $4)`,
+       values ($1, $2, 'CHECKED_OUT', $3, $4)`,
       [newId("apst"), input.appointmentId, actorRole, input.checkoutNote?.trim() || null],
     );
 
@@ -2776,8 +3199,28 @@ function onlineBookingNote(link: PmsOnlineSchedulingLinkRow, patientNote: string
 }
 
 export async function getChart(patientId: string, tenantId = defaultTenantId) {
-  const [patient, alerts, allergies, meds, conditions, notes, procedures] = await Promise.all([
-    getPatient(patientId, tenantId),
+  const patient = await getPatient(patientId, tenantId);
+  if (!patient) {
+    return {
+      patient: null,
+      profile: null,
+      account: null,
+      familyMembers: [],
+      alerts: [],
+      allergies: [],
+      medications: [],
+      conditions: [],
+      notes: [],
+      procedures: [],
+      treatmentPlans: [],
+      imaging: [],
+    };
+  }
+
+  const [profile, account, familyMembers, alerts, allergies, meds, conditions, notes, procedures, treatmentPlans, imaging] = await Promise.all([
+    getPatientProfile(patientId, tenantId),
+    getPatientAccount(patientId, tenantId),
+    getFamilyMembers(patientId, tenantId),
     query(
       `select ma.* from "PmsMedicalAlert" ma
        join "PmsPatient" p on p."id" = ma."patientId"
@@ -2822,8 +3265,42 @@ export async function getChart(patientId: string, tenantId = defaultTenantId) {
        order by pl."serviceDate" desc nulls last, pl."createdAt" desc`,
       [patientId, tenantId],
     ),
+    query(
+      `select tp.*, pr."displayName" as "providerName", coalesce(items.item_count, 0)::int as "itemCount"
+       from "PmsTreatmentPlan" tp
+       left join "PmsProvider" pr on pr."id" = tp."providerId"
+       left join lateral (
+         select count(*) as item_count
+         from "PmsTreatmentPlanItem" tpi
+         where tpi."treatmentPlanId" = tp."id"
+       ) items on true
+       where tp."patientId" = $1 and tp."tenantId" = $2
+       order by tp."updatedAt" desc`,
+      [patientId, tenantId],
+    ),
+    query(
+      `select img.*, pr."displayName" as "providerName"
+       from "PmsImagingStudy" img
+       left join "PmsProvider" pr on pr."id" = img."providerId"
+       where img."patientId" = $1 and img."tenantId" = $2
+       order by img."takenAt" desc nulls first, img."updatedAt" desc`,
+      [patientId, tenantId],
+    ),
   ]);
-  return { patient, alerts: alerts.rows, allergies: allergies.rows, medications: meds.rows, conditions: conditions.rows, notes: notes.rows, procedures: procedures.rows };
+  return {
+    patient,
+    profile,
+    account,
+    familyMembers,
+    alerts: alerts.rows,
+    allergies: allergies.rows,
+    medications: meds.rows,
+    conditions: conditions.rows,
+    notes: notes.rows,
+    procedures: procedures.rows,
+    treatmentPlans: treatmentPlans.rows,
+    imaging: imaging.rows,
+  };
 }
 
 export async function listProcedureCodes(tenantId = defaultTenantId) {
@@ -2876,7 +3353,7 @@ export async function addProcedureLog(patientId: string, input: { procedureCodeI
       input.procedureCodeId,
       input.tooth ?? null,
       input.surface ?? null,
-      input.status ?? "TREATMENT_PLANNED",
+      input.status ?? "PLANNED",
       input.feeCents ?? null,
       procedureCode.defaultFeeCents,
     ],
@@ -3276,7 +3753,7 @@ export async function addTreatmentPlanItem(input: {
     if (!plan) throw new Error("Treatment plan was not found in this tenant.");
     if (["ACCEPTED", "COMPLETED", "VOID"].includes(plan.status)) throw new Error("Accepted or closed treatment plans cannot be modified.");
     const code = (await client.query<{ defaultFeeCents: number; code: string }>(
-      `select "defaultFeeCents", "code" from "PmsProcedureCode" where "id" = $1 and "tenantId" = $2 and "status" = 'ACTIVE'`,
+      `select "defaultFeeCents", "code" from "PmsProcedureCode" where "id" = $1 and "tenantId" = $2`,
       [input.procedureCodeId, tenantId],
     )).rows[0];
     if (!code) throw new Error("Active procedure code was not found in this tenant.");
