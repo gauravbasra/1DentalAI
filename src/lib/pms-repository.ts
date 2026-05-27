@@ -1070,11 +1070,7 @@ export async function createPatient(input: {
       ],
     );
 
-    await client.query(
-      `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
-       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
-      [newId("audit"), tenantId, "front_desk", "PATIENT_CREATED", "PmsPatient", id, "ALLOWED", null],
-    );
+    await recordPatientCreatedAudit(client, tenantId, id);
     return result.rows[0];
   });
 }
@@ -6093,4 +6089,16 @@ export async function addAudit(
 async function assertPatientTenant(patientId: string, tenantId: string) {
   const patient = (await query<{ id: string }>(`select "id" from "PmsPatient" where "id" = $1 and "tenantId" = $2`, [patientId, tenantId])).rows[0];
   if (!patient) throw new Error("Patient not found in authenticated tenant.");
+}
+
+async function recordPatientCreatedAudit(
+  client: { query: <T extends QueryResultRow>(sql: string, values?: unknown[]) => Promise<QueryResult<T>> },
+  tenantId: string,
+  patientId: string,
+) {
+  await client.query(
+    `insert into "PmsAuditEvent" ("id", "tenantId", "actorRole", "eventType", "targetType", "targetId", "outcome", "metadata")
+     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+    [newId("audit"), tenantId, "front_desk", "PATIENT_CREATED", "PmsPatient", patientId, "ALLOWED", null],
+  );
 }
