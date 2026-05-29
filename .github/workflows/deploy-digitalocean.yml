@@ -98,6 +98,8 @@ jobs:
           NEXHEALTH_SUBDOMAIN: ${{ secrets.NEXHEALTH_SUBDOMAIN }}
           NEXHEALTH_SUBDOMAIN_OR_ORG_ID: ${{ secrets.NEXHEALTH_SUBDOMAIN_OR_ORG_ID }}
           PMS_SYNC_SOURCE: ${{ secrets.PMS_SYNC_SOURCE }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
         run: |
           ZOOM_ACCOUNT_ID_B64="$(printf '%s' "${ZOOM_ACCOUNT_ID:-}" | base64 -w 0)"
           ZOOM_CLIENT_ID_B64="$(printf '%s' "${ZOOM_CLIENT_ID:-}" | base64 -w 0)"
@@ -125,6 +127,8 @@ jobs:
           NEXHEALTH_SUBDOMAIN_B64="$(printf '%s' "${NEXHEALTH_SUBDOMAIN:-}" | base64 -w 0)"
           NEXHEALTH_SUBDOMAIN_OR_ORG_ID_B64="$(printf '%s' "${NEXHEALTH_SUBDOMAIN_OR_ORG_ID:-}" | base64 -w 0)"
           PMS_SYNC_SOURCE_B64="$(printf '%s' "${PMS_SYNC_SOURCE:-NEXHEALTH}" | base64 -w 0)"
+          STRIPE_SECRET_KEY_B64="$(printf '%s' "${STRIPE_SECRET_KEY:-}" | base64 -w 0)"
+          STRIPE_WEBHOOK_SECRET_B64="$(printf '%s' "${STRIPE_WEBHOOK_SECRET:-}" | base64 -w 0)"
           for i in 1 2 3; do
             timeout 600s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
             set -euo pipefail
@@ -254,8 +258,18 @@ jobs:
             fi
             PMS_SYNC_SOURCE_VALUE="\$(printf '%s' "${PMS_SYNC_SOURCE_B64}" | base64 -d)"
             if grep -q '^PMS_SYNC_SOURCE=' .env; then sed -i "s|^PMS_SYNC_SOURCE=.*|PMS_SYNC_SOURCE=\${PMS_SYNC_SOURCE_VALUE}|" .env; else printf '\\nPMS_SYNC_SOURCE=%s\\n' "\${PMS_SYNC_SOURCE_VALUE}" >> .env; fi
+            if [ -n "${STRIPE_SECRET_KEY_B64}" ]; then
+              STRIPE_SECRET_KEY_VALUE="\$(printf '%s' "${STRIPE_SECRET_KEY_B64}" | base64 -d)"
+              if grep -q '^STRIPE_SECRET_KEY=' .env; then sed -i "s|^STRIPE_SECRET_KEY=.*|STRIPE_SECRET_KEY=\${STRIPE_SECRET_KEY_VALUE}|" .env; else printf '\\nSTRIPE_SECRET_KEY=%s\\n' "\${STRIPE_SECRET_KEY_VALUE}" >> .env; fi
+            fi
+            if [ -n "${STRIPE_WEBHOOK_SECRET_B64}" ]; then
+              STRIPE_WEBHOOK_SECRET_VALUE="\$(printf '%s' "${STRIPE_WEBHOOK_SECRET_B64}" | base64 -d)"
+              if grep -q '^STRIPE_WEBHOOK_SECRET=' .env; then sed -i "s|^STRIPE_WEBHOOK_SECRET=.*|STRIPE_WEBHOOK_SECRET=\${STRIPE_WEBHOOK_SECRET_VALUE}|" .env; else printf '\\nSTRIPE_WEBHOOK_SECRET=%s\\n' "\${STRIPE_WEBHOOK_SECRET_VALUE}" >> .env; fi
+            fi
+            if ! grep -q '^NEXT_PUBLIC_APP_URL=' .env; then printf '\\nNEXT_PUBLIC_APP_URL=https://app.1dentalai.com\\n' >> .env; fi
+            if ! grep -q '^NEXT_PUBLIC_SITE_URL=' .env; then printf '\\nNEXT_PUBLIC_SITE_URL=https://1dentalai.com\\n' >> .env; fi
             docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
-            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm ci && (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true) && (npx prisma migrate resolve --rolled-back 202605221910_activate_webchat_openai || true) && npx prisma migrate deploy' < /dev/null
+            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm ci && (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true) && (npx prisma migrate resolve --rolled-back 202605221910_activate_webchat_openai || true) && npx prisma migrate deploy && npx prisma db push --skip-generate --accept-data-loss && node prisma/seed-modules.mjs' < /dev/null
             if grep -q '^NEXHEALTH_API_KEY=' .env; then
               docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm run pms:sync-live' < /dev/null || echo "Live PMS sync failed; keeping existing PMS records and surfacing source status in the PMS UI."
             else
@@ -301,6 +315,11 @@ jobs:
               sudo nginx -t
               sudo systemctl enable --now nginx || true
               sudo systemctl reload nginx || sudo nginx -s reload || true
+            else
+              # nginx already running — always refresh config on deploy
+              sudo cp ops/nginx/1dentalai.conf /etc/nginx/sites-available/1dentalai.conf
+              sudo ln -sf /etc/nginx/sites-available/1dentalai.conf /etc/nginx/sites-enabled/1dentalai.conf
+              sudo nginx -t && sudo systemctl reload nginx || true
             else
               echo "Port 80 is already handled by an existing proxy; leaving it in place."
               sudo ss -ltnp | grep ':80 ' || true
