@@ -37,7 +37,8 @@ jobs:
 
           # Full purge and reinstall
           systemctl stop docker || true
-          apt-get remove -y docker.io docker-ce docker-ce-cli containerd.io 2>/dev/null || true
+          apt-get remove -y docker.io docker-ce docker-ce-cli containerd.io docker-compose-v2 docker-compose-plugin 2>/dev/null || true
+          apt-get autoremove -y 2>/dev/null || true
           rm -f /var/lib/docker/buildkit/containerd.sock 2>/dev/null || true
           rm -f /run/containerd/containerd.sock 2>/dev/null || true
 
