@@ -37,6 +37,41 @@ model Tenant {
   roles       TenantRole[]
   workbenches WorkbenchArea[]
   audits      WorkbenchAuditEvent[]
+  subscriptions TenantSubscription[]
+}
+
+// ── Billing / Subscription ────────────────────────────────────────────────────
+
+model ProductModule {
+  id               String   @id @default(cuid())
+  slug             String   @unique   // e.g. "scheduler", "rcm", "clinical-ai"
+  name             String             // display name
+  description      String
+  priceMonthly     Int                // cents (e.g. 9900 = $99/mo)
+  stripePriceId    String?            // Stripe Price ID (live)
+  stripePriceIdTest String?           // Stripe Price ID (test)
+  active           Boolean  @default(true)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  subscriptions    TenantSubscription[]
+}
+
+model TenantSubscription {
+  id                   String    @id @default(cuid())
+  tenantId             String
+  tenant               Tenant    @relation(fields: [tenantId], references: [id])
+  moduleId             String
+  module               ProductModule @relation(fields: [moduleId], references: [id])
+  stripeSubscriptionId String?   @unique
+  stripeCustomerId     String?
+  status               String    @default("trialing") // trialing|active|past_due|canceled
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@unique([tenantId, moduleId])
+  @@index([tenantId])
 }
 
 model Location {

@@ -7,7 +7,8 @@ function publicUrl(pathname: string, request: Request) {
   const isLocal = /^(0\.0\.0\.0|127\.0\.0\.1|localhost)$/.test(hostOnly);
   const isIpFallback = hostOnly === "162.243.186.191";
   const isAppHost = hostOnly === "app.1dentalai.com";
-  const host = isAppHost || isIpFallback ? hostHeader : isLocal ? "localhost:3001" : "app.1dentalai.com";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.1dentalai.com";
+  const host = isAppHost || isIpFallback ? hostHeader : isLocal ? "localhost:3001" : new URL(appUrl).host;
   const proto = isIpFallback || isLocal ? "http" : "https";
   return new URL(pathname, `${proto}://${host}`);
 }

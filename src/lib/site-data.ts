@@ -12,127 +12,142 @@ export const navItems = [
 
 export const productPillars = [
   {
-    title: "AI communications",
-    eyebrow: "Phones, text, chat",
-    body: "Capture the first ring, match the patient, summarize the conversation, draft the reply, and turn every call or text into accountable follow-up.",
+    title: "Smart Scheduler",
+    eyebrow: "Appointments, waitlist, calendar",
+    body: "Drag-and-drop schedule with operatory management, provider colour-coding, real-time waitlist, bulk confirm, no-show tracking, and one-click check-in.",
   },
   {
-    title: "Insurance and RCM",
+    title: "Patient Management",
+    eyebrow: "Charts, records, families",
+    body: "Complete patient master records with medical alerts, insurance, family accounts, portal invites, merge duplicates, and a full audit trail.",
+  },
+  {
+    title: "Insurance & RCM",
     eyebrow: "Eligibility to payment",
-    body: "Move eligibility, benefit evidence, claim readiness, attachment risk, payer follow-up, denials, and ERA activity into work queues teams can trust.",
-  },
-  {
-    title: "Growth and reputation",
-    eyebrow: "Reviews, recalls, recovery",
-    body: "Recover missed opportunities, request reviews at the right moment, follow up on unscheduled treatment, and connect campaigns to booked production.",
+    body: "EDI 270/271 eligibility checks, claim submission and tracking, ERA posting, denial management, appeal generation, and payer performance dashboards.",
   },
   {
     title: "Clinical AI",
-    eyebrow: "Scribing, charting, perio",
-    body: "Give providers encounter context, draft documentation, perio workflow support, and controlled writeback paths that stay behind clinical approval.",
+    eyebrow: "Scribe, perio, CDT coding",
+    body: "AI encounter scribe turns voice transcripts into structured chart notes, assisted perio charting with staging/grading, and AI-suggested CDT codes.",
   },
   {
-    title: "Universal connectors",
-    eyebrow: "PMS, EHR, CRM, payers",
-    body: "Connect PMS, payer, phone, payment, CRM, reputation, and clinical systems with setup checks, health monitoring, cost visibility, and approval controls.",
+    title: "Treatment Plans",
+    eyebrow: "Present, accept, finance",
+    body: "Multi-phase treatment plans with fee estimates, insurance breakdowns, patient acceptance tracking, and one-click checkout.",
   },
   {
-    title: "Practice intelligence",
-    eyebrow: "Truthful analytics",
-    body: "See production, collections, call conversion, payer delay, treatment acceptance, and data quality with source-backed evidence instead of guesswork.",
+    title: "Billing & Ledger",
+    eyebrow: "Payments, adjustments, statements",
+    body: "Real-time ledger with procedure-level posting, insurance adjustments, payment collection, Stripe-powered checkout, and aging reports.",
+  },
+  {
+    title: "Communications",
+    eyebrow: "Reminders, portal, messaging",
+    body: "Automated appointment reminders, a patient-facing portal for forms and messaging, two-way SMS, and review request campaigns.",
+  },
+  {
+    title: "Practice Intelligence",
+    eyebrow: "Reports, analytics, AI insights",
+    body: "Production and collection reports, AI-driven revenue opportunity detection, provider performance, and payer analytics — all backed by source data.",
+  },
+  {
+    title: "PMS Data Migration",
+    eyebrow: "Dentrix, Eaglesoft, Open Dental, Curve",
+    body: "One-click connectors migrate your complete patient history, appointments, ledger, insurance, and clinical records from your existing PMS in hours, not weeks.",
   },
 ];
 
 export const useCases = [
   {
-    title: "Never miss the patient who is ready to book",
+    title: "Never miss the patient ready to book",
     role: "Front desk",
-    body: "AI phone and messaging workflows catch missed calls, identify known patients, convert new patient leads, and open the exact follow-up task.",
+    body: "AI phone and messaging workflows catch missed calls, match known patients, confirm appointments in bulk, and surface every waitlist opportunity.",
   },
   {
     title: "Clear tomorrow's schedule before the morning rush",
     role: "Insurance coordinator",
-    body: "Eligibility, benefits, missing demographics, prior auth risk, and claim blockers are organized before the patient reaches the chair.",
+    body: "EDI eligibility, benefits, missing demographics, prior-auth risk, and claim blockers are resolved before the patient reaches the chair.",
   },
   {
     title: "Turn treatment plans into accepted care",
     role: "Treatment coordinator",
-    body: "Patients get timely follow-ups, financing prompts, payment links, and reminders tied to the exact treatment that was recommended.",
+    body: "Patients get timely follow-ups, financing prompts, and payment links tied to the exact treatment that was recommended.",
   },
   {
     title: "Know which payers are slowing cash",
     role: "Billing manager",
-    body: "Payer performance, claim status, ERA details, denials, and fallback work show up as measurable queues instead of hallway updates.",
+    body: "Payer performance, claim status, ERA details, denials with AI-drafted appeals, and fallback work show up as measurable queues.",
   },
   {
-    title: "Give providers clinical context without extra clicks",
+    title: "Document encounters without extra clicks",
     role: "Dentist and hygienist",
-    body: "Call notes, forms, benefits, treatment history, AI note drafts, and perio data stay connected to the appointment and encounter.",
+    body: "AI scribe drafts chart notes from voice, perio charting is guided by AI staging, and CDT codes are suggested automatically.",
   },
   {
-    title: "Run every location with one operating system",
-    role: "DSO leadership",
-    body: "Central teams see location performance, approved playbook adoption, approvals, inboxes, billing queues, and launch status in one place.",
+    title: "Migrate your existing PMS in hours",
+    role: "Practice transitioning PMS",
+    body: "Connect Dentrix, Eaglesoft, Open Dental, or Curve — we extract all historical data and import patients, appointments, ledger, insurance, and clinical records.",
   },
 ];
 
 export const demoWorkflows = [
   {
-    title: "AI receptionist to booked appointment",
-    steps: ["Inbound call", "Patient match", "Schedule options", "Confirmation text", "Timeline update"],
+    title: "New patient to first appointment",
+    steps: ["Signup / portal invite", "Insurance eligibility", "Treatment plan", "Checkout", "Ledger posting"],
   },
   {
-    title: "Insurance check to financial clearance",
-    steps: ["Eligibility request", "Benefit evidence", "Blocker detection", "Staff task", "Appointment clearance"],
+    title: "Insurance eligibility to claim payment",
+    steps: ["EDI 270 check", "Benefit evidence", "Claim submission", "ERA posting", "Denial appeal"],
   },
   {
-    title: "Missed call to revenue recovery",
-    steps: ["Missed call", "Consent check", "AI draft", "Staff approval", "Booked follow-up"],
+    title: "Voice encounter to signed chart note",
+    steps: ["AI scribe transcript", "CDT suggestions", "Provider review", "Note signed", "Audit trail"],
   },
   {
-    title: "Clinical encounter to approved note",
-    steps: ["Transcript", "AI draft", "Provider review", "Audit trail", "Writeback request"],
+    title: "PMS migration in one session",
+    steps: ["Connect existing PMS", "Extract patient data", "Map schema", "Import records", "Go live"],
   },
 ];
 
 export const resources = [
   {
-    title: "Dental AI operating system blueprint",
+    title: "1DentalAI PMS complete feature guide",
     type: "Guide",
-    body: "How communications, insurance, RCM, clinical documentation, and analytics become one practice workflow.",
+    body: "Every module from scheduling to RCM to clinical AI — what it does, how it connects, and how it replaces your current stack.",
   },
   {
-    title: "PMS and payer connector strategy",
+    title: "PMS migration playbook",
     type: "Technical brief",
-    body: "How 1DentalAI keeps integrations accountable with setup checks, review controls, cost visibility, and clear work queues.",
+    body: "How to move from Dentrix, Eaglesoft, Open Dental, or Curve to 1DentalAI without losing a single patient record or claim history.",
   },
   {
     title: "AI governance for dental practices",
     type: "Checklist",
-    body: "Human review, PHI controls, audit evidence, role permissions, and safe automation rules.",
+    body: "Human review, PHI controls, audit evidence, role permissions, and safe AI automation rules that keep you HIPAA compliant.",
   },
   {
     title: "Front desk productivity calculator",
     type: "Worksheet",
-    body: "Estimate time lost to missed calls, insurance checks, review requests, recalls, no-shows, and claim rework.",
+    body: "Estimate hours lost to missed calls, manual insurance checks, no-show tracking, recall follow-ups, and claim rework.",
   },
   {
     title: "Dental AI Readiness Score",
     type: "Assessment",
-    body: "Score patient access, insurance, RCM, clinical documentation, reputation, analytics, and connector readiness before choosing what to automate first.",
+    body: "Score your practice readiness across scheduling, insurance, RCM, clinical documentation, reputation, and analytics before choosing what to automate first.",
   },
   {
-    title: "Partner workflow review kit",
+    title: "Insurance & RCM automation guide",
     type: "Partner resource",
-    body: "A co-marketing framework for consultants, vendors, and dental operators who want to bring AI workflow reviews to their audience.",
+    body: "How 1DentalAI's EDI eligibility, claim management, denial appeals, and ERA posting cuts your AR days in half.",
   },
 ];
 
 export const stats = [
-  { value: "1", label: "Patient timeline from first call to final payment" },
-  { value: "24/7", label: "AI-assisted capture for calls, texts, and requests" },
-  { value: "270/271", label: "Eligibility evidence captured before the appointment" },
-  { value: "1", label: "Accountable queue for calls, claims, care, and collections" },
+  { value: "1 platform", label: "Replaces your PMS, RCM tool, scribe, and patient portal" },
+  { value: "< 1 day", label: "Average time to migrate a practice from an existing PMS" },
+  { value: "270/271", label: "Real-time EDI eligibility before every appointment" },
+  { value: "AI-first", label: "Scribe, CDT coding, perio staging, and appeal drafts built in" },
 ];
 
 export const imageUrls = {
