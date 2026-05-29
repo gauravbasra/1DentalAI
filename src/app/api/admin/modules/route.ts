@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/prisma'
 import { currentSession } from '@/lib/auth'
 
-async function requireAdmin(req: NextRequest) {
+async function requireAdmin(_req: NextRequest) {
   const session = await currentSession()
   if (!session || session.roleKey !== 'super_admin') {
     return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }

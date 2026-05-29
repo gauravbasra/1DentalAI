@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
         where: { stripeSubscriptionId: sub.id },
         data: {
           status: sub.status,
-          currentPeriodEnd: new Date((sub as any).current_period_end * 1000),
+          currentPeriodEnd: new Date(((sub as Stripe.Subscription & { current_period_end: number }).current_period_end) * 1000),
         },
       })
     }
