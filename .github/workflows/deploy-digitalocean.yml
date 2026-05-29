@@ -306,24 +306,14 @@ jobs:
             cd "${DEPLOY_PATH}"
             sudo apt-get update
             sudo apt-get install -y nginx certbot python3-certbot-nginx
-            if sudo systemctl is-active --quiet nginx || ! sudo ss -ltnp | grep -q ':80 '; then
-              test -f /etc/letsencrypt/live/1dentalai.com/fullchain.pem
-              test -f /etc/letsencrypt/live/1dentalai.com/privkey.pem
-              sudo cp ops/nginx/1dentalai.conf /etc/nginx/sites-available/1dentalai.conf
-              sudo ln -sf /etc/nginx/sites-available/1dentalai.conf /etc/nginx/sites-enabled/1dentalai.conf
-              sudo rm -f /etc/nginx/sites-enabled/default
-              sudo nginx -t
-              sudo systemctl enable --now nginx || true
-              sudo systemctl reload nginx || sudo nginx -s reload || true
-            else
-              # nginx already running — always refresh config on deploy
-              sudo cp ops/nginx/1dentalai.conf /etc/nginx/sites-available/1dentalai.conf
-              sudo ln -sf /etc/nginx/sites-available/1dentalai.conf /etc/nginx/sites-enabled/1dentalai.conf
-              sudo nginx -t && sudo systemctl reload nginx || true
-            else
-              echo "Port 80 is already handled by an existing proxy; leaving it in place."
-              sudo ss -ltnp | grep ':80 ' || true
-            fi
+            test -f /etc/letsencrypt/live/1dentalai.com/fullchain.pem
+            test -f /etc/letsencrypt/live/1dentalai.com/privkey.pem
+            sudo cp ops/nginx/1dentalai.conf /etc/nginx/sites-available/1dentalai.conf
+            sudo ln -sf /etc/nginx/sites-available/1dentalai.conf /etc/nginx/sites-enabled/1dentalai.conf
+            sudo rm -f /etc/nginx/sites-enabled/default
+            sudo nginx -t
+            sudo systemctl enable --now nginx || true
+            sudo systemctl reload nginx || sudo nginx -s reload || true
           EOF
             sleep 10
           done
