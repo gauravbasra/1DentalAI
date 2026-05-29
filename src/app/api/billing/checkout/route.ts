@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { stripe, APP_URL, SITE_URL } from '@/lib/stripe'
+import { getStripe, APP_URL, SITE_URL } from '@/lib/stripe'
 import { db } from '@/lib/prisma'
 import { currentSession } from '@/lib/auth'
 import type { ProductModule } from '@prisma/client'
@@ -27,11 +27,11 @@ export async function POST(req: NextRequest) {
 
     if (!priceId) {
       // Create Stripe product + price on demand
-      const product = await stripe.products.create({
+      const product = await getStripe().products.create({
         name: mod.name,
         metadata: { moduleId: mod.id, moduleSlug: mod.slug },
       })
-      const price = await stripe.prices.create({
+      const price = await getStripe().prices.create({
         product: product.id,
         unit_amount: mod.priceMonthly,
         currency: 'usd',
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     return { price: priceId, quantity: 1 }
   }))
 
-  const checkoutSession = await stripe.checkout.sessions.create({
+  const checkoutSession = await getStripe().checkout.sessions.create({
     mode: 'subscription',
     line_items: lineItems,
     success_url: `${APP_URL}/onboarding/connect-pms?session_id={CHECKOUT_SESSION_ID}`,
