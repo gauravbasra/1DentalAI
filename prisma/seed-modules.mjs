@@ -2,7 +2,8 @@
  * Seed default product modules.
  * Run: node prisma/seed-modules.mjs
  */
-import { PrismaClient } from '@prisma/client'
+import pkg from '@prisma/client'
+const { PrismaClient } = pkg
 const db = new PrismaClient()
 
 const MODULES = [
