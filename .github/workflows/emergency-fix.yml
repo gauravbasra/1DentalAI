@@ -28,12 +28,31 @@ jobs:
           echo "=== Disk usage ==="
           df -h
 
+          echo "=== Docker journal ==="
+          journalctl -u docker --no-pager -n 30 || true
+
           echo "=== Fixing Docker ==="
-          # Clean up Docker state that may be preventing startup
-          rm -rf /var/lib/docker/tmp/* 2>/dev/null || true
-          systemctl daemon-reexec || true
+          # Try running dockerd directly to see the real error
+          timeout 5 dockerd --validate 2>&1 || true
+
+          # Full purge and reinstall
+          systemctl stop docker || true
+          apt-get remove -y docker.io docker-ce docker-ce-cli containerd.io 2>/dev/null || true
+          rm -f /var/lib/docker/buildkit/containerd.sock 2>/dev/null || true
+          rm -f /run/containerd/containerd.sock 2>/dev/null || true
+
+          # Install Docker CE from official repo
+          apt-get install -y ca-certificates curl gnupg
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --batch --yes
+          chmod a+r /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+          apt-get update -q
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
           systemctl daemon-reload
-          systemctl start docker || apt-get install -y docker.io && systemctl start docker
+          systemctl enable docker
+          systemctl start docker
 
           echo "=== Docker status ==="
           systemctl status docker --no-pager | tail -5
