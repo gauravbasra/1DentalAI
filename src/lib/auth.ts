@@ -288,7 +288,7 @@ export async function loginWithPassword(formData: FormData): Promise<LoginResult
 
   return {
     ok: true,
-    redirectTo: isWorkspacePath(next) && next !== "/app" ? next : "/wrapper",
+    redirectTo: isWorkspacePath(next) && next !== "/app" ? next : "/app/pms",
   };
 }
 

@@ -133,6 +133,7 @@ jobs:
             timeout 600s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
             set -euo pipefail
             cd "${DEPLOY_PATH}"
+            sudo systemctl start docker || true
             if [ ! -f .env ] || ! grep -q '^DB_PASSWORD_ENCODING=hex$' .env; then
               docker compose -f docker-compose.yml -f docker-compose.public.yml stop postgres || true
               docker compose -f docker-compose.yml -f docker-compose.public.yml rm -f postgres || true
