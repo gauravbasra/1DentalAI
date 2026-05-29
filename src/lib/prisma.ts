@@ -4,8 +4,15 @@ declare global {
   var __prisma: PrismaClient | undefined
 }
 
-export const db = globalThis.__prisma ?? new PrismaClient()
-
-if (process.env.NODE_ENV !== 'production') {
-  globalThis.__prisma = db
+function getPrismaClient(): PrismaClient {
+  if (!globalThis.__prisma) {
+    globalThis.__prisma = new PrismaClient()
+  }
+  return globalThis.__prisma
 }
+
+export const db = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    return getPrismaClient()[prop as keyof PrismaClient]
+  },
+})
