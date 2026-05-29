@@ -1,0 +1,55 @@
+name: Emergency Server Fix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_PATH: ${{ secrets.DO_DEPLOY_PATH != '' && secrets.DO_DEPLOY_PATH || '/var/www/1DentalAI' }}
+      DEPLOY_PORT: ${{ secrets.DO_SSH_PORT != '' && secrets.DO_SSH_PORT || '22' }}
+    steps:
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DO_SSH_PRIVATE_KEY }}" > ~/.ssh/do_deploy_key
+          chmod 600 ~/.ssh/do_deploy_key
+          ssh-keyscan -p "${DEPLOY_PORT}" -H "${{ secrets.DO_SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Fix Docker and restart app
+        run: |
+          ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=30 \
+            "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << 'EOF'
+          set -e
+
+          echo "=== Disk usage ==="
+          df -h
+
+          echo "=== Fixing Docker ==="
+          # Clean up Docker state that may be preventing startup
+          rm -rf /var/lib/docker/tmp/* 2>/dev/null || true
+          systemctl daemon-reexec || true
+          systemctl daemon-reload
+          systemctl start docker || apt-get install -y docker.io && systemctl start docker
+
+          echo "=== Docker status ==="
+          systemctl status docker --no-pager | tail -5
+
+          echo "=== Starting containers ==="
+          cd /var/www/1DentalAI
+          docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
+          sleep 5
+          docker compose -f docker-compose.yml -f docker-compose.public.yml up -d app
+
+          echo "=== Reloading nginx ==="
+          systemctl reload nginx || true
+
+          echo "=== Health check ==="
+          sleep 5
+          curl -fsS http://127.0.0.1:3001/api/health || echo "App not yet healthy"
+
+          echo "=== DONE ==="
+          EOF
