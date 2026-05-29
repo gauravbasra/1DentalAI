@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { stripe, APP_URL, SITE_URL } from '@/lib/stripe'
 import { db } from '@/lib/prisma'
 import { currentSession } from '@/lib/auth'
+import type { ProductModule } from '@prisma/client'
 
 export async function POST(req: NextRequest) {
   const session = await currentSession()
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
   if (!modules.length) return NextResponse.json({ error: 'No valid modules' }, { status: 400 })
 
   // Ensure each module has a Stripe Price — create on-the-fly if missing
-  const lineItems = await Promise.all(modules.map(async (mod) => {
+  const lineItems = await Promise.all(modules.map(async (mod: ProductModule) => {
     let priceId = isTest ? mod.stripePriceIdTest : mod.stripePriceId
 
     if (!priceId) {
