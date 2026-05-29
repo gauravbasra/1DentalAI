@@ -12,6 +12,7 @@ const emptyForm = { slug: '', name: '', description: '', priceMonthly: '', sortO
 export default function AdminModulesPage() {
   const [modules, setModules] = useState<Module[]>([])
   const [editing, setEditing] = useState<Module | null>(null)
+  const [formOpen, setFormOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
@@ -21,10 +22,15 @@ export default function AdminModulesPage() {
     if (res.ok) setModules(await res.json())
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    fetch('/api/admin/modules')
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then((data: Module[]) => setModules(data))
+      .catch(() => {})
+  }, [])
 
   function startEdit(mod: Module) {
-    setEditing(mod)
+    setEditing(mod); setFormOpen(true)
     setForm({
       slug: mod.slug, name: mod.name, description: mod.description,
       priceMonthly: String(mod.priceMonthly / 100),
@@ -34,7 +40,7 @@ export default function AdminModulesPage() {
   }
 
   function startNew() {
-    setEditing(null)
+    setEditing(null); setFormOpen(true)
     setForm(emptyForm)
     setMsg('')
   }
@@ -55,7 +61,7 @@ export default function AdminModulesPage() {
       body: JSON.stringify(payload),
     })
     setSaving(false)
-    if (res.ok) { setMsg('Saved!'); setEditing(null); setForm(emptyForm); load() }
+    if (res.ok) { setMsg('Saved!'); setEditing(null); setFormOpen(false); setForm(emptyForm); void load() }
     else { setMsg('Error saving') }
   }
 
@@ -76,7 +82,7 @@ export default function AdminModulesPage() {
         </div>
 
         {/* Form */}
-        {(editing !== undefined) && (
+        {formOpen && (
           <div className="mb-6 rounded-xl border border-neutral-200 bg-white p-6">
             <h2 className="mb-4 text-lg font-semibold">{editing ? `Edit: ${editing.name}` : 'New Module'}</h2>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -90,7 +96,7 @@ export default function AdminModulesPage() {
                   <label className="mb-1 block text-xs font-medium text-neutral-600">{label}</label>
                   <input
                     className="w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    value={(form as any)[key]}
+                    value={form[key as keyof typeof form]}
                     placeholder={placeholder}
                     onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
                   />
@@ -110,7 +116,7 @@ export default function AdminModulesPage() {
               <button onClick={save} disabled={saving} className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:opacity-50">
                 {saving ? 'Saving…' : 'Save'}
               </button>
-              <button onClick={() => { setEditing(undefined as any); setForm(emptyForm) }} className="text-sm text-neutral-500 hover:text-neutral-800">
+              <button onClick={() => { setEditing(null); setFormOpen(false); setForm(emptyForm) }} className="text-sm text-neutral-500 hover:text-neutral-800">
                 Cancel
               </button>
               {msg && <span className={`text-sm ${msg === 'Saved!' ? 'text-green-600' : 'text-red-600'}`}>{msg}</span>}
