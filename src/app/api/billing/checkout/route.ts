@@ -4,6 +4,8 @@ import { db } from '@/lib/prisma'
 import { currentSession } from '@/lib/auth'
 import type { ProductModule } from '@prisma/client'
 
+export const dynamic = 'force-dynamic'
+
 export async function POST(req: NextRequest) {
   const session = await currentSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

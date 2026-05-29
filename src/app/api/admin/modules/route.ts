@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/prisma'
 import { currentSession } from '@/lib/auth'
 
+export const dynamic = 'force-dynamic'
+
 async function requireAdmin(_req: NextRequest) {
   const session = await currentSession()
   if (!session || session.roleKey !== 'super_admin') {
