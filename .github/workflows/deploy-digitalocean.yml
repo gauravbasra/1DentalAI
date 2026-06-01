@@ -269,12 +269,27 @@ jobs:
             fi
             if ! grep -q '^NEXT_PUBLIC_APP_URL=' .env; then printf '\\nNEXT_PUBLIC_APP_URL=https://app.1dentalai.com\\n' >> .env; fi
             if ! grep -q '^NEXT_PUBLIC_SITE_URL=' .env; then printf '\\nNEXT_PUBLIC_SITE_URL=https://1dentalai.com\\n' >> .env; fi
-            # Start postgres (Docker if available, otherwise local)
-            sudo systemctl start docker 2>/dev/null && sleep 3 && sudo systemctl is-active --quiet docker \
-              && docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres && sleep 5 \
-              || sudo systemctl start postgresql 2>/dev/null || true
-            # Run migrations directly (no Docker needed)
+            # Start postgres — try Docker first, fall back to local postgres
+            DOCKER_OK=false
+            sudo systemctl start docker 2>/dev/null && sleep 5 && sudo systemctl is-active --quiet docker && DOCKER_OK=true || true
+            if \$DOCKER_OK; then
+              docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
+              sleep 8
+              echo "Using Docker postgres"
+            else
+              sudo systemctl start postgresql 2>/dev/null || true
+              # Ensure DB and user exist for local postgres
+              DB_PASS="\$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
+              sudo -u postgres psql -c "CREATE USER dentalai_app WITH PASSWORD '\${DB_PASS}';" 2>/dev/null || true
+              sudo -u postgres psql -c "CREATE DATABASE dentalai_prod OWNER dentalai_app;" 2>/dev/null || true
+              sudo -u postgres psql -c "GRANT ALL ON DATABASE dentalai_prod TO dentalai_app;" 2>/dev/null || true
+              echo "Using local postgres"
+            fi
+            # Run migrations — use localhost when Docker is unavailable
             set -a; source .env; set +a
+            if ! \$DOCKER_OK; then
+              export DATABASE_URL="\$(echo \$DATABASE_URL | sed 's|@postgres:|@localhost:|g')"
+            fi
             npm ci --prefer-offline 2>/dev/null || npm ci
             (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true)
             (npx prisma migrate resolve --rolled-back 202605221910_activate_webchat_openai || true)
@@ -294,7 +309,10 @@ jobs:
             which pm2 || npm install -g pm2
             pm2 delete 1dentalai 2>/dev/null || true
             set -a; source .env; set +a
-            PORT=3001 pm2 start .next/standalone/server.js --name 1dentalai
+            # Use localhost DB if Docker not running
+            systemctl is-active --quiet docker || export DATABASE_URL="\$(echo \$DATABASE_URL | sed 's|@postgres:|@localhost:|g')"
+            PORT=3001 pm2 start .next/standalone/server.js --name 1dentalai --env production \
+              --env DATABASE_URL="\$DATABASE_URL"
             pm2 save
             pm2 startup systemd -u root --hp /root 2>/dev/null | tail -1 | bash 2>/dev/null || true
             for i in 1 2 3 4 5; do
