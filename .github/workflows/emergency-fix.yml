@@ -29,11 +29,25 @@ jobs:
           df -h
 
           echo "=== Fixing Docker ==="
+          # Fix any broken package state first
+          apt-get install -f -y 2>/dev/null || true
+          dpkg --configure -a 2>/dev/null || true
+
+          # Remove everything Docker-related cleanly
+          systemctl stop docker containerd 2>/dev/null || true
+          apt-get purge -y 'docker*' 'containerd*' 2>/dev/null || true
+          apt-get autoremove -y 2>/dev/null || true
+          rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg 2>/dev/null || true
+
+          # Install docker.io from Ubuntu repos (no GPG key needed)
+          apt-get update -q
+          apt-get install -y docker.io docker-compose-v2
+
           systemctl daemon-reload
           systemctl enable docker
-          systemctl start docker || true
+          systemctl start docker
           sleep 3
-          systemctl is-active docker && echo "Docker running" || echo "Docker still down"
+          systemctl is-active docker && echo "Docker running OK" || (journalctl -u docker -n 20 --no-pager; exit 1)
 
           echo "=== Docker status ==="
           systemctl status docker --no-pager | tail -5
