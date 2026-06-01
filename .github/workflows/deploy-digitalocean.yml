@@ -318,7 +318,7 @@ jobs:
             export DATABASE_URL="\$(echo \$DATABASE_URL | sed 's|@postgres:|@localhost:|g')"
             PORT=3001 DATABASE_URL="\$DATABASE_URL" pm2 start .next/standalone/server.js --name 1dentalai
             pm2 save
-            pm2 startup systemd -u root --hp /root 2>/dev/null | tail -1 | bash 2>/dev/null || true
+            { pm2 startup systemd -u root --hp /root 2>/dev/null || true; } 2>/dev/null || true
             for i in 1 2 3 4 5 6 7 8 9 10; do
               sleep 5
               curl -s http://127.0.0.1:3001/api/health | grep -q '"app":"1DentalAI"' && echo "App healthy" && break
