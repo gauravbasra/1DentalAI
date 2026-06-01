@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  serverExternalPackages: ["pg", "pg-native", "bcrypt", "argon2"],
   experimental: {
     serverActions: {
       allowedOrigins: ["1dentalai.com", "www.1dentalai.com", "app.1dentalai.com", "162.243.186.191", "localhost:3001", "127.0.0.1:3001"],
