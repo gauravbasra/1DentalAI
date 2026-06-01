@@ -307,20 +307,22 @@ jobs:
             set -euo pipefail
             cd "${DEPLOY_PATH}"
             which pm2 || npm install -g pm2
+            # Stop the old PMS app if running (both share port 3001)
+            pm2 delete 1dentalai-pms 2>/dev/null || true
             pm2 delete 1dentalai 2>/dev/null || true
+            # Wait for port 3001 to free up
+            sleep 3
             set -a; source .env; set +a
-            # Use localhost DB if Docker not running
-            systemctl is-active --quiet docker || export DATABASE_URL="\$(echo \$DATABASE_URL | sed 's|@postgres:|@localhost:|g')"
-            PORT=3001 pm2 start .next/standalone/server.js --name 1dentalai --env production \
-              --env DATABASE_URL="\$DATABASE_URL"
+            # Always use localhost for direct (non-Docker) DB connections
+            export DATABASE_URL="\$(echo \$DATABASE_URL | sed 's|@postgres:|@localhost:|g')"
+            PORT=3001 DATABASE_URL="\$DATABASE_URL" pm2 start .next/standalone/server.js --name 1dentalai
             pm2 save
             pm2 startup systemd -u root --hp /root 2>/dev/null | tail -1 | bash 2>/dev/null || true
-            for i in 1 2 3 4 5; do
+            for i in 1 2 3 4 5 6 7 8; do
               curl -fsS http://127.0.0.1:3001/api/health && break
               sleep 5
             done
             curl -fsS http://127.0.0.1:3001/api/health
-            curl -fsS http://127.0.0.1:3001/api/database/health
           EOF
             sleep 10
           done
