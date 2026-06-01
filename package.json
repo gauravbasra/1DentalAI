@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && next build && node scripts/copy-pg-to-standalone.mjs",
     "start": "next start -H 127.0.0.1 -p ${PORT:-3001}",
     "lint": "eslint",
     "check": "npm run test:phase0 && npm run lint && npm run build",
