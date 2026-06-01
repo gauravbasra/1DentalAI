@@ -28,32 +28,12 @@ jobs:
           echo "=== Disk usage ==="
           df -h
 
-          echo "=== Docker journal ==="
-          journalctl -u docker --no-pager -n 30 || true
-
           echo "=== Fixing Docker ==="
-          # Try running dockerd directly to see the real error
-          timeout 5 dockerd --validate 2>&1 || true
-
-          # Full purge and reinstall
-          systemctl stop docker || true
-          apt-get remove -y docker.io docker-ce docker-ce-cli containerd.io docker-compose-v2 docker-compose-plugin 2>/dev/null || true
-          apt-get autoremove -y 2>/dev/null || true
-          rm -f /var/lib/docker/buildkit/containerd.sock 2>/dev/null || true
-          rm -f /run/containerd/containerd.sock 2>/dev/null || true
-
-          # Install Docker CE from official repo
-          apt-get install -y ca-certificates curl gnupg
-          install -m 0755 -d /etc/apt/keyrings
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --batch --yes
-          chmod a+r /etc/apt/keyrings/docker.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
-          apt-get update -q
-          apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-
           systemctl daemon-reload
           systemctl enable docker
-          systemctl start docker
+          systemctl start docker || true
+          sleep 3
+          systemctl is-active docker && echo "Docker running" || echo "Docker still down"
 
           echo "=== Docker status ==="
           systemctl status docker --no-pager | tail -5
