@@ -353,7 +353,7 @@ jobs:
       - name: Verify public health
         run: |
           for i in 1 2 3 4 5; do
-            code=$(curl -s -o /tmp/1dentalai-health.json -w "%{http_code}" "https://app.1dentalai.com/api/health" || true)
+            code=$(curl -s -o /tmp/1dentalai-health.json -w "%{http_code}" "https://1dentalai.com/api/health" || true)
             if [ "$code" = "200" ] && grep -q '"app":"1DentalAI"' /tmp/1dentalai-health.json; then
               cat /tmp/1dentalai-health.json
               exit 0
@@ -365,4 +365,4 @@ jobs:
 
       - name: Verify public database health
         run: |
-          curl -fsS "https://app.1dentalai.com/api/database/health"
+          curl -fsS "https://1dentalai.com/api/database/health"
