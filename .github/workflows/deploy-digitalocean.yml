@@ -295,6 +295,7 @@ jobs:
             (npx prisma migrate resolve --rolled-back 202605221910_activate_webchat_openai || true)
             npx prisma migrate deploy
             node prisma/seed-modules.mjs
+            node scripts/seed-demo-user.mjs
           EOF
             sleep 10
           done
