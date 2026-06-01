@@ -28,26 +28,30 @@ jobs:
           echo "=== Disk usage ==="
           df -h
 
+          echo "=== Docker journal (last error) ==="
+          journalctl -u docker -n 30 --no-pager 2>/dev/null || true
+
           echo "=== Fixing Docker ==="
-          # Fix any broken package state first
-          apt-get install -f -y 2>/dev/null || true
-          dpkg --configure -a 2>/dev/null || true
-
-          # Remove everything Docker-related cleanly
+          # Stop and clean up any broken state
           systemctl stop docker containerd 2>/dev/null || true
-          apt-get purge -y 'docker*' 'containerd*' 2>/dev/null || true
-          apt-get autoremove -y 2>/dev/null || true
-          rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg 2>/dev/null || true
+          pkill -9 dockerd 2>/dev/null || true
+          pkill -9 containerd 2>/dev/null || true
+          rm -f /var/run/docker.pid /var/run/docker.sock /var/run/containerd/containerd.sock 2>/dev/null || true
+          rm -rf /var/lib/docker/network/files 2>/dev/null || true
 
-          # Install docker.io from Ubuntu repos (no GPG key needed)
-          apt-get update -q
-          apt-get install -y docker.io docker-compose-v2
-
+          # Try starting Docker CE (already installed from previous fix)
           systemctl daemon-reload
-          systemctl enable docker
           systemctl start docker
-          sleep 3
-          systemctl is-active docker && echo "Docker running OK" || (journalctl -u docker -n 20 --no-pager; exit 1)
+          sleep 5
+          if systemctl is-active docker; then
+            echo "Docker running OK (existing install)"
+          else
+            echo "Docker still failing — trying snap"
+            apt-get purge -y 'docker*' 'containerd*' 2>/dev/null || true
+            snap install docker
+            sleep 10
+            snap services docker
+          fi
 
           echo "=== Docker status ==="
           systemctl status docker --no-pager | tail -5
