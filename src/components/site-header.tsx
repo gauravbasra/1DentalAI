@@ -29,7 +29,7 @@ export function SiteHeader() {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href="/app"
+            href="https://app.1dentalai.com/login"
             className="inline-flex min-h-9 items-center rounded-md border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-800 transition hover:border-neutral-950"
           >
             Sign in
