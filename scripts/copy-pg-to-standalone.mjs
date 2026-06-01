@@ -4,7 +4,7 @@
  * Also handles Turbopack's hashed external module names by scanning
  * the runtime for any pg-* reference and creating symlinks.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, symlinkSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, symlinkSync, unlinkSync } from 'fs'
 import { join } from 'path'
 
 const standaloneModules = '.next/standalone/node_modules'
@@ -46,11 +46,15 @@ walkDir('.next/standalone/.next', (filePath) => {
       seen.add(name)
       const dst = join(standaloneModules, name)
       const src = join(standaloneModules, 'pg')
-      if (!existsSync(dst) && existsSync(src)) {
+      // Remove any existing (possibly broken) symlink before recreating
+      if (existsSync(dst)) { try { unlinkSync(dst) } catch {} }
+      if (existsSync(src)) {
         try {
-          symlinkSync(src, dst)
+          // Symlink target must be relative to the symlink's OWN parent dir
+          // so just 'pg', not the full path
+          symlinkSync('pg', dst)
           console.log(`✓ Symlinked ${name} → pg`)
-        } catch {}
+        } catch (e) { console.warn(`symlink ${name}:`, e.message) }
       }
     }
   } catch {}
