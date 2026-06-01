@@ -62,7 +62,7 @@ jobs:
             rsync -az --delete \
               --exclude='.git' \
               --exclude='.env' \
-              --exclude='node_modules' \
+              --exclude='/node_modules' \
               --exclude='.next/cache' \
               -e "ssh -p ${DEPLOY_PORT} -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=60 -o ConnectionAttempts=3 -o ServerAliveInterval=20 -o ServerAliveCountMax=6" \
               ./ "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}:${DEPLOY_PATH}/" && exit 0
