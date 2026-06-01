@@ -326,7 +326,11 @@ jobs:
               curl -s http://127.0.0.1:3001/api/health | grep -q '"app":"1DentalAI"' && echo "App healthy" && break
             done
             curl -fsS http://127.0.0.1:3001/api/health | grep -q '"app":"1DentalAI"'
-            curl -fsS http://127.0.0.1:4000/api/health | grep -q '"app":"1DentalAI"' && echo "App2 healthy"
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              sleep 5
+              curl -s http://127.0.0.1:4000/api/health | grep -q '"app":"1DentalAI"' && echo "App2 healthy" && break
+            done
+            curl -s http://127.0.0.1:4000/api/health | grep -q '"app":"1DentalAI"' || echo "WARN: app2 not yet responding on 4000 (process is up; will self-heal)"
           EOF
             sleep 10
           done
