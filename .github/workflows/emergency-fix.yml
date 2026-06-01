@@ -75,32 +75,43 @@ jobs:
           echo "=== PM2 logs (last 30 lines) ==="
           pm2 logs 1dentalai --lines 30 --nostream 2>/dev/null || true
 
-          echo "=== Restart app with correct DB URL ==="
-          if [ -f "${DEPLOY_PATH}/.next/standalone/server.js" ]; then
-            cd "${DEPLOY_PATH}"
-            set -a; source .env 2>/dev/null || true; set +a
-            # Always use localhost (not Docker hostname)
-            export DATABASE_URL="$(echo "$DATABASE_URL" | sed 's|@postgres:|@localhost:|g')"
-            # Ensure local postgres is running
-            systemctl start postgresql 2>/dev/null || true
-            # Ensure DB user/database exist
-            DB_PASS="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
-            sudo -u postgres psql -c "CREATE USER dentalai_app WITH PASSWORD '${DB_PASS}';" 2>/dev/null || true
-            sudo -u postgres psql -c "CREATE DATABASE dentalai_prod OWNER dentalai_app;" 2>/dev/null || true
-            sudo -u postgres psql -c "GRANT ALL ON DATABASE dentalai_prod TO dentalai_app;" 2>/dev/null || true
-            # Run any pending migrations
-            npx prisma migrate deploy 2>/dev/null || true
-            # Restart PM2 with correct env
-            pm2 delete 1dentalai-pms 2>/dev/null || true
-            pm2 delete 1dentalai 2>/dev/null || true
-            sleep 2
-            PORT=3001 DATABASE_URL="$DATABASE_URL" pm2 start .next/standalone/server.js --name 1dentalai
-            pm2 save
-            sleep 8
-            curl -s http://127.0.0.1:3001/api/health | grep -q '"app":"1DentalAI"' && echo "App healthy!" || echo "App not healthy yet"
-          else
-            echo "SKIP: .next/standalone/server.js not found — need full deploy"
+          echo "=== Fix DATABASE_URL in .env (localhost not Docker hostname) ==="
+          cd "${DEPLOY_PATH}"
+          sed -i 's|@postgres:5432|@localhost:5432|g' .env
+          grep 'DATABASE_URL' .env | sed 's/PASSWORD=[^@]*/PASSWORD=***/' || true
+
+          echo "=== Ensure local postgres is configured ==="
+          systemctl start postgresql 2>/dev/null || true
+          DB_PASS="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
+          DB_URL="$(grep '^DATABASE_URL=' .env | cut -d= -f2-)"
+          # Allow password auth in pg_hba.conf
+          if ! grep -q 'dentalai_app' /etc/postgresql/*/main/pg_hba.conf 2>/dev/null; then
+            echo "host dentalai_prod dentalai_app 127.0.0.1/32 md5" >> /etc/postgresql/*/main/pg_hba.conf
+            echo "local dentalai_prod dentalai_app md5" >> /etc/postgresql/*/main/pg_hba.conf
+            systemctl reload postgresql
           fi
+          sudo -u postgres psql -c "CREATE USER dentalai_app WITH PASSWORD '${DB_PASS}';" 2>/dev/null || \
+            sudo -u postgres psql -c "ALTER USER dentalai_app WITH PASSWORD '${DB_PASS}';"
+          sudo -u postgres psql -c "CREATE DATABASE dentalai_prod OWNER dentalai_app;" 2>/dev/null || true
+          sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE dentalai_prod TO dentalai_app;" 2>/dev/null || true
+
+          echo "=== Run migrations ==="
+          set -a; source .env; set +a
+          npx prisma migrate deploy 2>&1 | tail -5 || true
+          node prisma/seed-modules.mjs 2>&1 | tail -3 || true
+
+          echo "=== Restart app ==="
+          pm2 delete 1dentalai-pms 2>/dev/null || true
+          pm2 delete 1dentalai 2>/dev/null || true
+          # Kill any stray node process on port 3001
+          fuser -k 3001/tcp 2>/dev/null || true
+          sleep 2
+          set -a; source .env; set +a
+          PORT=3001 pm2 start .next/standalone/server.js --name 1dentalai
+          pm2 save
+          pm2 startup systemd -u root --hp /root 2>/dev/null | tail -1 | bash 2>/dev/null || true
+          sleep 8
+          curl -s http://127.0.0.1:3001/api/health | grep '"app":"1DentalAI"' && echo "✅ App healthy!" || { echo "Not healthy — logs:"; pm2 logs 1dentalai --lines 20 --nostream; }
 
           echo "=== Reload nginx ==="
           systemctl reload nginx || true
