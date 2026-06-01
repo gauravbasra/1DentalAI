@@ -65,17 +65,22 @@ jobs:
             echo "DATABASE_URL found in .env"
           fi
 
-          echo "=== Run app with PM2 ==="
-          cd "${DEPLOY_PATH}"
-          # Source env
-          set -a; source .env 2>/dev/null || true; set +a
-          # Kill old pm2 process if running
-          pm2 delete 1dentalai 2>/dev/null || true
-          # Start standalone Next.js
-          PORT=3001 pm2 start .next/standalone/server.js --name 1dentalai
-          pm2 save
-          # Ensure PM2 restarts on reboot
-          pm2 startup systemd -u root --hp /root 2>/dev/null | tail -1 | bash 2>/dev/null || true
+          echo "=== Check deploy dir ==="
+          ls -la "${DEPLOY_PATH}/" 2>/dev/null | head -20 || echo "Deploy dir not found or empty"
+          ls -la "${DEPLOY_PATH}/.next/standalone/" 2>/dev/null | head -5 || echo ".next/standalone not present yet — deploy needed"
+
+          echo "=== Run app with PM2 (if built) ==="
+          if [ -f "${DEPLOY_PATH}/.next/standalone/server.js" ]; then
+            cd "${DEPLOY_PATH}"
+            set -a; source .env 2>/dev/null || true; set +a
+            pm2 delete 1dentalai 2>/dev/null || true
+            PORT=3001 pm2 start .next/standalone/server.js --name 1dentalai
+            pm2 save
+            pm2 startup systemd -u root --hp /root 2>/dev/null | tail -1 | bash 2>/dev/null || true
+            echo "PM2 started"
+          else
+            echo "SKIP: .next/standalone/server.js not found — trigger the full deploy next"
+          fi
 
           echo "=== Reload nginx ==="
           systemctl reload nginx || true

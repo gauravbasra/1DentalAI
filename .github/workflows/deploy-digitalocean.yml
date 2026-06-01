@@ -269,13 +269,17 @@ jobs:
             fi
             if ! grep -q '^NEXT_PUBLIC_APP_URL=' .env; then printf '\\nNEXT_PUBLIC_APP_URL=https://app.1dentalai.com\\n' >> .env; fi
             if ! grep -q '^NEXT_PUBLIC_SITE_URL=' .env; then printf '\\nNEXT_PUBLIC_SITE_URL=https://1dentalai.com\\n' >> .env; fi
-            docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres
-            docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm ci && (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true) && (npx prisma migrate resolve --rolled-back 202605221910_activate_webchat_openai || true) && npx prisma migrate deploy && node prisma/seed-modules.mjs' < /dev/null
-            if grep -q '^NEXHEALTH_API_KEY=' .env; then
-              docker compose -f docker-compose.yml -f docker-compose.public.yml --profile migrate run -T --rm migrate sh -c 'npm run pms:sync-live' < /dev/null || echo "Live PMS sync failed; keeping existing PMS records and surfacing source status in the PMS UI."
-            else
-              echo "NEXHEALTH_API_KEY is not configured; live PMS sync skipped."
-            fi
+            # Start postgres (Docker if available, otherwise local)
+            sudo systemctl start docker 2>/dev/null && sleep 3 && sudo systemctl is-active --quiet docker \
+              && docker compose -f docker-compose.yml -f docker-compose.public.yml up -d postgres && sleep 5 \
+              || sudo systemctl start postgresql 2>/dev/null || true
+            # Run migrations directly (no Docker needed)
+            set -a; source .env; set +a
+            npm ci --prefer-offline 2>/dev/null || npm ci
+            (npx prisma migrate resolve --rolled-back 202605210110_platform_admin_rbac || true)
+            (npx prisma migrate resolve --rolled-back 202605221910_activate_webchat_openai || true)
+            npx prisma migrate deploy
+            node prisma/seed-modules.mjs
           EOF
             sleep 10
           done
@@ -287,10 +291,15 @@ jobs:
             timeout 900s ssh -p "${DEPLOY_PORT}" -i ~/.ssh/do_deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${{ secrets.DO_SSH_USER }}@${{ secrets.DO_SSH_HOST }}" << EOF && exit 0
             set -euo pipefail
             cd "${DEPLOY_PATH}"
-            docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build app
+            which pm2 || npm install -g pm2
+            pm2 delete 1dentalai 2>/dev/null || true
+            set -a; source .env; set +a
+            PORT=3001 pm2 start .next/standalone/server.js --name 1dentalai
+            pm2 save
+            pm2 startup systemd -u root --hp /root 2>/dev/null | tail -1 | bash 2>/dev/null || true
             for i in 1 2 3 4 5; do
               curl -fsS http://127.0.0.1:3001/api/health && break
-              sleep 3
+              sleep 5
             done
             curl -fsS http://127.0.0.1:3001/api/health
             curl -fsS http://127.0.0.1:3001/api/database/health
