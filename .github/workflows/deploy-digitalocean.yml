@@ -308,8 +308,7 @@ jobs:
             set -euo pipefail
             cd "${DEPLOY_PATH}"
             which pm2 || npm install -g pm2
-            # Stop the old PMS app if running (both share port 3001)
-            pm2 delete 1dentalai-pms 2>/dev/null || true
+            # Only restart the marketing app (1dentalai-pms is on port 3002, leave it alone)
             pm2 delete 1dentalai 2>/dev/null || true
             # Wait for port 3001 to free up
             sleep 3
