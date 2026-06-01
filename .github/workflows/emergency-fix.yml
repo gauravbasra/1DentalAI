@@ -69,17 +69,37 @@ jobs:
           ls -la "${DEPLOY_PATH}/" 2>/dev/null | head -20 || echo "Deploy dir not found or empty"
           ls -la "${DEPLOY_PATH}/.next/standalone/" 2>/dev/null | head -5 || echo ".next/standalone not present yet — deploy needed"
 
-          echo "=== Run app with PM2 (if built) ==="
+          echo "=== PM2 status ==="
+          pm2 list 2>/dev/null || true
+
+          echo "=== PM2 logs (last 30 lines) ==="
+          pm2 logs 1dentalai --lines 30 --nostream 2>/dev/null || true
+
+          echo "=== Restart app with correct DB URL ==="
           if [ -f "${DEPLOY_PATH}/.next/standalone/server.js" ]; then
             cd "${DEPLOY_PATH}"
             set -a; source .env 2>/dev/null || true; set +a
+            # Always use localhost (not Docker hostname)
+            export DATABASE_URL="$(echo "$DATABASE_URL" | sed 's|@postgres:|@localhost:|g')"
+            # Ensure local postgres is running
+            systemctl start postgresql 2>/dev/null || true
+            # Ensure DB user/database exist
+            DB_PASS="$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
+            sudo -u postgres psql -c "CREATE USER dentalai_app WITH PASSWORD '${DB_PASS}';" 2>/dev/null || true
+            sudo -u postgres psql -c "CREATE DATABASE dentalai_prod OWNER dentalai_app;" 2>/dev/null || true
+            sudo -u postgres psql -c "GRANT ALL ON DATABASE dentalai_prod TO dentalai_app;" 2>/dev/null || true
+            # Run any pending migrations
+            npx prisma migrate deploy 2>/dev/null || true
+            # Restart PM2 with correct env
+            pm2 delete 1dentalai-pms 2>/dev/null || true
             pm2 delete 1dentalai 2>/dev/null || true
-            PORT=3001 pm2 start .next/standalone/server.js --name 1dentalai
+            sleep 2
+            PORT=3001 DATABASE_URL="$DATABASE_URL" pm2 start .next/standalone/server.js --name 1dentalai
             pm2 save
-            pm2 startup systemd -u root --hp /root 2>/dev/null | tail -1 | bash 2>/dev/null || true
-            echo "PM2 started"
+            sleep 8
+            curl -s http://127.0.0.1:3001/api/health | grep -q '"app":"1DentalAI"' && echo "App healthy!" || echo "App not healthy yet"
           else
-            echo "SKIP: .next/standalone/server.js not found — trigger the full deploy next"
+            echo "SKIP: .next/standalone/server.js not found — need full deploy"
           fi
 
           echo "=== Reload nginx ==="
