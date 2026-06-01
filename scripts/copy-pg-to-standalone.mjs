@@ -21,29 +21,39 @@ for (const pkg of pkgs) {
   }
 }
 
-// Handle Turbopack hashed names: find any pg-[hash] directory referenced in chunks
-// and create a symlink pointing to pg
-const chunksDir = '.next/standalone/.next/server/chunks'
-if (existsSync(chunksDir)) {
+// Handle Turbopack hashed names: search ALL chunk files recursively
+// for pg-[hash] references and create symlinks
+import { readFileSync } from 'fs'
+
+function walkDir(dir, callback) {
+  if (!existsSync(dir)) return
   try {
-    const runtime = readdirSync(chunksDir).filter(f => f.includes('turbopack') && f.endsWith('.js'))
-    for (const file of runtime) {
-      const { readFileSync } = await import('fs')
-      const content = readFileSync(join(chunksDir, file), 'utf8')
-      const matches = content.match(/["']pg-[0-9a-f]{16}["']/g) || []
-      for (const match of matches) {
-        const name = match.replace(/['"]/g, '')
-        const dst = join(standaloneModules, name)
-        const src = join(standaloneModules, 'pg')
-        if (!existsSync(dst) && existsSync(src)) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) walkDir(full, callback)
+      else if (entry.isFile() && entry.name.endsWith('.js')) callback(full)
+    }
+  } catch {}
+}
+
+const seen = new Set()
+walkDir('.next/standalone/.next', (filePath) => {
+  try {
+    const content = readFileSync(filePath, 'utf8')
+    const matches = content.match(/pg-[0-9a-f]{12,20}/g) || []
+    for (const name of matches) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      const dst = join(standaloneModules, name)
+      const src = join(standaloneModules, 'pg')
+      if (!existsSync(dst) && existsSync(src)) {
+        try {
           symlinkSync(src, dst)
           console.log(`✓ Symlinked ${name} → pg`)
-        }
+        } catch {}
       }
     }
-  } catch (e) {
-    console.warn('Could not create Turbopack hash symlinks:', e.message)
-  }
-}
+  } catch {}
+})
 
 console.log('✅ pg copied to standalone')
