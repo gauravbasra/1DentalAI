@@ -31,26 +31,37 @@ jobs:
           echo "=== Docker journal (last error) ==="
           journalctl -u docker -n 30 --no-pager 2>/dev/null || true
 
-          echo "=== Fixing Docker ==="
-          # Stop and clean up any broken state
-          systemctl stop docker containerd 2>/dev/null || true
-          pkill -9 dockerd 2>/dev/null || true
-          pkill -9 containerd 2>/dev/null || true
-          rm -f /var/run/docker.pid /var/run/docker.sock /var/run/containerd/containerd.sock 2>/dev/null || true
-          rm -rf /var/lib/docker/network/files 2>/dev/null || true
-
-          # Try starting Docker CE (already installed from previous fix)
-          systemctl daemon-reload
-          systemctl start docker
-          sleep 5
-          if systemctl is-active docker; then
-            echo "Docker running OK (existing install)"
+          echo "=== Adding swap (prevents OOM during build) ==="
+          if [ ! -f /swapfile ]; then
+            fallocate -l 2G /swapfile
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+            echo "2GB swap created"
           else
-            echo "Docker still failing — trying snap"
+            swapon /swapfile 2>/dev/null || true
+            echo "Swap already exists"
+          fi
+          free -h
+
+          echo "=== Fixing Docker ==="
+          systemctl daemon-reload
+          systemctl start docker 2>/dev/null || true
+          sleep 3
+          if systemctl is-active --quiet docker; then
+            echo "Docker running OK"
+          else
+            echo "Docker not running — reinstalling docker.io"
             apt-get purge -y 'docker*' 'containerd*' 2>/dev/null || true
-            snap install docker
-            sleep 10
-            snap services docker
+            apt-get autoremove -y 2>/dev/null || true
+            apt-get update -q
+            DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose-v2
+            systemctl daemon-reload
+            systemctl enable docker
+            systemctl start docker
+            sleep 3
+            systemctl is-active docker && echo "Docker OK" || { journalctl -u docker -n 20 --no-pager; exit 1; }
           fi
 
           echo "=== Docker status ==="
