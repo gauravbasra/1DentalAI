@@ -75,11 +75,14 @@ jobs:
           echo "=== PM2 logs (last 30 lines) ==="
           pm2 logs 1dentalai --lines 30 --nostream 2>/dev/null || true
 
-          echo "=== PM2 logs ==="
-          pm2 logs 1dentalai --lines 40 --nostream 2>/dev/null || echo "no pm2 logs"
+          echo "=== PM2 status ==="
+          pm2 list 2>/dev/null || echo "no pm2"
 
-          echo "=== standalone node_modules check ==="
-          ls /var/www/1DentalAI/.next/standalone/node_modules/ 2>/dev/null | grep pg || echo "no pg in standalone"
+          echo "=== Port 3002 check ==="
+          ss -tlnp | grep 3002 || echo "nothing on 3002"
+
+          echo "=== 1dentalai-pms logs ==="
+          pm2 logs 1dentalai-pms --lines 30 --nostream 2>/dev/null || echo "no pms logs"
 
           echo "=== Fix DATABASE_URL in .env ==="
           cd /var/www/1DentalAI
