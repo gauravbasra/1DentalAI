@@ -1,11 +1,28 @@
 /**
- * Post-build: copy pg and its deps into .next/standalone/node_modules/
- * so they are available when the standalone server runs.
- * Also handles Turbopack's hashed external module names by scanning
- * the runtime for any pg-* reference and creating symlinks.
+ * Post-build: prepare standalone output for deployment.
+ * 1. Copy .next/static → .next/standalone/.next/static (JS/CSS chunks)
+ * 2. Copy public → .next/standalone/public (static assets)
+ * 3. Copy pg and deps into .next/standalone/node_modules/
+ * 4. Symlink Turbopack pg-[hash] → pg
  */
 import { cpSync, existsSync, mkdirSync, readdirSync, symlinkSync, unlinkSync } from 'fs'
 import { join } from 'path'
+
+// 1. Copy static chunks so /_next/static/ requests resolve
+const staticSrc = '.next/static'
+const staticDst = '.next/standalone/.next/static'
+if (existsSync(staticSrc)) {
+  cpSync(staticSrc, staticDst, { recursive: true })
+  console.log('✓ Copied .next/static → standalone')
+}
+
+// 2. Copy public directory
+const publicSrc = 'public'
+const publicDst = '.next/standalone/public'
+if (existsSync(publicSrc)) {
+  cpSync(publicSrc, publicDst, { recursive: true })
+  console.log('✓ Copied public → standalone')
+}
 
 const standaloneModules = '.next/standalone/node_modules'
 const pkgs = ['pg', 'pg-types', 'pg-protocol', 'pgpass', 'pg-connection-string', 'split2', 'generic-pool']
