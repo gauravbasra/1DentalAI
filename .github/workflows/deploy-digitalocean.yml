@@ -1,18 +1,34 @@
 name: Deploy 1DentalAI to DigitalOcean
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+    inputs:
+      confirm_production_deploy:
+        description: 'Type DEPLOY_1DENTALAI_COM to deploy 1dentalai.com'
+        required: true
+        type: string
 
 concurrency:
   group: deploy-1dentalai
-  cancel-in-progress: true
+  # Never cancel an active DigitalOcean deploy: interrupting PM2 or artifact sync
+  # can strand 1dentalai.com offline before the restart/health checks complete.
+  cancel-in-progress: false
 
 jobs:
+  deploy-confirmation:
+    name: Confirm production deploy intent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require explicit production confirmation
+        run: |
+          if [ "${{ inputs.confirm_production_deploy }}" != "DEPLOY_1DENTALAI_COM" ]; then
+            echo "Production deploy blocked. Re-run with confirm_production_deploy=DEPLOY_1DENTALAI_COM."
+            exit 1
+          fi
+
   deploy:
     runs-on: ubuntu-latest
+    needs: deploy-confirmation
     timeout-minutes: 45
     env:
       DEPLOY_PATH: ${{ secrets.DO_DEPLOY_PATH != '' && secrets.DO_DEPLOY_PATH || '/var/www/1DentalAI' }}
@@ -211,8 +227,10 @@ jobs:
             fi
             if [ -n "${TWILIO_WEBHOOK_BASE_URL_B64}" ]; then
               TWILIO_WEBHOOK_BASE_URL_VALUE="\$(printf '%s' "${TWILIO_WEBHOOK_BASE_URL_B64}" | base64 -d)"
-              if grep -q '^TWILIO_WEBHOOK_BASE_URL=' .env; then sed -i "s|^TWILIO_WEBHOOK_BASE_URL=.*|TWILIO_WEBHOOK_BASE_URL=\${TWILIO_WEBHOOK_BASE_URL_VALUE}|" .env; else printf '\\nTWILIO_WEBHOOK_BASE_URL=%s\\n' "\${TWILIO_WEBHOOK_BASE_URL_VALUE}" >> .env; fi
+            else
+              TWILIO_WEBHOOK_BASE_URL_VALUE="https://1dentalai.com"
             fi
+            if grep -q '^TWILIO_WEBHOOK_BASE_URL=' .env; then sed -i "s|^TWILIO_WEBHOOK_BASE_URL=.*|TWILIO_WEBHOOK_BASE_URL=\${TWILIO_WEBHOOK_BASE_URL_VALUE}|" .env; else printf '\\nTWILIO_WEBHOOK_BASE_URL=%s\\n' "\${TWILIO_WEBHOOK_BASE_URL_VALUE}" >> .env; fi
             if [ -n "${GOOGLE_MAPS_API_KEY_B64}" ]; then
               GOOGLE_MAPS_API_KEY_VALUE="\$(printf '%s' "${GOOGLE_MAPS_API_KEY_B64}" | base64 -d)"
               if grep -q '^GOOGLE_MAPS_API_KEY=' .env; then sed -i "s|^GOOGLE_MAPS_API_KEY=.*|GOOGLE_MAPS_API_KEY=\${GOOGLE_MAPS_API_KEY_VALUE}|" .env; else printf '\\nGOOGLE_MAPS_API_KEY=%s\\n' "\${GOOGLE_MAPS_API_KEY_VALUE}" >> .env; fi
