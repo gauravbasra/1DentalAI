@@ -73,6 +73,10 @@ function authSecret() {
   return process.env.ONE_DENTAL_AUTH_SECRET || process.env.NEXTAUTH_SECRET || process.env.DATABASE_URL || "local-1dentalai-development-secret";
 }
 
+function onboardingSignupSecret() {
+  return process.env.ONE_DENTAL_ONBOARDING_SIGNUP_SECRET || process.env.ONE_DENTAL_AUTH_SECRET || process.env.JWT_SECRET || process.env.DATABASE_URL || "local-onboarding-signup-secret";
+}
+
 function normalizeEmail(email: FormDataEntryValue | string | null) {
   return String(email ?? "").trim().toLowerCase();
 }
@@ -85,8 +89,17 @@ function hmac(value: string) {
   return createHmac("sha256", authSecret()).update(value).digest("base64url");
 }
 
+function onboardingHmac(value: string) {
+  return createHmac("sha256", onboardingSignupSecret()).update(value).digest("base64url");
+}
+
 function signToken(token: string) {
   return `${token}.${hmac(token)}`;
+}
+
+function encodeOnboardingPayload(payload: Record<string, unknown>) {
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${body}.${onboardingHmac(body)}`;
 }
 
 function readSignedToken(cookieValue?: string) {
@@ -309,12 +322,13 @@ export async function signupAction(_previousState: AuthActionState, formData: Fo
     return { ok: false, message: "Practice, contact, email, and role are required." };
   }
 
+  const signupRequestId = newId("signup");
   await query(
     `insert into "AuthSignupRequest"
        ("id", "tenantId", "practiceName", "contactName", "email", "emailHash", "phone", "roleRequested", "verificationNote")
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [
-      newId("signup"),
+      signupRequestId,
       defaultTenantId,
       practiceName,
       contactName,
@@ -332,7 +346,18 @@ export async function signupAction(_previousState: AuthActionState, formData: Fo
     metadata: { emailHash: sha256(email), roleRequested, phiStored: false },
   });
 
-  const onboardingUrl = new URL("/onboarding", process.env.NEXT_PUBLIC_APP_URL ?? "https://app.1dentalai.com");
+  const onboardingToken = encodeOnboardingPayload({
+    signupRequestId,
+    practiceName,
+    contactName,
+    email,
+    phone,
+    roleRequested,
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 15 * 60 * 1000,
+  });
+  const onboardingUrl = new URL("/api/onboarding/signup", process.env.NEXT_PUBLIC_APP_URL ?? "https://app.1dentalai.com");
+  onboardingUrl.searchParams.set("token", onboardingToken);
   redirect(onboardingUrl.toString());
 }
 
