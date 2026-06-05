@@ -35,10 +35,10 @@ export function SiteHeader() {
             Sign in
           </Link>
           <Link
-            href="/contact"
+            href="/signup"
             className="inline-flex min-h-9 items-center rounded-md bg-neutral-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-700"
           >
-            Request access
+            Sign up
           </Link>
         </div>
       </nav>

@@ -46,8 +46,8 @@ export default function DemosPage() {
             A walkthrough can be matched to your PMS, payer mix, phone setup,
             and practice size.
           </p>
-          <Link href="/contact" className="mt-8 inline-flex rounded-full bg-white px-6 py-3 text-sm font-semibold text-neutral-950">
-            Request a walkthrough
+          <Link href="/signup" className="mt-8 inline-flex rounded-full bg-white px-6 py-3 text-sm font-semibold text-neutral-950">
+            Sign up for onboarding
           </Link>
         </section>
       </main>

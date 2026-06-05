@@ -28,6 +28,11 @@ export default function ContactPage() {
           title="Talk with the 1DentalAI team."
           body="Tell us what kind of practice you run, where work gets stuck, and which systems 1DentalAI needs to connect first."
         />
+        <div className="mx-auto -mt-10 flex max-w-5xl justify-center px-6 pb-14 sm:px-8">
+          <Link href="/signup" className="inline-flex rounded-full bg-neutral-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-cyan-700">
+            Ready to onboard? Sign up here
+          </Link>
+        </div>
         <section className="mx-auto grid max-w-7xl gap-8 px-6 pb-24 sm:px-8 lg:grid-cols-[0.9fr_1.1fr]">
           <aside className="rounded-[2rem] bg-neutral-950 p-8 text-white">
             <h2 className="text-3xl font-semibold tracking-tight">Start with a guided conversation.</h2>

@@ -87,7 +87,7 @@ export function SignupForm() {
         disabled={pending}
         className="inline-flex w-full items-center justify-center rounded-md bg-neutral-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-neutral-400"
       >
-        {pending ? "Submitting..." : "Request access"}
+        {pending ? "Starting..." : "Start onboarding"}
       </button>
     </form>
   );

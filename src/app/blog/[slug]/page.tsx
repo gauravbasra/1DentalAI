@@ -95,8 +95,8 @@ export default async function BlogPostPage({ params }: Props) {
             <p className="mt-4 text-base leading-7 text-neutral-300">
               Share your PMS, phone system, payer mix, and biggest workflow bottleneck. The 1DentalAI team can walk through what an operating layer would look like for your practice.
             </p>
-            <Link href="/contact" className="mt-7 inline-flex rounded-full bg-white px-6 py-3 text-sm font-semibold text-neutral-950">
-              Request access
+            <Link href="/signup" className="mt-7 inline-flex rounded-full bg-white px-6 py-3 text-sm font-semibold text-neutral-950">
+              Sign up
             </Link>
           </aside>
         </article>

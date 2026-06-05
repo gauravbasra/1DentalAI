@@ -9,7 +9,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     url: `${siteUrl}${route}`,
     lastModified: now,
     changeFrequency: route === "" ? "weekly" as const : "monthly" as const,
-    priority: route === "" ? 1 : route === "/contact" ? 0.9 : 0.8,
+    priority: route === "" ? 1 : route === "/signup" || route === "/contact" ? 0.9 : 0.8,
   }));
 
   const blogRoutes = blogPosts.map((post) => ({

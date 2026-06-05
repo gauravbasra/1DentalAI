@@ -98,8 +98,8 @@ export default async function SolutionPage({ params }: Props) {
                 {solution.description}
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <Link href="/contact" className="rounded-full bg-neutral-950 px-6 py-3 text-center text-sm font-semibold text-white transition hover:bg-cyan-700">
-                  Request workflow review
+                <Link href="/signup" className="rounded-full bg-neutral-950 px-6 py-3 text-center text-sm font-semibold text-white transition hover:bg-cyan-700">
+                  Sign up for onboarding
                 </Link>
                 <Link href="/solutions" className="rounded-full border border-neutral-300 bg-white px-6 py-3 text-center text-sm font-semibold text-neutral-900 transition hover:border-cyan-600 hover:text-cyan-700">
                   View all solutions
@@ -176,8 +176,8 @@ export default async function SolutionPage({ params }: Props) {
           <h2 className="mx-auto max-w-4xl text-4xl font-semibold tracking-tight sm:text-6xl">
             See where {solution.title} fits in your practice.
           </h2>
-          <Link href="/contact" className="mt-8 inline-flex rounded-full bg-white px-6 py-3 text-sm font-semibold text-neutral-950 transition hover:bg-cyan-100">
-            Request access
+          <Link href="/signup" className="mt-8 inline-flex rounded-full bg-white px-6 py-3 text-sm font-semibold text-neutral-950 transition hover:bg-cyan-100">
+            Sign up
           </Link>
         </section>
       </main>

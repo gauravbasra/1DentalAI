@@ -199,10 +199,10 @@ export default function ProductPage() {
             or payer cannot support real-time automation.
           </p>
           <Link
-            href="/contact"
+            href="/signup"
             className="mt-8 inline-flex rounded-full bg-neutral-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-cyan-700"
           >
-            Talk through your stack
+            Sign up for onboarding
           </Link>
         </section>
       </main>
