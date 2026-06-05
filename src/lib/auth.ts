@@ -332,7 +332,8 @@ export async function signupAction(_previousState: AuthActionState, formData: Fo
     metadata: { emailHash: sha256(email), roleRequested, phiStored: false },
   });
 
-  return { ok: true, message: "Onboarding started. We will verify the practice and activate the right workspace role before PHI-capable workflows are enabled." };
+  const onboardingUrl = new URL("/onboarding", process.env.NEXT_PUBLIC_APP_URL ?? "https://app.1dentalai.com");
+  redirect(onboardingUrl.toString());
 }
 
 export async function logout() {
